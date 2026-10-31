@@ -126,7 +126,7 @@ $('ov').addEventListener('change',function(e){if(e.target.id!='ff'||!e.target.fi
  shrink(e.target.files[0]).then(function(u){enew=u;eimg='';$('ipv').innerHTML='<img src="'+u+'" alt="">'}).catch(function(){toast('الصورة دي مش شغالة، جرّب غيرها')})});
 $('app').addEventListener('click',function(e){var t=e.target,b;
  if(t.id=='pub')return pub();
- if(t.id=='lo'){location.reload();return}
+ if(t.id=='lo'){try{localStorage.removeItem('abu_rt');localStorage.removeItem('abu_em')}catch(z){}location.reload();return}
  if((b=t.closest('[data-t]'))){tab=b.dataset.t;render();return}
  if(t.dataset.add!=null){openEd(-1,t.dataset.add);return}
  if(t.dataset.up!=null||t.dataset.dn!=null){var i=+(t.dataset.up!=null?t.dataset.up:t.dataset.dn),j=t.dataset.up!=null?i-1:i+1;
@@ -144,19 +144,29 @@ $('app').addEventListener('change',function(e){var t=e.target;
  else if(t.dataset.s){var k=t.dataset.s;
   if(k=='phone'){D.cfg.phone=np(t.value);render()}else if(k=='min')D.cfg.min=+t.value||0;else D.cfg.unit=t.value.trim()||'كرتونة';mark()}});
 $('q').addEventListener('input',function(){q=this.value.trim();$('v').innerHTML=vp()});
+var RT=null,TKEXP=0;
+async function fresh(){
+ if(TK&&Date.now()<TKEXP-120000)return;
+ if(!RT)throw new Error('no refresh token');
+ var r=await fetch('https://securetoken.googleapis.com/v1/token?key='+FB.key,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=refresh_token&refresh_token='+encodeURIComponent(RT)});
+ var d=await r.json();if(!d.id_token)throw new Error('refresh failed: '+(d.error&&d.error.message||r.status));
+ TK=d.id_token;RT=d.refresh_token||RT;TKEXP=Date.now()+(+d.expires_in||3600)*1000}
+async function put(u,body,m){
+ var r=await fetch(u+'?auth='+TK,{method:m||'PUT',body:body});
+ if(!r.ok){var t='';try{t=await r.text()}catch(z){}throw new Error(r.status+' '+t.slice(0,120))}return r}
 async function pub(){
  if(D.cfg.phone.length<11){toast('رقم الواتساب ناقص، راجعه من الإعدادات');tab='s';render();return}
  if(DEMO){toast('ده عرض تجريبي، النشر بيشتغل بعد ربط Firebase');return}
  var b=$('pub');b.disabled=true;D.v=(D.v||0)+1;var A='https://'+FB.db+'/chips/',used={};
  D.p.forEach(function(p){if(p[8])used[p[8]]=1});
  try{
-  for(var k in PEND){if(used[k]){var r0=await fetch(A+'img/'+k+'.json?auth='+TK,{method:'PUT',body:JSON.stringify(IMG[k])});if(!r0.ok)throw 0}}
+  await fresh();
+  for(var k in PEND){if(used[k]){await put(A+'img/'+k+'.json',JSON.stringify(IMG[k]))}}
+  await put(A+'data.json',JSON.stringify({ts:Date.now(),json:JSON.stringify(D)}));
   PEND={};
-  var r=await fetch(A+'data.json?auth='+TK,{method:'PUT',body:JSON.stringify({ts:Date.now(),json:JSON.stringify(D)})});
-  if(!r.ok)throw 0;
   try{var ex=await (await fetch(A+'img.json?shallow=true&auth='+TK)).json();for(var id in (ex||{}))if(!used[id])fetch(A+'img/'+id+'.json?auth='+TK,{method:'DELETE'})}catch(z){}
   dirty=false;$('st').textContent='اتنشر ✅ العملاء هيشوفوه خلال ثواني';b.classList.remove('hot');toast('اتنشر ✅')}
- catch(e){D.v--;toast('مقدرش ينشر، سجّل دخول تاني (الجلسة بتنتهي بعد ساعة)')}
+ catch(e){D.v--;console.error(e);toast('مقدرش ينشر: '+(e&&e.message||e))}
  b.disabled=false}
 function enter(){$('lf').hidden=true;$('app').hidden=false;render()}
 $('lf').onsubmit=async function(e){e.preventDefault();var er=$('le');er.textContent='';
@@ -164,11 +174,21 @@ $('lf').onsubmit=async function(e){e.preventDefault();var er=$('le');er.textCont
  try{
   var r=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+FB.key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('lu').value.trim(),password:$('lp').value,returnSecureToken:true})});
   var d=await r.json();if(!d.idToken){er.textContent='الإيميل أو كلمة السر غلط';return}
-  TK=d.idToken;
-  var v=await (await fetch('https://'+FB.db+'/chips/data.json')).json();
-  if(v&&v.json)D=JSON.parse(v.json);
-  await Promise.all(D.p.filter(function(p){return p[8]}).map(function(p){return fetch('https://'+FB.db+'/chips/img/'+p[8]+'.json').then(function(r){return r.json()}).then(function(x){if(x)IMG[p[8]]=x}).catch(function(){})}));
+  TK=d.idToken;RT=d.refreshToken;TKEXP=Date.now()+(+d.expiresIn||3600)*1000;
+  try{localStorage.setItem('abu_rt',RT);localStorage.setItem('abu_em',$('lu').value.trim())}catch(z){}
+  await loadAll();
   enter()
  }catch(x){er.textContent='مفيش اتصال أو إعدادات Firebase ناقصة'}};
+async function loadAll(){
+ var v=await (await fetch('https://'+FB.db+'/chips/data.json')).json();
+ if(v&&v.json)D=JSON.parse(v.json);
+ await Promise.all(D.p.filter(function(p){return p[8]}).map(function(p){return fetch('https://'+FB.db+'/chips/img/'+p[8]+'.json').then(function(r){return r.json()}).then(function(x){if(x)IMG[p[8]]=x}).catch(function(){})}))}
+(async function(){
+ var rt,em;try{rt=localStorage.getItem('abu_rt');em=localStorage.getItem('abu_em')}catch(z){}
+ if(em)$('lu').value=em;
+ if(!rt||DEMO)return;
+ try{RT=rt;TK=null;await fresh();await loadAll();enter()}
+ catch(x){RT=null;TK=null;try{localStorage.removeItem('abu_rt')}catch(z){}}
+})();
 if(DEMO){$('lu').value='admin@demo.com';$('lp').value='1234'}
 </script></body></html>
