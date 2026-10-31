@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><title>لوحة التحكم – مخزن أبو سعيد</title>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><title>لوحة التحكم – أبو سعيد</title>
 <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Cairo:wght@600;800&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#ffd93d;--paper:#fff8e1;--ink:#1b1b1b;--red:#ff4b3e;--blue:#2b6cff;--green:#17b26a;--mu:#5c5238;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -24,7 +24,7 @@ label{display:block;font-size:13px;font-weight:800;margin:10px 0 4px}
 .pubb:disabled{opacity:.5}
 .x{background:var(--ink);color:var(--bg);border:3px solid var(--ink);border-radius:50%;width:36px;height:36px;font-weight:800}
 .tb{display:flex;gap:6px;margin-top:6px}
-.tb button{flex:1;background:var(--paper);border:3px solid var(--ink);border-radius:12px;padding:6px 4px;font-weight:800;font-size:14px}
+.tb button{flex:1;background:var(--paper);border:3px solid var(--ink);border-radius:12px;padding:6px 2px;font-weight:800;font-size:13px;white-space:nowrap}
 .tb button.on{background:var(--ink);color:var(--bg)}
 #qw{margin-top:8px}
 #qw input{padding:7px 12px}
@@ -63,10 +63,10 @@ label{display:block;font-size:13px;font-weight:800;margin:10px 0 4px}
 .ip{display:flex;gap:12px;align-items:center}.ipv{width:80px;height:80px;border:3px solid var(--ink);border-radius:14px;background:#fff;display:grid;place-items:center;font-size:32px;flex:none;overflow:hidden}.ipv img{width:100%;height:100%;object-fit:cover}
 .ip .btns{display:flex;flex-direction:column;gap:8px;align-items:flex-start}.ip .pubb{margin:0;font-size:14px}
 </style></head><body>
-<form class="login" id="lf"><h3>🔧 لوحة التحكم</h3><div style="font-weight:800;color:var(--mu)">مخزن أبو سعيد</div><label>الإيميل</label><input id="lu" type="email" dir="ltr" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" dir="ltr" autocomplete="current-password"><button class="pubb" style="width:100%;margin-top:14px;padding:10px" type="submit">دخول</button><div class="err" id="le"></div><div class="cred">تصميم وتطوير <b>احمد رحال</b></div></form>
+<form class="login" id="lf"><h3>🔧 لوحة التحكم</h3><div style="font-weight:800;color:var(--mu)">أبو سعيد</div><label>الإيميل</label><input id="lu" type="email" dir="ltr" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" dir="ltr" autocomplete="current-password"><button class="pubb" style="width:100%;margin-top:14px;padding:10px" type="submit">دخول</button><div class="err" id="le"></div><div class="cred">تصميم وتطوير <b>احمد رحال</b></div></form>
 <div id="app" hidden>
- <div class="top"><div class="trow"><b>🔧 مخزن أبو سعيد</b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
- <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="s">⚙️ الإعدادات</button></nav>
+ <div class="top"><div class="trow"><b>🔧 أبو سعيد</b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
+ <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="s">⚙️ الإعدادات</button></nav>
  <div id="qw"><input id="q" placeholder="🔍 دوّر على صنف"></div></div>
  <div id="v"></div>
  <div class="cred">تصميم وتطوير <b>احمد رحال</b></div>
@@ -86,7 +86,7 @@ function cnt(c){return D.p.filter(function(p){return p[1]==c}).length}
 function np(v){v=v.replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/\D/g,'');if(v.indexOf('00')==0)v=v.slice(2);if(v[0]=='0')v='20'+v.slice(1);return v}
 function render(){
  [].forEach.call(document.querySelectorAll('.tb button'),function(b){b.classList.toggle('on',b.dataset.t==tab)});
- $('qw').hidden=tab!='p';$('v').innerHTML=tab=='p'?vp():tab=='c'?vc():vs()}
+ $('qw').hidden=tab!='p';$('v').innerHTML=tab=='p'?vp():tab=='c'?vc():tab=='o'?vo():vs()}
 function vp(){
  var h='';
  D.cats.forEach(function(c){
@@ -107,7 +107,7 @@ function vs(){var c=D.cfg;
  '<label>اسم الوحدة</label><input data-s="unit" value="'+esc(c.unit)+'"><p class="hint">زي: كرتونة، دستة، شوال.</p></div>'}
 function openEd(i,c){
  ei=i;var p=i>=0?D.p[i]:['',c,'',0,PAL[0][1],PAL[0][2],'🥔',0,''];pal=0;eimg=p[8]||'';enew='';PAL.forEach(function(x,j){if(x[1]==p[4])pal=j});
- $('ov').innerHTML='<div class="pn"><h2>'+(i>=0?'تعديل صنف':'صنف جديد')+'<button class="x" id="edx">✕</button></h2><label>صورة المنتج</label><div class="ip"><div class="ipv" id="ipv">'+(eimg&&IMG[eimg]?'<img src="'+IMG[eimg]+'" alt="">':esc(p[6]))+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer">📷 اختر صورة<input type="file" id="ff" accept="image/*" hidden></label><button class="del" id="irm" type="button">إزالة الصورة</button></div></div><label>اسم الصنف</label><input id="fn" value="'+esc(p[0])+'"><div class="r2"><div><label>السعر (جنيه)</label><input id="fp" type="number" inputmode="numeric" value="'+(p[3]||'')+'"></div><div style="max-width:92px"><label>إيموجي</label><input id="fe" value="'+esc(p[6])+'" style="text-align:center"></div></div><label>العبوة / الوصف</label><input id="fd" value="'+esc(p[2])+'" placeholder="مثال: كرتونة ٤٨ كيس"><label>القسم</label><select id="fc">'+D.cats.map(function(x){return '<option'+(x==p[1]?' selected':'')+'>'+esc(x)+'</option>'}).join('')+'</select><label>لون الكيس</label><div class="sws">'+PAL.map(function(x,j){return '<span class="swc'+(j==pal?' on':'')+'" data-pal="'+j+'" style="background:'+x[1]+'"></span>'}).join('')+'</div><label class="ck"><input type="checkbox" id="fa"'+(p[7]?'':' checked')+'> متوفر في المخزن</label><div class="r2"><button class="pubb big" id="eok">حفظ</button>'+(i>=0?'<button class="del big" id="edl">حذف</button>':'')+'</div></div>';
+ $('ov').innerHTML='<div class="pn"><h2>'+(i>=0?'تعديل صنف':'صنف جديد')+'<button class="x" id="edx">✕</button></h2><label>صورة المنتج</label><div class="ip"><div class="ipv" id="ipv">'+(eimg&&IMG[eimg]?'<img src="'+IMG[eimg]+'" alt="">':esc(p[6]))+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer">📷 اختر صورة<input type="file" id="ff" accept="image/*" hidden></label><button class="del" id="irm" type="button">إزالة الصورة</button></div></div><label>اسم الصنف</label><input id="fn" value="'+esc(p[0])+'"><div class="r2"><div><label>السعر (جنيه)</label><input id="fp" type="number" inputmode="numeric" value="'+(p[3]||'')+'"></div><div style="max-width:92px"><label>إيموجي</label><input id="fe" value="'+esc(p[6])+'" style="text-align:center"></div></div><label>العبوة / الوصف</label><input id="fd" value="'+esc(p[2])+'" placeholder="مثال: كرتونة ٤٨ كيس"><label>القسم</label><select id="fc">'+D.cats.map(function(x){return '<option'+(x==p[1]?' selected':'')+'>'+esc(x)+'</option>'}).join('')+'</select><label>لون الكيس</label><div class="sws">'+PAL.map(function(x,j){return '<span class="swc'+(j==pal?' on':'')+'" data-pal="'+j+'" style="background:'+x[1]+'"></span>'}).join('')+'</div><label class="ck"><input type="checkbox" id="fa"'+(p[7]?'':' checked')+'> متوفر</label><div class="r2"><button class="pubb big" id="eok">حفظ</button>'+(i>=0?'<button class="del big" id="edl">حذف</button>':'')+'</div></div>';
  $('ov').classList.add('on');if(i<0)setTimeout(function(){$('fn').focus()},50)}
 function closeEd(){$('ov').classList.remove('on')}
 $('ov').addEventListener('click',function(e){var t=e.target;
@@ -144,6 +144,48 @@ $('app').addEventListener('change',function(e){var t=e.target;
  else if(t.dataset.s){var k=t.dataset.s;
   if(k=='phone'){D.cfg.phone=np(t.value);render()}else if(k=='min')D.cfg.min=+t.value||0;else D.cfg.unit=t.value.trim()||'كرتونة';mark()}});
 $('q').addEventListener('input',function(){q=this.value.trim();$('v').innerHTML=vp()});
+
+// ===== العروض =====
+var oei=-1;
+function OFS(){return D.offers||(D.offers=[])}
+function vo(){
+ var L=OFS(),h='<div class="sh" style="margin-top:14px"><b>🎁 العروض</b><small>'+L.length+' عرض</small><button class="mini" data-oadd="1">+ عرض</button></div><p class="hint">العروض بتظهر للعملاء في سلايد فوق الأصناف. رتّبها بالأسهم، والزرار بيخفي العرض من غير ما يتحذف.</p><div style="margin-top:10px">';
+ L.forEach(function(o,i){
+  h+='<div class="it'+(o.x?' off':'')+'" data-o="'+i+'"><div class="ar"><button data-oup="'+i+'">▲</button><button data-odn="'+i+'">▼</button></div><div class="mb" style="background:'+(o.c||'#ffd23f')+'">'+(o.i&&IMG[o.i]?'<img src="'+IMG[o.i]+'" alt="">':'🎁')+'</div><div class="tx"><b>'+esc(o.t)+'</b><small>'+esc(o.d||o.pr||'')+'</small></div><label class="sw"><input type="checkbox" data-ov="'+i+'"'+(o.x?'':' checked')+'><i></i></label></div>'});
+ if(!L.length)h+='<p class="emp">مفيش عروض لسه، دوس + عرض</p>';
+ return h+'</div>'}
+function openOf(i){
+ oei=i;var o=i>=0?OFS()[i]:{t:'',d:'',pr:'',g:'',c:PAL[0][1],i:'',x:0};
+ pal=0;PAL.forEach(function(x,j){if(x[1]==o.c)pal=j});eimg=o.i||'';enew='';
+ $('ov').innerHTML='<div class="pn"><h2>'+(i>=0?'تعديل عرض':'عرض جديد')+'<button class="x" id="ofx">✕</button></h2>'+
+ '<label>صورة العرض (اختياري)</label><div class="ip"><div class="ipv" id="ipv">'+(eimg&&IMG[eimg]?'<img src="'+IMG[eimg]+'" alt="">':'🎁')+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer">📷 اختر صورة<input type="file" id="of" accept="image/*" hidden></label><button class="del" id="ofirm" type="button">إزالة الصورة</button></div></div>'+
+ '<label>عنوان العرض</label><input id="ot" value="'+esc(o.t)+'" placeholder="مثال: عرض الشيبسي">'+
+ '<label>الوصف</label><input id="od" value="'+esc(o.d)+'" placeholder="مثال: اشتري ١٠ كراتين وخد كرتونة هدية">'+
+ '<div class="r2"><div><label>السعر أو الخصم</label><input id="op" value="'+esc(o.pr)+'" placeholder="مثال: ١٨٠ جنيه"></div><div><label>شارة</label><input id="og" value="'+esc(o.g)+'" placeholder="مثال: جديد"></div></div>'+
+ '<label>لون الكارت</label><div class="sws">'+PAL.map(function(x,j){return '<span class="swc'+(j==pal?' on':'')+'" data-pal="'+j+'" style="background:'+x[1]+'"></span>'}).join('')+'</div>'+
+ '<label class="ck"><input type="checkbox" id="oa"'+(o.x?'':' checked')+'> ظاهر للعملاء</label>'+
+ '<div class="r2"><button class="pubb big" id="ofok">حفظ</button>'+(i>=0?'<button class="del big" id="ofdl">حذف</button>':'')+'</div></div>';
+ $('ov').classList.add('on');if(i<0)setTimeout(function(){$('ot').focus()},50)}
+$('ov').addEventListener('click',function(e){var t=e.target;
+ if(t.id=='ofx')closeEd();
+ else if(t.id=='ofirm'){eimg='';enew='';$('ipv').textContent='🎁'}
+ else if(t.id=='ofok'){
+  var o={t:$('ot').value.trim(),d:$('od').value.trim(),pr:$('op').value.trim(),g:$('og').value.trim(),c:PAL[pal][1],i:eimg,x:$('oa').checked?0:1};
+  if(!o.t){toast('اكتب عنوان العرض');return}
+  if(enew){var nid='i'+Date.now().toString(36);IMG[nid]=enew;PEND[nid]=1;o.i=nid}
+  if(oei>=0)OFS()[oei]=o;else OFS().push(o);
+  mark();closeEd();render()}
+ else if(t.id=='ofdl'&&confirm('تحذف العرض ده؟')){OFS().splice(oei,1);mark();closeEd();render()}});
+$('ov').addEventListener('change',function(e){if(e.target.id!='of'||!e.target.files[0])return;
+ shrink(e.target.files[0]).then(function(u){enew=u;eimg='';$('ipv').innerHTML='<img src="'+u+'" alt="">'}).catch(function(){toast('الصورة دي مش شغالة، جرّب غيرها')})});
+$('app').addEventListener('click',function(e){var t=e.target,b;
+ if(t.dataset.oadd!=null){openOf(-1);return}
+ if(t.dataset.oup!=null||t.dataset.odn!=null){var L=OFS(),i=+(t.dataset.oup!=null?t.dataset.oup:t.dataset.odn),j=t.dataset.oup!=null?i-1:i+1;
+  if(j>=0&&j<L.length){var x=L[i];L[i]=L[j];L[j]=x;mark();render()}return}
+ if(t.closest('.sw'))return;
+ if((b=t.closest('[data-o]')))openOf(+b.dataset.o)});
+$('app').addEventListener('change',function(e){var t=e.target;
+ if(t.dataset.ov!=null){OFS()[+t.dataset.ov].x=t.checked?0:1;mark();render()}});
 var RT=null,TKEXP=0;
 async function fresh(){
  if(TK&&Date.now()<TKEXP-120000)return;
@@ -159,6 +201,7 @@ async function pub(){
  if(DEMO){toast('ده عرض تجريبي، النشر بيشتغل بعد ربط Firebase');return}
  var b=$('pub');b.disabled=true;D.v=(D.v||0)+1;var A='https://'+FB.db+'/chips/',used={};
  D.p.forEach(function(p){if(p[8])used[p[8]]=1});
+ OFS().forEach(function(o){if(o.i)used[o.i]=1});
  try{
   await fresh();
   for(var k in PEND){if(used[k]){await put(A+'img/'+k+'.json',JSON.stringify(IMG[k]))}}
@@ -182,7 +225,9 @@ $('lf').onsubmit=async function(e){e.preventDefault();var er=$('le');er.textCont
 async function loadAll(){
  var v=await (await fetch('https://'+FB.db+'/chips/data.json')).json();
  if(v&&v.json)D=JSON.parse(v.json);
- await Promise.all(D.p.filter(function(p){return p[8]}).map(function(p){return fetch('https://'+FB.db+'/chips/img/'+p[8]+'.json').then(function(r){return r.json()}).then(function(x){if(x)IMG[p[8]]=x}).catch(function(){})}))}
+ D.offers=D.offers||[];
+ var ks=D.p.map(function(p){return p[8]}).concat(D.offers.map(function(o){return o.i})).filter(Boolean);
+ await Promise.all(ks.map(function(k){return fetch('https://'+FB.db+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(x){if(x)IMG[k]=x}).catch(function(){})}))}
 (async function(){
  var rt,em;try{rt=localStorage.getItem('abu_rt');em=localStorage.getItem('abu_em')}catch(z){}
  if(em)$('lu').value=em;

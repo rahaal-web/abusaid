@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>مخزن أبو سعيد – اطلب بضاعتك</title>
+<title>أبو سعيد – اطلب بضاعتك</title>
 <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Cairo:wght@600;800&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#ffd93d;--paper:#fff8e1;--ink:#1b1b1b;--red:#ff4b3e;--blue:#2b6cff;--green:#17b26a;--mu:#5c5238;
@@ -63,18 +63,36 @@ footer{text-align:center;font-size:12px;color:var(--mu);padding:0 16px 20px}
 h1 small{display:block;font-size:24px;letter-spacing:2px;text-shadow:2px 2px 0 var(--red)}
 .pic.has{padding:0}.pic.has img{width:100%;height:132px;object-fit:cover;display:block}
 .cr{text-align:center;font-size:12.5px;color:var(--mu);margin-top:10px}.cr b{color:var(--ink);font-weight:800}
+.offers{margin-top:8px}
+.otitle{font-family:Lalezar,Cairo,sans-serif;font-size:24px;padding:0 16px 2px}
+.otrack{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:8px 14px 12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.otrack::-webkit-scrollbar{display:none}
+.slide{flex:0 0 86%;scroll-snap-align:center;border:3px solid var(--ink);border-radius:22px;box-shadow:5px 5px 0 var(--ink);padding:14px;display:flex;gap:10px;align-items:center;min-height:150px}
+.slide.one{flex-basis:100%}
+.slide .st{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.slide h3{font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:27px;line-height:1.15;margin:0}
+.slide p{margin:0;font-size:13.5px;font-weight:600;line-height:1.5}
+.stag{background:var(--red);color:#fff;border:3px solid #1b1b1b;border-radius:999px;padding:0 10px;font-size:12px;font-weight:800;transform:rotate(-3deg)}
+.spr{background:#fff;color:#1b1b1b;border:3px solid #1b1b1b;border-radius:12px;padding:0 10px;font-family:Lalezar,Cairo,sans-serif;font-size:21px;box-shadow:2px 2px 0 #1b1b1b}
+.sbtn{margin-top:2px;background:#1b1b1b;color:#fff;border-radius:999px;padding:5px 14px;font-size:13px;font-weight:800;text-decoration:none}
+.simg{flex:none;width:104px;height:104px;border:3px solid #1b1b1b;border-radius:16px;overflow:hidden;background:#fff;transform:rotate(3deg)}
+.simg img{width:100%;height:100%;object-fit:cover;display:block}
+.dots{display:flex;justify-content:center;gap:6px}
+.dots i{width:9px;height:9px;border-radius:50%;border:2px solid var(--ink);display:block}
+.dots i.on{background:var(--ink)}
 </style>
 </head>
 <body>
 <section class="hero">
   <span class="badge">جملة وقطاعي 🚚</span>
-  <h1><small>مخزن</small>أبو سعيد</h1>
+  <h1>أبو سعيد</h1>
   <p>اختار الأصناف، حدد عدد الكراتين، وابعت طلبك واتساب. هنكلمك نأكد ونوصّلك.</p>
   <div class="perks"><span>✅ أسعار الجملة</span><span>🚚 توصيل للمحلات</span><span>📦 بالكرتونة</span></div>
 </section>
+<section class="offers" id="offers" hidden><div class="otitle">🎁 العروض</div><div class="otrack" id="otrack"></div><div class="dots" id="dots"></div></section>
 <nav class="cats" id="cats"></nav>
 <main class="grid" id="grid"></main>
-<footer>الأسعار قابلة للتغيير حسب الشركة · الطلب يتأكد من المخزن قبل التوصيل<div class="cr">تصميم وتطوير <b>احمد رحال</b></div></footer>
+<footer>الأسعار قابلة للتغيير حسب الشركة · الطلب بيتأكد معاك قبل التوصيل<div class="cr">تصميم وتطوير <b>احمد رحال</b></div></footer>
 
 <div class="bar" id="bar"><button id="open"><span><em id="cnt">0</em>شوف طلبك</span><span id="sum">0 جنيه</span></button></div>
 
@@ -90,9 +108,9 @@ h1 small{display:block;font-size:24px;letter-spacing:2px;text-shadow:2px 2px 0 v
 </div>
 
 <script>
-// ===== إعدادات المخزن (عدّلها هنا) =====
+// ===== الإعدادات (عدّلها هنا) =====
 var D={"v": 1, "cfg": {"phone": "201006898024", "min": 500, "unit": "كرتونة"}, "cats": ["شيبسي", "سناكس", "حلويات", "مشروبات"], "p": [["شيبسي ملح", "شيبسي", "كرتونة ٤٨ كيس", 190, "#ffd23f", "#e8a400", "🥔", 0], ["شيبسي طماطم", "شيبسي", "كرتونة ٤٨ كيس", 190, "#ff4b3e", "#b3201a", "🍅", 0], ["شيبسي شطة", "شيبسي", "كرتونة ٤٨ كيس", 190, "#e6322b", "#7d0f0a", "🌶️", 0], ["شيبسي جبنة", "شيبسي", "كرتونة ٤٨ كيس", 190, "#ff9f1c", "#c26a00", "🧀", 0], ["شيبسي خل وملح", "شيبسي", "كرتونة ٤٨ كيس", 190, "#3fa7ff", "#1b6dbb", "🧂", 0], ["شيبسي كبير عائلي", "شيبسي", "كرتونة ٢٤ كيس", 260, "#17b26a", "#0b7a46", "🥔", 0], ["ذرة مقرمشة", "سناكس", "كرتونة ٤٨ كيس", 170, "#ffb703", "#c98400", "🌽", 0], ["فشار بالكراميل", "سناكس", "كرتونة ٣٦ كيس", 150, "#f4a261", "#b5651d", "🍿", 0], ["بف جبنة", "سناكس", "كرتونة ٤٨ كيس", 165, "#ffc233", "#d18b00", "🧀", 0], ["لب وسوداني", "سناكس", "كرتونة ٢٤ كيس", 210, "#c68642", "#7a4a1c", "🥜", 0], ["بسكويت شوكولاتة", "حلويات", "كرتونة ٣٦ علبة", 240, "#6b3e26", "#3a1f10", "🍫", 0], ["ويفر كريمة", "حلويات", "كرتونة ٤٨ قطعة", 200, "#e9b872", "#a8742f", "🍪", 0], ["حلاوة طحينية", "حلويات", "كرتونة ٢٤ علبة", 280, "#f1d58a", "#b58a22", "🍯", 0], ["عصير مانجو", "مشروبات", "كرتونة ٢٤ علبة", 220, "#ffa62b", "#c26a00", "🥭", 0], ["عصير فراولة", "مشروبات", "كرتونة ٢٤ علبة", 220, "#ff5c8a", "#b3234f", "🍓", 0], ["مياه غازية", "مشروبات", "كرتونة ٢٤ زجاجة", 300, "#2b6cff", "#0f3fa8", "🥤", 0]]},CFG=D.cfg,P=D.p,CATS=['الكل'].concat(D.cats);
-var IMGS={},IMGQ={},cart={},cat='الكل',$=function(i){return document.getElementById(i)};
+var OI=0,OT=null,OP=0,IMGS={},IMGQ={},cart={},cat='الكل',$=function(i){return document.getElementById(i)};
 try{var sv=JSON.parse(localStorage.getItem('cart')||'null');if(sv&&sv.v===D.v)cart=sv.c}catch(e){}
 
 function bag(c1,c2,em,name){
@@ -147,10 +165,35 @@ $('send').onclick=function(e){
  if(totals().s<CFG.min){e.preventDefault();$('min').scrollIntoView({block:'center'});alert($('min').textContent);return}
  wa();
 };
-tabs();grid();upd();
+
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}
+function lum(h){h=String(h||'#ffd23f').replace('#','');return (parseInt(h.substr(0,2),16)*299+parseInt(h.substr(2,2),16)*587+parseInt(h.substr(4,2),16)*114)/1000}
+function oset(i){OI=i;[].forEach.call($('dots').children,function(d,j){d.classList.toggle('on',j==i)})}
+function ogo(i,b){var tr=$('otrack'),sl=tr.children[i];if(!sl)return;var a=sl.getBoundingClientRect(),r=tr.getBoundingClientRect();tr.scrollBy({left:(a.left+a.width/2)-(r.left+r.width/2),behavior:b||'smooth'})}
+function offers(){
+ var L=(D.offers||[]).filter(function(o){return !o.x&&o.t}),s=$('offers');
+ clearInterval(OT);
+ if(!L.length){s.hidden=true;return}
+ s.hidden=false;
+ $('otrack').innerHTML=L.map(function(o){
+  var c=o.c||'#ffd23f',fg=lum(c)>150?'#1b1b1b':'#fff',im=o.i&&IMGS[o.i],msg='السلام عليكم، عايز أطلب عرض: '+o.t;
+  return '<article class="slide'+(L.length==1?' one':'')+'" style="background:'+esc(c)+';color:'+fg+'"><div class="st">'+(o.g?'<span class="stag">'+esc(o.g)+'</span>':'')+'<h3>'+esc(o.t)+'</h3>'+(o.d?'<p>'+esc(o.d)+'</p>':'')+(o.pr?'<span class="spr">'+esc(o.pr)+'</span>':'')+'<a class="sbtn" target="_blank" rel="noopener" href="https://wa.me/'+CFG.phone+'?text='+encodeURIComponent(msg)+'">اطلب العرض 📲</a></div>'+(im?'<div class="simg"><img src="'+im+'" alt=""></div>':'')+'</article>'}).join('');
+ $('dots').innerHTML=L.length>1?L.map(function(){return '<i></i>'}).join(''):'';
+ if(OI>=L.length)OI=0;oset(OI);if(OI>0)ogo(OI,'auto');
+ if(L.length>1)OT=setInterval(function(){if(document.hidden||Date.now()<OP||$('offers').hidden)return;ogo((OI+1)%L.length)},4500);
+}
+(function(){var tr=$('otrack'),tm;
+ tr.addEventListener('scroll',function(){clearTimeout(tm);tm=setTimeout(function(){
+  var r=tr.getBoundingClientRect(),c=r.left+r.width/2,best=0,bd=1e9;
+  [].forEach.call(tr.children,function(sl,j){var a=sl.getBoundingClientRect(),d=Math.abs(a.left+a.width/2-c);if(d<bd){bd=d;best=j}});
+  oset(best)},60)});
+ ['touchstart','pointerdown','wheel'].forEach(function(ev){tr.addEventListener(ev,function(){OP=Date.now()+8000},{passive:true})})})();
+tabs();grid();upd();offers();
 function loadImgs(){if(DBU.indexOf('YOUR')>=0)return;P.forEach(function(p){var k=p[8];if(!k||IMGQ[k])return;IMGQ[k]=1;
- fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;grid()}}).catch(function(){IMGQ[k]=0})})}
-function ref(){CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';tabs();grid();upd();loadImgs()}
+ fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;grid()}}).catch(function(){IMGQ[k]=0})});
+ (D.offers||[]).forEach(function(o){var k=o.i;if(!k||IMGQ[k])return;IMGQ[k]=1;
+  fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;offers()}}).catch(function(){IMGQ[k]=0})})}
+function ref(){CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';tabs();grid();upd();offers();loadImgs()}
 // ===== ربط قاعدة البيانات (Firebase Realtime Database) =====
 var DBU='abu-saied-a6b74-default-rtdb.firebaseio.com',ct=0;
 function sync(){
