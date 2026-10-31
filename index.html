@@ -152,7 +152,7 @@ function loadImgs(){if(DBU.indexOf('YOUR')>=0)return;P.forEach(function(p){var k
  fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;grid()}}).catch(function(){IMGQ[k]=0})})}
 function ref(){CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';tabs();grid();upd();loadImgs()}
 // ===== ربط قاعدة البيانات (Firebase Realtime Database) =====
-var DBU='YOUR-PROJECT-default-rtdb.firebaseio.com',ct=0;
+var DBU='abu-saied-a6b74-default-rtdb.firebaseio.com',ct=0;
 function sync(){
  if(DBU.indexOf('YOUR')>=0)return;
  fetch('https://'+DBU+'/chips/data.json').then(function(r){return r.json()}).then(function(v){
