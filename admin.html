@@ -277,7 +277,7 @@ var SM=[],SMT='';
 function nd(s){return String(s||'').replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)})}
 var KW='(?:في|فيه|وفيه|عنده|بسعر|سعره|سعرها|سعر|النكهات|نكهات|الطعوم|طعوم|الطعم|طعم|نكهة|عبوة|العبوة|الحجم|قسم|القسم|بدل|قبل)';
 function sfl(v){var r=[],seen={};String(v||'').split(/[,،؛;\n\/|]+/).forEach(function(x){x.split(/\s+و\s+/).forEach(function(y){y=y.trim().replace(/[.\u061B]+$/,'');if(y&&!seen[y]){seen[y]=1;r.push(y)}})});return r}
-function mc(cn){if(D.cats.indexOf(cn)>-1)return cn;var f=D.cats.filter(function(c){return c.indexOf(cn)>-1||cn.indexOf(c)>-1});return f.length?f[0]:cn}
+function mc(cn){if(D.cats.indexOf(cn)>-1)return cn;var f=D.cats.filter(function(c){return c.indexOf(cn)>-1||cn.indexOf(c)>-1});return f.length?f[0]:snap(cn,D.cats)}
 function lpb(s){
  var o={n:'',c:'',d:'',p:0,o:0,v:'',e:'',f:[],on:1},m;
  s=s.replace(/^(?:انا |أنا )?(?:عندي|ضيف|أضف|اضف|اضافة|إضافة)\s+/,'');
@@ -299,7 +299,30 @@ function lp(text){
  var t=nd(text).replace(/\r/g,''),bl=/\n\s*\n/.test(t)?t.split(/\n\s*\n/):t.split('\n'),out=[];
  bl.forEach(function(b){b=b.replace(/\s+/g,' ').trim();if(b.length<2)return;var r=lpb(b);if(r)out.push(r)});return out}
 function nz(x){return {n:String(x.name||'').trim(),c:String(x.category||'').trim(),d:String(x.pack||'').trim(),p:+x.price||0,o:+x.oldPrice||0,v:String(x.variant||'').trim(),e:String(x.emoji||'').trim(),f:sfl((x.flavors||[]).map(function(f){return String(f).trim()}).join('،')),on:1}}
-function aiPrompt(text){return 'أنت مساعد لإدخال بيانات أصناف متجر جملة. حوّل النص التالي إلى JSON فقط (من غير أي كلام تاني) بالشكل: {"products":[{"name":"","category":"","pack":"","price":0,"oldPrice":0,"variant":"","emoji":"","flavors":[""]}]}\nالقواعد:\n- name هو اسم الصنف فقط.\n- category لازم يكون واحد من الأقسام الحالية بالظبط لو مناسب، وإلا اقترح اسم قسم قصير. الأقسام الحالية: '+JSON.stringify(D.cats)+'\n- pack العبوة أو الوصف (مثال: كرتونة ٤٨ كيس) وسيبه فاضي لو مش مذكور.\n- price رقم بالجنيه بالأرقام الإنجليزية، و oldPrice السعر قبل الخصم أو 0.\n- لو الصنف له أكتر من حجم أو نوع بأسعار مختلفة اعمل عنصر منفصل لكل واحد بنفس الاسم وحط الحجم أو النوع في variant.\n- flavors كل النكهات المذكورة بأسمائها بالظبط، ماتخترعش نكهات مش مذكورة، وسيبها [] لو مفيش.\n- emoji إيموجي واحد مناسب للصنف.\n- مهم: لو الكلام عن صنف واحد وبعده أكتر من طعم أو نكهة مفصولين بـ «و» أو فاصلة (زي «دوريتوس عنده طعم جبنة وكباب وملح وشطة») فده صنف واحد بس، وحط كل الطعوم في flavors بتاعته، وماتعملش عنصر لكل طعم.\n- لو في أكتر من صنف في النص اعمل عنصر لكل صنف.\nالنص:\n'+text}
+// ===== دقة وإملاء Rahal Ai: ظبط محلي بعد التحليل =====
+function an(s){return nd(s).replace(/[\u064B-\u065F\u0670\u0640]/g,'').replace(/[أإآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/[^\u0621-\u064Aa-zA-Z0-9 ]+/g,' ').replace(/\s+/g,' ').trim().toLowerCase()}
+function lev(a,b){if(a==b)return 0;if(Math.abs(a.length-b.length)>1)return 2;var p=[],q,i,j;for(j=0;j<=b.length;j++)p[j]=j;for(i=1;i<=a.length;i++){q=[i];for(j=1;j<=b.length;j++)q[j]=Math.min(p[j]+1,q[j-1]+1,p[j-1]+(a[i-1]==b[j-1]?0:1));p=q}return p[b.length]}
+function snap(v,pool){var a=an(v);if(!a)return v;var best=null,bd=9,i,b,d;for(i=0;i<pool.length;i++){b=an(pool[i]);if(b==a)return pool[i];if(a.length>=5&&b.length>=5){d=lev(a,b);if(d<bd){bd=d;best=pool[i]}}}return bd<=1?best:v}
+function nums(s){return (nd(s).match(/\d+(?:\.\d+)?/g)||[]).map(Number).sort(function(a,b){return a-b})}
+function nsame(a,b){var x=nums(a),y=nums(b);return x.length==y.length&&x.every(function(v,i){return v==y[i]})}
+function fixList(list,tx){
+ var T=an(tx),N=nums(tx),names=[],fl=[],m={},out=[];
+ D.p.forEach(function(p){if(p[0]&&names.indexOf(p[0])<0)names.push(p[0]);(p[9]||[]).forEach(function(f){var n=Array.isArray(f)?f[0]:f;if(n&&fl.indexOf(n)<0)fl.push(n)})});
+ list.forEach(function(o){
+  o.w=[];var n0=o.n.trim();o.n=snap(n0,names);if(o.n!=n0)o.w.push('✏️ الاسم اتظبط: '+n0+' ← '+o.n);
+  var seen={},fs=[];o.f.forEach(function(f){var g=snap(String(f).replace(/^(?:طعم|نكهة|نكهه)\s+/,'').trim(),fl),k=an(g);if(!k||seen[k])return;seen[k]=1;fs.push(g)});o.f=fs;
+  var k2=an(o.n)+'|'+an(o.v),g2=m[k2];
+  if(g2&&(!o.p||!g2.p||o.p==g2.p)){var sn={};g2.f.forEach(function(f){sn[an(f)]=1});o.f.forEach(function(f){if(!sn[an(f)])g2.f.push(f)});g2.p=g2.p||o.p;g2.o=g2.o||o.o;g2.d=g2.d||o.d;g2.e=g2.e||o.e;g2.w.push('اتدمج أكتر من سطر لنفس الصنف');return}
+  m[k2]=o;out.push(o)});
+ out.forEach(function(o){
+  var miss=o.f.filter(function(f){var k=an(f);return T.indexOf(k)<0&&!k.split(' ').some(function(w){return w.length>2&&T.indexOf(w)>-1})});
+  if(miss.length)o.w.push('نكهات مش واضحة في الكلام: '+miss.join('، '));
+  if(!(o.p>0))o.w.push('مفيش سعر، اكتبه');
+  else if(N.indexOf(o.p)<0)o.w.push('السعر '+o.p+' مش مكتوب بالأرقام في الكلام، تأكد منه');
+  if(o.o&&o.p&&o.o<=o.p)o.w.push('السعر القديم مش أكبر من الجديد، هيتتجاهل');
+  if(o.n&&T.indexOf(an(o.n))<0&&!an(o.n).split(' ').some(function(w){return w.length>2&&T.indexOf(w)>-1}))o.w.push('اسم الصنف مش مكتوب كده في الكلام، راجعه')});
+ return out}
+function aiPrompt(text){return 'أنت مساعد لإدخال بيانات أصناف متجر جملة. حوّل النص التالي إلى JSON فقط (من غير أي كلام تاني) بالشكل: {"products":[{"name":"","category":"","pack":"","price":0,"oldPrice":0,"variant":"","emoji":"","flavors":[""]}]}\nالقواعد:\n- name هو اسم الصنف فقط.\n- category لازم يكون واحد من الأقسام الحالية بالظبط لو مناسب، وإلا اقترح اسم قسم قصير. الأقسام الحالية: '+JSON.stringify(D.cats)+'\n- pack العبوة أو الوصف (مثال: كرتونة ٤٨ كيس) وسيبه فاضي لو مش مذكور.\n- price رقم بالجنيه بالأرقام الإنجليزية، و oldPrice السعر قبل الخصم أو 0.\n- لو الصنف له أكتر من حجم أو نوع بأسعار مختلفة اعمل عنصر منفصل لكل واحد بنفس الاسم وحط الحجم أو النوع في variant.\n- flavors كل النكهات المذكورة بأسمائها بالظبط، ماتخترعش نكهات مش مذكورة، وسيبها [] لو مفيش.\n- emoji إيموجي واحد مناسب للصنف.\n- مهم: لو الكلام عن صنف واحد وبعده أكتر من طعم أو نكهة مفصولين بـ «و» أو فاصلة (زي «دوريتوس عنده طعم جبنة وكباب وملح وشطة») فده صنف واحد بس، وحط كل الطعوم في flavors بتاعته، وماتعملش عنصر لكل طعم.\n- لو في أكتر من صنف في النص اعمل عنصر لكل صنف.\n- انسخ الأسعار والأرقام زي ما هي في النص بالظبط من غير حساب أو تقريب، ولو السعر مش واضح خلّي price 0.\n- صحّح الإملاء بس في اسم الصنف والنكهات (زي ه/ة وأ/ا) من غير ما تبدّل الكلمة بكلمة تانية أو تضيف حاجة.\nمثال: النص «شيبسي كرتونة ٢٤ كيس بسعر ٢٦٠ جنيه في قسم شيبسي عنده طعم ملح وخل وشطة» يرجع: {"products":[{"name":"شيبسي","category":"شيبسي","pack":"كرتونة 24 كيس","price":260,"oldPrice":0,"variant":"","emoji":"🥔","flavors":["ملح","خل","شطة"]}]}\nالنص:\n'+text}
 async function askGemini(key,prompt){
  var B='https://generativelanguage.googleapis.com/v1beta/',H={'Content-Type':'application/json','x-goog-api-key':key},tried={};
  async function one(m){
@@ -439,7 +462,7 @@ async function vPolish(){
   var raw=await askGemini(key,pr),j=JSON.parse(raw.replace(/```json|```/g,'').trim()),out=String(j.text||'').trim();
   var ta2=$('smt');
   var nl=function(x){return x.split(/\n+/).filter(function(l){return l.trim()}).length};
-  if(ta2&&out&&out.length>tx.length*.5&&out.length<tx.length*2&&nl(out)<=nl(tx)&&ta2.value.trim()==tx){ta2.value=out;SMT=out}
+  if(ta2&&out&&out.length>tx.length*.5&&out.length<tx.length*2&&nl(out)<=nl(tx)&&ta2.value.trim()==tx&&nsame(out,tx)){ta2.value=out;SMT=out}
   var e2=$('sme');if(e2){e2.style.color='var(--mu)';e2.textContent='✅ الكتابة اتظبطت'}
  }catch(x){var e3=$('sme');if(e3){e3.style.color='';e3.textContent=''}}}
 $('ov').addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('#smmic');if(b){if(VON||VR||VST)vStop(true);else if(!(VENG=='ai'&&b.classList.contains('rec')))vStart();return}
@@ -455,7 +478,7 @@ function smRv(keep){
  var op=document.querySelector('#ov .pn'),st=keep&&op?op.scrollTop:0,h='<div class="pn"><h2>راجع الأصناف ('+SM.length+')<button class="x" id="smx">✕</button></h2><p class="hint">عدّل أي حاجة، وشيل العلامة من اللي مش عايزه.</p>';
  SM.forEach(function(o,i){
   var cs=D.cats.slice();if(o.c&&cs.indexOf(o.c)<0)cs.push(o.c);var a=' data-si="'+i+'" data-sk=';
-  h+='<div class="card2"><label class="ck" style="margin:0"><input type="checkbox"'+a+'"on"'+(o.on?' checked':'')+'> إضافة'+(o.dup?' <span style="color:var(--red)">⚠️ شبهه موجود</span>':'')+'</label>'+
+  h+='<div class="card2"><label class="ck" style="margin:0"><input type="checkbox"'+a+'"on"'+(o.on?' checked':'')+'> إضافة'+(o.dup?' <span style="color:var(--red)">⚠️ شبهه موجود</span>':'')+'</label>'+(o.w&&o.w.length?'<div class="hint" style="color:var(--red);margin:6px 0">'+o.w.map(function(x){return esc(x)}).join('<br>')+'</div>':'')+
   '<label>صورة المنتج (اختياري)</label><div class="ip"><div class="ipv" style="width:72px;height:72px">'+(o.im?'<img src="'+o.im+'" alt="">':esc(o.e||'🥔'))+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer;margin:0">📷 اختر صورة<input type="file" accept="image/*" hidden data-si="'+i+'" data-sk="img"></label>'+(o.im?'<button class="del" type="button" data-si="'+i+'" data-sk="rmim">إزالة الصورة</button>':'')+'</div></div>'+'<label>الاسم</label><input'+a+'"n" value="'+esc(o.n)+'">'+
   '<div class="r2"><div><label>السعر</label><input type="number" inputmode="numeric"'+a+'"p" value="'+(o.p||'')+'"></div><div><label>الحجم / النوع</label><input'+a+'"v" value="'+esc(o.v)+'"></div><div style="max-width:70px"><label>إيموجي</label><input'+a+'"e" value="'+esc(o.e)+'" style="text-align:center"></div></div>'+
   '<label>العبوة / الوصف</label><input'+a+'"d" value="'+esc(o.d)+'">'+
@@ -476,7 +499,7 @@ async function smGo(ai){
    var raw=await askGemini(k,aiPrompt(tx)),j=JSON.parse(raw.replace(/```json|```/g,'').trim());
    list=(Array.isArray(j)?j:(j.products||[])).map(nz)}
   else list=lp(tx);
-  list=list.filter(function(o){return o.n});
+  list=list.filter(function(o){return o.n});list=fixList(list,tx);
   if(!list.length){er.style.color='';er.textContent='ما قدرتش أفهم أي صنف من النص، جرّب توضحه أكتر';return}
   list.forEach(function(o){
    o.im='';o.c=o.c?mc(o.c):(D.cats[0]||'عام');
