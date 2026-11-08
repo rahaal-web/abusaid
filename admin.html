@@ -132,11 +132,11 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
 </head><body>
 <form class="login" id="lf"><h3>🔧 لوحة التحكم</h3><div style="font-weight:800;color:var(--mu)">أبو سعيد</div><label>الإيميل</label><input id="lu" type="email" dir="ltr" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" dir="ltr" autocomplete="current-password"><button class="pubb" style="width:100%;margin-top:14px;padding:10px" type="submit">دخول</button><div class="err" id="le"></div><div class="cred">تصميم وتطوير <b>احمد رحال</b></div></form>
 <div id="app" hidden>
- <div class="top"><div class="trow"><b>🔧 أبو سعيد</b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
- <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="s">⚙️ الإعدادات</button></nav>
+ <div class="top"><div class="trow"><b>🔧 أبو سعيد <small style="font:600 11px Cairo;color:var(--mu)">v3 💬</small></b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
+ <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="t">🎨 التصميم</button><button data-t="s">⚙️ الإعدادات</button></nav>
  <div id="qw" style="display:flex;gap:8px;align-items:center"><input id="q" placeholder="🔍 دوّر على صنف"><button class="pubb" id="smb" type="button" style="flex:none;padding:5px 12px;font-size:14px;font-family:inherit;letter-spacing:.3px;background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b">Rahal Ai</button></div></div>
  <div id="v"></div>
- <div class="cred">تصميم وتطوير <b>احمد رحال</b></div>
+ <div class="cred">تصميم وتطوير <b>احمد رحال</b><br><small>إصدار ٣ · شات Rahal Ai 💬</small></div>
 </div>
 <div class="ov" id="ov"></div><div class="toast" id="ts"></div>
 <script>
@@ -154,7 +154,7 @@ function cnt(c){return D.p.filter(function(p){return p[1]==c}).length}
 function np(v){v=v.replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/\D/g,'');if(v.indexOf('00')==0)v=v.slice(2);if(v[0]=='0')v='20'+v.slice(1);return v}
 function render(){
  [].forEach.call(document.querySelectorAll('.tb button'),function(b){b.classList.toggle('on',b.dataset.t==tab)});
- $('qw').hidden=tab!='p';$('v').innerHTML=tab=='p'?vp():tab=='c'?vc():tab=='o'?vo():vs()}
+ $('qw').hidden=tab!='p';$('v').innerHTML=tab=='p'?vp():tab=='c'?vc():tab=='o'?vo():tab=='t'?vt():vs()}
 function vp(){
  var h='';
  D.cats.forEach(function(c){
@@ -177,6 +177,16 @@ function vs(){var c=D.cfg;
 '<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار Rahal Ai للعملاء</b><label class="sw"><input type="checkbox" data-s="ro"'+(c.ro?'':' checked')+'><i></i></label></div>'+
 '<label>الجملة اللي جنب Rahal Ai</label><input data-s="rt" value="'+esc(c.rt==null?'اطلب بالكتابة أو الصوت':c.rt)+'" placeholder="اطلب بالكتابة أو الصوت">'+
 '<div class="cr" style="border:0;background:transparent;padding:0;margin:12px 0 0"><b style="flex:1">الكتابة بالصوت 🎤</b><label class="sw"><input type="checkbox" data-s="rm"'+(c.rm?'':' checked')+'><i></i></label></div></div>'}
+var THEMES=[
+{id:'classic',n:'الأصلي',d:'كرتوني: أصفر وحدود سودا وظلال حادة',bg:'#ffd93d',pa:'#fff8e1',ac:'#ff4b3e',ink:'#1b1b1b',hard:1},
+{id:'soft',n:'ناعم دافئ',d:'بيج وتيراكوتا، كروت ناعمة وظلال خفيفة (زي الصورة)',bg:'#f7e9d9',pa:'#fffaf3',ac:'#b9502e',ink:'#2e1c14'},
+{id:'night',n:'ليلي فخم',d:'خلفية غامقة مع ذهبي',bg:'#15110c',pa:'#211b14',ac:'#f0b03a',ink:'#f5e9d0'},
+{id:'fresh',n:'أخضر نضيف',d:'أبيض وأخضر هادي ومريح للعين',bg:'#eaf5ee',pa:'#ffffff',ac:'#1f9d5c',ink:'#16301f'}];
+function vt(){var cur=D.cfg.theme||'classic';
+ return '<p class="hint">اختار شكل الموقع للعملاء، وبعدين دوس 🚀 نشر. تقدر ترجع للأصلي في أي وقت.</p><div style="margin-top:10px">'+THEMES.map(function(t){
+  var bd=t.hard?'3px solid '+t.ink:'1px solid rgba(0,0,0,.12)',sh=t.hard?'2px 2px 0 '+t.ink:'0 3px 8px rgba(0,0,0,.14)',on=t.id==cur;
+  var c='<div style="flex:1;background:'+t.pa+';border:'+bd+';border-radius:10px;box-shadow:'+sh+';padding:6px"><div style="height:26px;border-radius:6px;background:'+t.bg+';opacity:.75"></div><div style="height:6px;width:60%;background:'+t.ink+';opacity:.7;border-radius:4px;margin:6px 0 4px"></div><div style="height:14px;border-radius:'+(t.hard?'5px':'999px')+';background:'+t.ac+'"></div></div>';
+  return '<button type="button" data-th="'+t.id+'" class="card2" style="width:100%;display:flex;gap:10px;align-items:center;text-align:right;font:inherit;color:var(--ink);cursor:pointer;margin-bottom:10px;'+(on?'outline:4px solid var(--green);':'')+'"><div style="flex:none;width:136px;display:flex;gap:6px;padding:8px;border-radius:12px;background:'+t.bg+'">'+c+c+'</div><div style="flex:1"><b style="font-size:17px">'+t.n+(on?' ✅':'')+'</b><div class="hint" style="margin:2px 0 0">'+t.d+'</div></div></button>'}).join('')+'</div>'}
 var dupFrom=-1;
 function openEd(i,c,dup){
  var sp=null;if(dup&&D.p[i]){sp=D.p[i];dupFrom=i;i=-1}else dupFrom=-1;
@@ -215,6 +225,7 @@ $('app').addEventListener('click',function(e){var t=e.target,b;
  if(t.id=='pub')return pub();
  if(t.id=='lo'){try{localStorage.removeItem('abu_rt');localStorage.removeItem('abu_em')}catch(z){}location.reload();return}
  if((b=t.closest('[data-t]'))){tab=b.dataset.t;render();return}
+ if((b=t.closest('[data-th]'))){D.cfg.theme=b.dataset.th;mark();render();return}
  if(t.dataset.pu!=null||t.dataset.pd!=null){var up=t.dataset.pu!=null,i0=+(up?t.dataset.pu:t.dataset.pd),c0=D.p[i0][1],j0=i0;
   do{j0+=up?-1:1}while(j0>=0&&j0<D.p.length&&D.p[j0][1]!=c0);
   if(j0>=0&&j0<D.p.length){var x0=D.p[i0];D.p[i0]=D.p[j0];D.p[j0]=x0;mark();render()}return}
