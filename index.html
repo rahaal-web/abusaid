@@ -123,6 +123,16 @@ h1 small{display:block;font-size:24px;letter-spacing:2px;text-shadow:2px 2px 0 v
 @media (prefers-reduced-motion:reduce){.vp.on::after{animation:none}}
 .vp.x{opacity:.5;text-decoration:line-through}
 .info .vp b{position:absolute;top:1px;inset-inline-end:3px;margin:0;background:var(--red);color:#fff;border-radius:999px;font-size:9px;font-weight:800;line-height:1.4;padding:0 4px}
+
+.cats button.rai,.rai{flex:none;background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b;border:3px solid var(--ink);border-radius:999px;padding:5px 16px;font-weight:800;font-size:14px;box-shadow:3px 3px 0 var(--ink)}
+.raiH{display:block;margin:14px auto 0;font-size:16px;padding:8px 20px}
+.rgold{background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b;border:3px solid var(--ink);cursor:pointer;font-family:inherit;font-weight:800}
+.rrow{border-bottom:2px dashed var(--ink);padding:10px 0;display:flex;flex-direction:column;gap:6px}
+.rh{display:flex;gap:6px;align-items:center}
+.pn select{width:100%;min-width:0;font:inherit;font-weight:700;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:12px;padding:7px 10px}
+.rf{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.rf small{color:var(--mu);font-weight:800}
+.rdel{flex:none;background:var(--red);color:#fff;border:3px solid var(--ink);border-radius:10px;width:40px;height:38px;font-size:16px}
 </style>
 <!-- PWA: install support -->
 <script>
@@ -183,6 +193,7 @@ if(iosSafari)show('ثبّت أبو سعيد كتطبيق على موبايلك �
   <div class="kinds"><span>📦 جملة</span><span>🛒 قطاعي</span></div>
   <p>اختار الأصناف، حدد عدد الكراتين، وابعت طلبك واتساب. هنكلمك نأكد ونوصّلك.</p>
   <div class="perks"><span>✅ أسعار الجملة</span><span>🚚 توصيل للمحلات</span><span>📦 بالكرتونة</span></div>
+  <button class="rai raiH" id="raiH" type="button">Rahal Ai 🤖 اطلب بالكتابة أو الصوت</button>
 </section>
 <section class="offers" id="offers" hidden><div class="otitle">🎁 العروض</div><div class="otrack" id="otrack"></div><div class="dots" id="dots"></div></section>
 <nav class="cats" id="cats"></nav>
@@ -201,6 +212,8 @@ if(iosSafari)show('ثبّت أبو سعيد كتطبيق على موبايلك �
     <p class="note">هيفتح واتساب بالطلب جاهز، دوس إرسال وهنكلمك نأخد التفاصيل.</p>
   </div>
 </div>
+
+<div class="sheet" id="rsheet"><div class="pn" id="rpn"></div></div>
 
 <div class="sheet" id="fsheet">
   <div class="pn">
@@ -225,8 +238,8 @@ function money(n){return n.toLocaleString('ar-EG')+' جنيه'}
 function save(){try{localStorage.setItem('cart',JSON.stringify({v:D.v,c:cart}))}catch(e){}}
 
 function tabs(){
- $('cats').innerHTML=CATS.map(function(c){return '<button class="'+(c==cat?'on':'')+'" data-c="'+c+'">'+c+'</button>'}).join('');
- [].forEach.call($('cats').children,function(b){b.onclick=function(){cat=b.dataset.c;tabs();grid()}});
+ $('cats').innerHTML=(CFG&&CFG.ro?'':'<button class="rai" type="button">Rahal Ai</button>')+CATS.map(function(c){return '<button class="'+(c==cat?'on':'')+'" data-c="'+c+'">'+c+'</button>'}).join('');
+ [].forEach.call($('cats').children,function(b){if(!b.dataset.c){b.onclick=openAI;return}b.onclick=function(){cat=b.dataset.c;tabs();grid()}});
 }
 function FL(p){return p[9]||[]}
 function nk(n){return n==1?'نكهة واحدة':n==2?'نكهتين':n.toLocaleString('ar-EG')+' نكهات'}
@@ -333,12 +346,118 @@ function offers(){
   [].forEach.call(tr.children,function(sl,j){var a=sl.getBoundingClientRect(),d=Math.abs(a.left+a.width/2-c);if(d<bd){bd=d;best=j}});
   oset(best)},60)});
  ['touchstart','pointerdown','wheel'].forEach(function(ev){tr.addEventListener(ev,function(){OP=Date.now()+8000},{passive:true})})})();
-clean();tabs();grid();upd();offers();
+// ===== Rahal Ai: العميل يطلب بالكلام =====
+var RL=[],RU=[],RT='',SR=window.SpeechRecognition||window.webkitSpeechRecognition,rrec=null;
+function rnd(s){return String(s||'').replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)})}
+function rn(s){return rnd(s).toLowerCase().replace(/[\u064B-\u065F\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/ئ/g,'ي').replace(/ؤ/g,'و')}
+function rtk(s){var o=[];rn(s).split(/[^\u0621-\u064Aa-z0-9]+/).forEach(function(t){if(!t)return;if(t.length>3&&t.indexOf('ال')==0)t=t.slice(2);o.push(t)});return o}
+var RNUM={};[['واحد',1],['واحده',1],['اتنين',2],['اثنين',2],['اتنتين',2],['تنين',2],['كرتونتين',2],['تلاته',3],['ثلاثه',3],['تلات',3],['ثلاث',3],['اربعه',4],['اربع',4],['خمسه',5],['خمس',5],['سته',6],['ست',6],['سبعه',7],['سبع',7],['تمانيه',8],['ثمانيه',8],['تمن',8],['ثمان',8],['تسعه',9],['تسع',9],['عشره',10],['عشر',10],['احداشر',11],['اتناشر',12],['تلتاشر',13],['اربعتاشر',14],['خمستاشر',15],['عشرين',20],['تلاتين',30],['ثلاثين',30],['اربعين',40],['خمسين',50],['ميه',100]].forEach(function(a){RNUM[a[0]]=a[1]});
+var RSTOP={};'عايز عاوز عايزه عاوزه اريد ابغي محتاج محتاجه هات هاتلي ضيف ضيفلي كمان طلب اطلب ابعت بعت ممكن لو سمحت من فضلك يا باشا معلم استاذ كرتونه كراتين كرتون كارتونه كرتونتين علبه علب دسته شوال عدد حبه قطعه وحده وحدات في عندي انا لي ده دي مع معاهم ورقم صنف نوع طعم نكهه نكهات بتاع بتاعه'.split(' ').forEach(function(w){RSTOP[rn(w)]=1});
+var RSP=new RegExp('\\n|[,،؛;+.]|\\s+و\\s+|\\s+و(?=\\d)|\\s+و(?=(?:'+Object.keys(RNUM).sort(function(a,b){return b.length-a.length}).map(function(k){return k.replace(/ه/g,'[هة]').replace(/ا/g,'[اأإآ]')}).join('|')+')(?:\\s|$))|\\s+ومعاهم\\s+|\\s+وكمان\\s+|\\s+كمان\\s+|\\s+ثم\\s+');
+function rseg(t){return rnd(t).replace(/\r/g,'').split(RSP).map(function(x){return x.trim()}).filter(Boolean)}
+function rq(toks){var q=0,rest=[];toks.forEach(function(t){var v=null;if(/^\d+$/.test(t))v=+t;else if(RNUM[t]!=null)v=RNUM[t];else if(t[0]=='و'&&RNUM[t.slice(1)]!=null)v=RNUM[t.slice(1)];if(v!=null&&!q&&v>0&&v<1000)q=v;else rest.push(t)});return [q||1,rest]}
+function rmatch(rest){
+ var S={};rest.forEach(function(t){if(RSTOP[t])return;S[t]=1;if(t.length>3&&t[0]=='و')S[t.slice(1)]=1});
+ if(!Object.keys(S).length)return null;
+ var cs=[];
+ P.forEach(function(p,i){if(p[7]||isOut(p))return;
+  var N=rtk(p[0]+' '+(p[10]||'')).filter(function(t){return !RSTOP[t]}),m=0;
+  N.forEach(function(t){if(S[t])m++});
+  var fm=0;FL(p).forEach(function(f){if(f[1])return;var c=0;rtk(f[0]).forEach(function(t){if(S[t])c++});if(c>fm)fm=c});
+  if(m||fm)cs.push({i:i,s:m*10+(N.length?m/N.length*5:0)+fm*3})});
+ cs.sort(function(a,b){return b.s-a.s});
+ return cs.length?{cs:cs,S:S}:null}
+function rlocal(text){
+ var items=[],unk=[];
+ rseg(text).forEach(function(sg){
+  var r=rq(rtk(sg)),m=rmatch(r[1]);
+  if(!m){unk.push(sg);return}
+  var top=m.cs[0],p=P[top.i],fl=FL(p),fs=[];
+  if(fl.length){var best=0,sc=[];fl.forEach(function(f,j){var c=0;if(!f[1])rtk(f[0]).forEach(function(t){if(m.S[t])c++});sc[j]=c;if(c>best)best=c});
+   if(best>0)sc.forEach(function(c,j){if(c==best)fs.push(j)})}
+  var cands=m.cs.slice(0,5).map(function(c){return c.i}),amb=m.cs.length>1&&m.cs[1].s>=top.s*.95;
+  if(fs.length)fs.forEach(function(j){items.push({i:top.i,f:j,q:r[0],c:cands,amb:amb})});
+  else items.push({i:top.i,f:-1,q:r[0],c:cands,amb:amb})});
+ return {items:items,unk:unk}}
+async function rGem(key,prompt){
+ var B='https://generativelanguage.googleapis.com/v1beta/',H={'Content-Type':'application/json','x-goog-api-key':key},tried={};
+ async function one(m){tried[m]=1;var ac=new AbortController(),tm=setTimeout(function(){ac.abort()},15000);
+  try{var r=await fetch(B+'models/'+m+':generateContent',{method:'POST',headers:H,signal:ac.signal,body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:.1,responseMimeType:'application/json'}})});
+   if(r.ok){var d=await r.json(),c=d.candidates&&d.candidates[0],t=c&&c.content&&c.content.parts?c.content.parts.map(function(p){return p.text||''}).join(''):'';if(t){try{localStorage.setItem('rai_m',m)}catch(z){}return t}return null}
+   if(r.status==429||r.status==403)throw new Error('STOP');
+   var b='';try{b=await r.text()}catch(z){}if(/API key|API_KEY/i.test(b))throw new Error('STOP');return null}
+  finally{clearTimeout(tm)}}
+ var first=[],i,t;try{var sv=localStorage.getItem('rai_m');if(sv)first.push(sv)}catch(z){}
+ first.push('gemini-flash-lite-latest','gemini-flash-latest');
+ for(i=0;i<first.length;i++){if(tried[first[i]])continue;t=await one(first[i]);if(t)return t}
+ var lr=await fetch(B+'models?pageSize=200',{headers:H});
+ if(lr.ok){var ld=await lr.json(),ns=(ld.models||[]).filter(function(m){return (m.supportedGenerationMethods||[]).indexOf('generateContent')>-1&&/flash/i.test(m.name)&&!/image|tts|live|audio|embed|exp|robotics|computer/i.test(m.name)}).map(function(m){return m.name.replace('models/','')}).sort(function(a,b){return (/lite/.test(b)?1:0)-(/lite/.test(a)?1:0)});
+  for(i=0;i<ns.length&&i<4;i++){if(tried[ns[i]])continue;t=await one(ns[i]);if(t)return t}}
+ throw new Error('NOMODEL')}
+async function rAI(key,text){
+ var ls=[];P.forEach(function(p,i){if(p[7]||isOut(p))return;ls.push(i+'|'+p[0]+'|'+(p[10]||'')+'|'+FL(p).map(function(f,j){return f[1]?'':j+'='+f[0]}).filter(Boolean).join(';'))});
+ var pr='أنت مساعد استلام طلبات لمتجر جملة. العميل كتب طلبه بالعامية المصرية. طابق كل صنف في كلامه مع الكتالوج واستخرج الكمية.\nالكتالوج (رقم الصنف|الاسم|الحجم|النكهات بصيغة رقم=اسم):\n'+ls.join('\n')+'\nأرجع JSON فقط بالشكل: {"items":[{"i":0,"f":-1,"q":1}],"unknown":[""]}\nالقواعد:\n- i هو رقم الصنف من الكتالوج بالظبط، و f رقم النكهة أو -1 لو الصنف مالوش نكهات أو العميل ماحددش نكهة، و q الكمية.\n- لو ذكر العميل أكتر من نكهة لنفس الصنف اعمل عنصر لكل نكهة بكميتها.\n- لو الكمية مش مذكورة خليها 1.\n- ماتخترعش أصناف مش في الكتالوج، وحط أي كلام مش لاقي له صنف في unknown.\nطلب العميل:\n'+text;
+ var raw=await rGem(key,pr),j=JSON.parse(raw.replace(/```json|```/g,'').trim()),items=[];
+ (j.items||[]).forEach(function(x){var i=+x.i,f=x.f==null?-1:+x.f,q=Math.round(+x.q)||1,p=P[i];if(!p||p[7]||isOut(p))return;var fl=FL(p);if(fl.length){if(!(f>=0&&fl[f]&&!fl[f][1]))f=-1}else f=-1;items.push({i:i,f:f,q:Math.max(1,Math.min(q,99)),c:[i]})});
+ return {items:items,unk:(j.unknown||[]).map(String)}}
+function rErr(m){var e=$('rerr');if(e){e.textContent=m;e.style.display=m?'block':'none'}}
+function rIn(){
+ $('rpn').innerHTML='<h2>Rahal Ai<button class="x" id="rx" type="button" aria-label="إغلاق">✕</button></h2><p class="fsub">اكتب طلبك زي ما بتتكلم وأنا هرتّبه لك، وبعدها تزوّد أو تنقّص زي ما تحب. مثال: ٥ كراتين شيبسي ملح و٣ طماطم و٢ ذرة</p><textarea id="rt" rows="5" placeholder="اكتب طلبك هنا...">'+esc(RT)+'</textarea>'+(SR&&!(CFG&&CFG.rm)?'<button class="addmore" id="rmic" type="button" style="margin-top:8px">🎤 اتكلم</button>':'')+'<div class="min" id="rerr"></div><button class="send rgold" id="rgo" type="button">حلّل طلبي 🤖</button>'}
+function openAI(){RL=[];RU=[];rIn();$('rsheet').classList.add('on')}
+function rClose(){$('rsheet').classList.remove('on');if(rrec){try{rrec.stop()}catch(e){}}}
+function rMic(){
+ if(rrec){try{rrec.stop()}catch(e){}return}
+ var r=new SR();rrec=r;r.lang='ar-EG';r.interimResults=false;
+ r.onresult=function(e){var t='';for(var i=e.resultIndex;i<e.results.length;i++)t+=e.results[i][0].transcript+' ';var ta=$('rt');if(ta)ta.value=(ta.value+' '+t).trim()};
+ r.onend=function(){rrec=null;var m=$('rmic');if(m)m.textContent='🎤 اتكلم'};r.onerror=function(){};
+ var b=$('rmic');if(b)b.textContent='⏹ وقف';try{r.start()}catch(e){rrec=null;if(b)b.textContent='🎤 اتكلم'}}
+async function rGo(){
+ var ta=$('rt'),t=ta?ta.value.trim():'';RT=t;
+ if(!t){rErr('اكتب طلبك الأول');return}
+ rErr('');var b=$('rgo');b.disabled=true;b.textContent='⏳ بحلل طلبك...';
+ var res=null;
+ if(CFG&&CFG.gk){try{res=await rAI(CFG.gk,t)}catch(e){res=null}}
+ if(!res||!res.items.length)res=rlocal(t);
+ var b2=$('rgo');if(b2){b2.disabled=false;b2.textContent='حلّل طلبي 🤖'}
+ if(!res.items.length){rErr('ما فهمتش طلبك، جرّب تكتب اسم الصنف والكمية');return}
+ RL=res.items;RU=res.unk;rRv()}
+function ropts(l){var seen={},h='<optgroup label="الأقرب">';(l.c&&l.c.length?l.c:[l.i]).forEach(function(i){if(!P[i]||seen[i])return;seen[i]=1;h+='<option value="'+i+'"'+(i==l.i?' selected':'')+'>'+esc(pname(i))+'</option>'});
+ h+='</optgroup><optgroup label="كل الأصناف">';P.forEach(function(p,i){if(seen[i]||p[7]||isOut(p))return;h+='<option value="'+i+'">'+esc(pname(i))+'</option>'});return h+'</optgroup>'}
+function rRv(){
+ RL=RL.filter(function(l){return P[l.i]});
+ if(!RL.length){rIn();return}
+ var h='<h2>Rahal Ai<button class="x" id="rx" type="button" aria-label="إغلاق">✕</button></h2><p class="fsub">دي طلباتك زي ما فهمتها. زوّد أو نقّص أو غيّر أي صنف.</p>',tot=0;
+ RL.forEach(function(l,n){var p=P[l.i],fl=FL(p),a=' data-rn="'+n+'"';tot+=l.q*p[3];
+  h+='<div class="rrow"><div class="rh"><select'+a+' data-rk="i">'+ropts(l)+'</select><button class="rdel" type="button"'+a+' data-rk="del" aria-label="حذف">🗑</button></div>';
+  if(fl.length)h+='<select'+a+' data-rk="f">'+(l.f<0?'<option value="-1" selected>— اختار النكهة —</option>':'')+fl.map(function(f,j){return f[1]?'':'<option value="'+j+'"'+(j==l.f?' selected':'')+'>'+esc(f[0])+'</option>'}).join('')+'</select>';
+  h+='<div class="rf">'+(l.amb?'<small>⚠️ اتأكد من الصنف</small>':'<small>'+l.q.toLocaleString('ar-EG')+' × '+p[3].toLocaleString('ar-EG')+' جنيه</small>')+'<b>'+money(l.q*p[3])+'</b><span class="step" style="margin:0;width:104px"><button type="button"'+a+' data-rd="1" aria-label="زيادة">+</button><span>'+l.q.toLocaleString('ar-EG')+'</span><button type="button"'+a+' data-rd="-1" aria-label="نقص">−</button></span></div></div>'});
+ if(RU.length)h+='<p class="fsub" style="margin-top:8px">ما لقيتش في الأصناف: «'+RU.map(esc).join('»، «')+'»</p>';
+ $('rpn').innerHTML=h+'<div class="tot"><span>الإجمالي</span><span>'+money(tot)+'</span></div><div class="min" id="rerr"></div><button class="send" id="rok" type="button">✅ ضيف للطلب</button><button class="addmore" id="rbk" type="button" style="margin-top:10px">← رجوع وعدّل كلامك</button>'}
+function rAdd(){
+ if(RL.some(function(l){return FL(P[l.i]).length&&l.f<0})){rErr('اختار النكهة في الأصناف اللي لسه ما اتحددتش');return}
+ RL.forEach(function(l){var k=FL(P[l.i]).length?l.i+':'+l.f:String(l.i);cart[k]=Math.min((cart[k]||0)+l.q,99)});
+ save();grid();upd();rClose();lines();$('sheet').classList.add('on')}
+$('rsheet').onclick=function(e){var t=e.target;
+ if(t==this||t.id=='rx'){rClose();return}
+ if(t.id=='rgo'){rGo();return}
+ if(t.id=='rmic'){rMic();return}
+ if(t.id=='rbk'){rIn();return}
+ if(t.id=='rok'){rAdd();return}
+ var n=t.dataset.rn;if(n==null)return;var l=RL[+n];if(!l)return;
+ if(t.dataset.rk=='del'){RL.splice(+n,1);rRv();return}
+ if(t.dataset.rd){l.q+=+t.dataset.rd;if(l.q<1)RL.splice(+n,1);else if(l.q>99)l.q=99;rRv()}};
+$('rsheet').onchange=function(e){var t=e.target,l=RL[+t.dataset.rn];if(!l)return;
+ if(t.dataset.rk=='i'){l.i=+t.value;l.f=-1;l.amb=false;rRv()}
+ else if(t.dataset.rk=='f'){l.f=+t.value;rRv()}};
+function rapply(){var h=$('raiH'),t=CFG&&CFG.rt!=null?CFG.rt:'اطلب بالكتابة أو الصوت';h.style.display=CFG&&CFG.ro?'none':'';h.textContent=('Rahal Ai 🤖 '+t).trim()}
+$('raiH').onclick=openAI;
+
+clean();tabs();grid();upd();offers();rapply();
 function loadImgs(){if(DBU.indexOf('YOUR')>=0)return;P.forEach(function(p){var k=p[8];if(!k||IMGQ[k])return;IMGQ[k]=1;
  fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;grid()}}).catch(function(){IMGQ[k]=0})});
  (D.offers||[]).forEach(function(o){var k=o.i;if(!k||IMGQ[k])return;IMGQ[k]=1;
   fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;offers()}}).catch(function(){IMGQ[k]=0})})}
-function ref(){CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';clean();save();tabs();grid();upd();offers();loadImgs()}
+function ref(){CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';clean();save();tabs();grid();upd();offers();rapply();loadImgs()}
 // ===== ربط قاعدة البيانات (Firebase Realtime Database) =====
 var DBU='abu-saied-a6b74-default-rtdb.firebaseio.com',ct=0;
 function sync(){
