@@ -459,7 +459,7 @@ function rAdd(){
  if(RL.some(function(l){return FL(P[l.i]).length&&l.f<0})){rErr('اختار النكهة في الأصناف اللي لسه ما اتحددتش');return}
  RL.forEach(function(l){var k=FL(P[l.i]).length?l.i+':'+l.f:String(l.i);cart[k]=Math.min((cart[k]||0)+l.q,99)});
  save();grid();upd();rClose();lines();$('sheet').classList.add('on')}
-$('rsheet').onclick=function(e){var t=e.target;
+$('rsheet').onclick=function(e){var t=e.target;if(t!=this){var cb=t.closest('button');if(cb)t=cb}
  if(t==this||t.id=='rx'){rClose();return}
  if(t.id=='rgo'){rGo();return}
  if(t.id=='rmic'){rMic();return}
