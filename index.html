@@ -407,8 +407,8 @@ function openAI(){RL=[];RU=[];rIn();$('rsheet').classList.add('on')}
 function rClose(){$('rsheet').classList.remove('on');if(rrec){try{rrec.stop()}catch(e){}}}
 function rMic(){
  if(rrec){try{rrec.stop()}catch(e){}return}
- var r=new SR(),ta=$('rt'),base=ta?ta.value.trim():'';rrec=r;r.lang='ar-EG';r.interimResults=true;r.continuous=true;
- r.onresult=function(e){var t='';for(var i=0;i<e.results.length;i++)t+=e.results[i][0].transcript+' ';var x=$('rt');if(x)x.value=((base?base+' ':'')+t).trim()};
+ var r=new SR();rrec=r;r.lang='ar-EG';r.interimResults=false;
+ r.onresult=function(e){var t='';for(var i=e.resultIndex;i<e.results.length;i++)t+=e.results[i][0].transcript+' ';var ta=$('rt');if(ta)ta.value=(ta.value+' '+t).trim()};
  r.onend=function(){rrec=null;var m=$('rmic');if(m)m.textContent='🎤 اتكلم'};r.onerror=function(){};
  var b=$('rmic');if(b)b.textContent='⏹ وقف';try{r.start()}catch(e){rrec=null;if(b)b.textContent='🎤 اتكلم'}}
 async function rGo(){
