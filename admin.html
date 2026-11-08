@@ -341,10 +341,90 @@ function vRun(){
  r.onerror=function(e){if(e.error=='not-allowed'||e.error=='service-not-allowed'){VON=false;toast('اسمح للمايك من إعدادات المتصفح')}else if(e.error=='network'||e.error=='audio-capture')VERR++};
  r.onend=function(){if(VR===r)VR=null;if(VON){if(VERR>20){VON=false;vUI(false);toast('فيه مشكلة في الاتصال أو المايك، الكتابة بالصوت وقفت');return}setTimeout(vRun,VERR?600:120);return}vUI(false);if(VPOL){VPOL=false;vPolish()}};
  try{r.start()}catch(x){VR=null;if(VON){VERR++;if(VERR>20){VON=false;vUI(false)}else setTimeout(vRun,400)}}}
+var VENG='',VST=null,VSID=0,VSL=[],VPEND=0,VBASE='',VAIERR=0;
+function vBeep(ac){try{var o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.value=880;g.gain.setValueAtTime(.0001,ac.currentTime);g.gain.exponentialRampToValueAtTime(.25,ac.currentTime+.02);g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+.14);o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.16)}catch(z){}}
+function vWav(f,sr){
+ var ra=sr/16000,n=Math.floor(f.length/ra),buf=new ArrayBuffer(44+n*2),v=new DataView(buf),i,j;
+ function ws(o,t){for(var q=0;q<t.length;q++)v.setUint8(o+q,t.charCodeAt(q))}
+ ws(0,'RIFF');v.setUint32(4,36+n*2,true);ws(8,'WAVE');ws(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,16000,true);v.setUint32(28,32000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);ws(36,'data');v.setUint32(40,n*2,true);
+ for(i=0;i<n;i++){var a=0,c=0,st=Math.floor(i*ra),en=Math.min(f.length,Math.floor((i+1)*ra));for(j=st;j<en;j++){a+=f[j];c++}var x=c?a/c:0;x=Math.max(-1,Math.min(1,x));v.setInt16(44+i*2,x<0?x*32768:x*32767,true)}
+ var u=new Uint8Array(buf),b='',k;for(k=0;k<u.length;k+=8192)b+=String.fromCharCode.apply(null,u.subarray(k,k+8192));return btoa(b)}
+async function gAud(key,b64){
+ var B='https://generativelanguage.googleapis.com/v1beta/',H={'Content-Type':'application/json','x-goog-api-key':key},ms=[],sv='';
+ try{sv=localStorage.getItem('abu_gm')||''}catch(z){}
+ if(sv)ms.push(sv);ms.push('gemini-flash-lite-latest','gemini-flash-latest');
+ var nm=D.p.slice(0,100).map(function(p){return p[0]}).filter(Boolean),
+ pr='اكتب بالظبط الكلام المنطوق في المقطع الصوتي ده (بالعامية المصرية، وموضوعه أصناف ونكهات وأسعار متجر جملة) بإملاء صحيح. الأرقام بالإنجليزية. ماتضيفش أي شرح أو علامات اقتباس ولا تترجم. لو مفيش كلام مفهوم ارجع نص فاضي. أسماء أصناف موجودة للاسترشاد في الإملاء: '+JSON.stringify(nm)+' والأقسام: '+JSON.stringify(D.cats);
+ for(var i=0;i<ms.length;i++){
+  var m=ms[i],ac=new AbortController(),tm=setTimeout(function(){ac.abort()},25000);
+  try{
+   var r=await fetch(B+'models/'+m+':generateContent',{method:'POST',headers:H,signal:ac.signal,body:JSON.stringify({contents:[{parts:[{text:pr},{inline_data:{mime_type:'audio/wav',data:b64}}]}],generationConfig:{temperature:0}})});
+   if(r.ok){var d=await r.json(),c=d.candidates&&d.candidates[0],t=c&&c.content&&c.content.parts?c.content.parts.map(function(p){return p.text||''}).join(''):'';try{localStorage.setItem('abu_gm',m)}catch(z){}return t.trim().replace(/^["«»“”]+|["«»“”]+$/g,'').trim()}
+   if(r.status==429)throw new Error('LIMIT');
+   var bt='';try{bt=await r.text()}catch(z){}
+   if(r.status==403||/API key|API_KEY/i.test(bt))throw new Error('KEY')}
+  finally{clearTimeout(tm)}}
+ throw new Error('NOMODEL')}
+function vAIrender(){var t=$('smt');if(!t)return;t.value=VBASE+vfix(VSL.map(function(x){return x==null?'…':x}).filter(function(x){return x!==''}).join(' '));t.scrollTop=t.scrollHeight;SMT=t.value}
+function vAIfail(err){
+ var m=err&&err.message;VAIERR++;
+ if(m=='KEY'||m=='LIMIT'||m=='NOMODEL'||VAIERR>=3){
+  if(VST&&!VST.stopping){var was=VON;vRelease();VENG='sr';
+   toast(m=='LIMIT'?'حصة الذكاء الاصطناعي خلصت، هكمل بتعرف المتصفح':m=='KEY'?'الـ API مش مظبوط، هكمل بتعرف المتصفح':'الذكاء الاصطناعي مش متاح دلوقتي، هكمل بتعرف المتصفح');
+   if(was&&VSR){VON=true;vRun()}else{VON=false;vUI(false)}}}}
+function vRelease(){
+ var s=VST;VST=null;if(!s)return;
+ try{s.pr.onaudioprocess=null;s.pr.disconnect()}catch(z){}
+ try{s.src.disconnect()}catch(z){}
+ try{s.stream.getTracks().forEach(function(t){t.stop()})}catch(z){}
+ try{s.ac.close()}catch(z){}}
+function vSend(f,sr,key,sid){
+ var idx=VSL.length;VSL.push(null);VPEND++;vAIrender();
+ var b64;try{b64=vWav(f,sr)}catch(z){VSL[idx]='';VPEND--;return}
+ gAud(key,b64).then(function(t){if(sid!=VSID)return;VSL[idx]=t;VAIERR=0}).catch(function(e){if(sid!=VSID)return;VSL[idx]='';vAIfail(e)}).then(function(){VPEND--;if(sid==VSID)vAIrender()})}
+async function vAI(key){
+ var sid=++VSID,ta=$('smt');if(!ta)return;
+ VBASE=ta.value;if(VBASE&&!/\s$/.test(VBASE))VBASE+=' ';VSL=[];VPEND=0;VAIERR=0;
+ try{
+  var AC=window.AudioContext||window.webkitAudioContext,stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}),ac=new AC();
+  if(ac.state=='suspended')await ac.resume();
+  if(sid!=VSID||!VON){stream.getTracks().forEach(function(t){t.stop()});try{ac.close()}catch(z){}return}
+  vBeep(ac);
+  var src=ac.createMediaStreamSource(stream),pr=ac.createScriptProcessor(4096,1,1),sr=ac.sampleRate,
+  S={ac:ac,src:src,pr:pr,stream:stream,seg:[],pre:[],len:0,speaking:false,silent:0,noise:.004,t0:ac.currentTime+.3,stopping:false,key:key,sid:sid,sr:sr};
+  VST=S;
+  S.flush=function(){var tot=S.len,sp=S.speaking;var arr=S.seg;S.seg=[];S.len=0;S.speaking=false;S.silent=0;
+   if(!sp||tot<sr*.4)return;var f=new Float32Array(tot),o=0;arr.forEach(function(c){f.set(c,o);o+=c.length});vSend(f,sr,key,sid)};
+  pr.onaudioprocess=function(e){
+   if(!VST||VST!==S||S.stopping)return;
+   if(ac.currentTime<S.t0)return;
+   var d=e.inputBuffer.getChannelData(0),c=new Float32Array(d.length);c.set(d);
+   var sum=0,i;for(i=0;i<c.length;i++)sum+=c[i]*c[i];var rms=Math.sqrt(sum/c.length),thr=Math.max(.012,S.noise*3);
+   if(rms>thr){if(!S.speaking){S.speaking=true;S.seg=S.pre.slice();S.len=0;S.seg.forEach(function(x){S.len+=x.length})}S.silent=0;S.seg.push(c);S.len+=c.length}
+   else{S.noise=S.noise*.95+rms*.05;
+    if(S.speaking){S.seg.push(c);S.len+=c.length;S.silent+=c.length;if(S.silent>sr*.8)S.flush()}
+    else{S.pre.push(c);if(S.pre.length>3)S.pre.shift()}}
+   if(S.speaking&&S.len>sr*12)S.flush()};
+  src.connect(pr);pr.connect(ac.destination);
+ }catch(x){
+  VON=false;vUI(false);
+  toast(x&&(x.name=='NotAllowedError'||x.name=='SecurityError')?'اسمح للمايك من إعدادات المتصفح':'مقدرتش أشغّل المايك')}}
+function vStopAI(graceful){
+ var S=VST;
+ if(!graceful){VSID++;VON=false;vRelease();vUI(false);return}
+ if(!S){VON=false;vUI(false);return}
+ S.stopping=true;S.flush();VON=false;vRelease();
+ var sid=S.sid,n=0,iv=setInterval(function(){n++;if(VPEND<=0||n>200||sid!=VSID){clearInterval(iv);if(sid==VSID)vAIrender();vUI(false)}},100)}
 function vStart(){
- if(!VSR){toast('المتصفح ده مش بيدعم الكتابة بالصوت، جرّب Chrome');return}
- VON=true;VPOL=false;VERR=0;vUI(true);vRun()}
+ if(VON||VR||VST)return;
+ var ke=$('smk'),key=ke?ke.value.trim():'',AC=window.AudioContext||window.webkitAudioContext,
+ canAI=key&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&AC&&window.btoa;
+ if(!canAI&&!VSR){toast('المتصفح ده مش بيدعم الكتابة بالصوت، جرّب Chrome');return}
+ VON=true;VPOL=false;VERR=0;vUI(true);
+ if(canAI){VENG='ai';vAI(key)}else{VENG='sr';vRun()}}
 function vStop(polish){
+ if(VENG=='ai'&&(VST||VON)){vStopAI(!!polish);return}
+ if(!polish)VSID++;
  var was=VON||!!VR;VON=false;
  if(VR){VPOL=!!polish;try{VR.stop()}catch(x){VR=null;vUI(false);if(polish)vPolish()}}
  else{vUI(false);if(polish&&was)vPolish()}}
@@ -362,7 +442,7 @@ async function vPolish(){
   if(ta2&&out&&out.length>tx.length*.5&&out.length<tx.length*2&&nl(out)<=nl(tx)&&ta2.value.trim()==tx){ta2.value=out;SMT=out}
   var e2=$('sme');if(e2){e2.style.color='var(--mu)';e2.textContent='✅ الكتابة اتظبطت'}
  }catch(x){var e3=$('sme');if(e3){e3.style.color='';e3.textContent=''}}}
-$('ov').addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('#smmic');if(b){if(VON||VR)vStop(true);else vStart();return}
+$('ov').addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('#smmic');if(b){if(VON||VR||VST)vStop(true);else if(!(VENG=='ai'&&b.classList.contains('rec')))vStart();return}
  if(e.target.id=='smx')vStop(false)});
 function smIn(t){
  vStop(false);
