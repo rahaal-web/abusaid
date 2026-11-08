@@ -441,8 +441,8 @@ async function gAud(key,b64){
  var B='https://generativelanguage.googleapis.com/v1beta/',H={'Content-Type':'application/json','x-goog-api-key':key},ms=[],sv='';
  try{sv=localStorage.getItem('rai_m')||''}catch(z){}
  if(sv)ms.push(sv);ms.push('gemini-flash-lite-latest','gemini-flash-latest');
- var nm=P.slice(0,100).map(function(p){return p[0]}).filter(Boolean),
- pr='اكتب بالظبط الكلام المنطوق في المقطع الصوتي ده (بالعامية المصرية، وموضوعه طلب أصناف وكميات من متجر جملة) بإملاء صحيح. الأرقام بالإنجليزية. ماتضيفش أي شرح أو علامات اقتباس ولا تترجم. لو مفيش كلام مفهوم ارجع نص فاضي. أسماء أصناف موجودة للاسترشاد في الإملاء: '+JSON.stringify(nm)+' والأقسام: '+JSON.stringify(CATS);
+ var vc=vCat(),
+ pr='اكتب بالظبط الكلام المنطوق في المقطع الصوتي ده (بالعامية المصرية، وموضوعه طلب أصناف وكميات من متجر جملة) بإملاء صحيح. الأرقام بالإنجليزية. ماتضيفش أي شرح أو علامات اقتباس ولا تترجم. لو مفيش كلام مفهوم ارجع نص فاضي. العميل بيقول مثلاً: «عايز كرتونة شيبسي وكرتونة دوريتوس بطعم الشطة»، وكلمة «طعم» أو «بطعم» بتيجي قبل النكهة. لو سمعت كلمة قريبة في النطق من اسم صنف أو نكهة من القوايم دي اكتبها بالاسم الصح. أسماء الأصناف: '+JSON.stringify(vc.n)+' والنكهات: '+JSON.stringify(vc.f);
  for(var i=0;i<ms.length;i++){
   var m=ms[i],ac=new AbortController(),tm=setTimeout(function(){ac.abort()},25000);
   try{
@@ -502,10 +502,23 @@ function vStopAI(graceful){
  if(!graceful){VSID++;VON=false;vRelease();vUI(false);return}
  if(!S){VON=false;vUI(false);return}
  S.stopping=true;S.flush();VON=false;vRelease();
- var sid=S.sid,n=0,iv=setInterval(function(){n++;if(VPEND<=0||n>200||sid!=VSID){clearInterval(iv);if(sid==VSID)vAIrender();vUI(false)}},100)}
+ var sid=S.sid,n=0,iv=setInterval(function(){n++;if(VPEND<=0||n>200||sid!=VSID){clearInterval(iv);if(sid==VSID){vAIrender();vUI(false);vPolish()}else vUI(false)}},100)}
 
+function vCat(){var nm=[],fl={},ff=[];P.forEach(function(p,i){if(p[7]||isOut(p))return;nm.push(pname(i));FL(p).forEach(function(f){if(!f[1]&&!fl[f[0]]){fl[f[0]]=1;ff.push(f[0])}})});return {n:nm.slice(0,150),f:ff.slice(0,200)}}
 function vfix(s){return rnd(s).replace(/\s*(?:سطر جديد|سطر تاني|سطر تانيه|السطر الجديد|صنف جديد|صنف تاني|صنف تانيه)\s*/g,'\n').replace(/\s*(?:فاصلة|فاصله)\s*/g,'، ').replace(/[ \t]{2,}/g,' ').replace(/ *\n */g,'\n')}
-var VR=null,VON=false,VERR=0,VWL=null;
+var VPOL=false;
+async function vPolish(){
+ var ta=$('rt');if(!ta||!CFG||!CFG.gk)return;
+ var tx=ta.value.trim();if(!tx)return;
+ VPOL=true;var l=$('rmvl');if(l)l.textContent='✨ بظبط الكلام...';
+ try{
+  var vc=vCat(),pr='ده طلب اتكتب بالإملاء الصوتي (بالعامية المصرية) لمتجر جملة، وممكن فيه كلمات اتسمعت غلط. صحّح الكلمات اللي اتسمعت غلط وخليها اسم الصنف أو النكهة الصح من القوايم، من غير ما تغيّر المعنى أو الأرقام أو الكميات. مثال: «بتاع مشاطة» تبقى «بطعم الشطة». ماتضيفش ولا تحذف أصناف أو كميات، وماتزودش عدد الأسطر. اكتب الأرقام بالإنجليزية.\nأسماء الأصناف: '+JSON.stringify(vc.n)+'\nالنكهات: '+JSON.stringify(vc.f)+'\nأرجع JSON فقط بالشكل {"text":""}\nالنص:\n'+tx,
+  raw=await rGem(CFG.gk,pr),j=JSON.parse(raw.replace(/```json|```/g,'').trim()),out=String(j.text||'').trim(),
+  nl=function(x){return x.split(/\n+/).filter(function(q){return q.trim()}).length},t2=$('rt');
+  if(t2&&out&&out.length>tx.length*.5&&out.length<tx.length*2&&nl(out)<=nl(tx)&&t2.value.trim()==tx){t2.value=out;RT=out}
+ }catch(x){}
+ VPOL=false;var l2=$('rmvl');if(l2&&!VON&&!VST&&!VR)l2.textContent='اطلب بالصوت'}
+var VR=null,VON=false,VERR=0,VWL=null,VGP=false;
 function vUI(on){var b=$('rmic'),l=$('rmvl');if(b)b.classList.toggle('rec',on);if(l)l.textContent=on?'بسمعك... دوس للإيقاف':'اطلب بالصوت';
  try{if(on){if(navigator.wakeLock&&!VWL)navigator.wakeLock.request('screen').then(function(x){VWL=x;x.addEventListener('release',function(){VWL=null})}).catch(function(){})}else if(VWL){VWL.release();VWL=null}}catch(z){}}
 function vRun(){
@@ -520,7 +533,7 @@ function vRun(){
   var lf2=fin.length?fin[fin.length-1]:'';if(lf2&&im.indexOf(lf2)==0)im=im.slice(lf2.length).trim();else if(lf2&&im.length>3&&lf2.indexOf(im)>-1)im='';
   t2.value=base+vfix(fin.join(' ')+(im?' '+im:''));t2.scrollTop=t2.scrollHeight;RT=t2.value};
  r.onerror=function(e){if(e.error=='not-allowed'||e.error=='service-not-allowed'){VON=false;rErr('اسمح للمايك من إعدادات المتصفح')}else if(e.error=='network'||e.error=='audio-capture')VERR++};
- r.onend=function(){if(VR===r)VR=null;if(VON){if(VERR>20){VON=false;vUI(false);rErr('فيه مشكلة في الاتصال أو المايك، التسجيل وقف');return}setTimeout(vRun,VERR?600:120);return}vUI(false)};
+ r.onend=function(){if(VR===r)VR=null;if(VON){if(VERR>20){VON=false;vUI(false);rErr('فيه مشكلة في الاتصال أو المايك، التسجيل وقف');return}setTimeout(vRun,VERR?600:120);return}vUI(false);if(VGP){VGP=false;vPolish()}};
  try{r.start()}catch(x){VR=null;if(VON){VERR++;if(VERR>20){VON=false;vUI(false)}else setTimeout(vRun,400)}}}
 function vCanAI(){var AC=window.AudioContext||window.webkitAudioContext;return !!(CFG&&CFG.gk&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&AC&&window.btoa)}
 function vStart(){
@@ -532,10 +545,10 @@ function vStart(){
 function vStop(graceful){
  if(VENG=='ai'&&(VST||VON)){vStopAI(!!graceful);return}
  if(!graceful)VSID++;
- VON=false;if(VR){try{VR.stop()}catch(x){VR=null;vUI(false)}}else vUI(false)}
-function rMic(){var b=$('rmic');if(VON||VR||VST)vStop(true);else if(!(VENG=='ai'&&b&&b.classList.contains('rec')))vStart()}
+ VGP=!!graceful;VON=false;if(VR){try{VR.stop()}catch(x){VR=null;vUI(false);if(VGP){VGP=false;vPolish()}}}else vUI(false)}
+function rMic(){var b=$('rmic');if(VPOL)return;if(VON||VR||VST)vStop(true);else if(!(VENG=='ai'&&b&&b.classList.contains('rec')))vStart()}
 async function rGo(){
- if(VON||VR||VST||VPEND>0){rErr('وقّف التسجيل واستنى لحد ما الكلام يتكتب، وبعدين دوس حلّل');return}
+ if(VON||VR||VST||VPEND>0||VPOL){rErr('وقّف التسجيل واستنى لحد ما الكلام يتكتب، وبعدين دوس حلّل');return}
  var ta=$('rt'),t=ta?ta.value.trim():'';RT=t;
  if(!t){rErr('اكتب طلبك الأول');return}
  rErr('');var b=$('rgo');b.disabled=true;b.textContent='⏳ بحلل طلبك...';
