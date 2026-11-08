@@ -401,7 +401,7 @@ function rlocal(text){
 async function rGem(key,prompt){
  var B='https://generativelanguage.googleapis.com/v1beta/',H={'Content-Type':'application/json','x-goog-api-key':key},tried={};
  async function one(m){tried[m]=1;var ac=new AbortController(),tm=setTimeout(function(){ac.abort()},15000);
-  try{var r=await fetch(B+'models/'+m+':generateContent',{method:'POST',headers:H,signal:ac.signal,body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:.1,responseMimeType:'application/json'}})});
+  try{var r=await fetch(B+'models/'+m+':generateContent',{method:'POST',headers:H,signal:ac.signal,body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0,responseMimeType:'application/json'}})});
    if(r.ok){var d=await r.json(),c=d.candidates&&d.candidates[0],t=c&&c.content&&c.content.parts?c.content.parts.map(function(p){return p.text||''}).join(''):'';if(t){try{localStorage.setItem('rai_m',m)}catch(z){}return t}return null}
    if(r.status==429||r.status==403)throw new Error('STOP');
    var b='';try{b=await r.text()}catch(z){}if(/API key|API_KEY/i.test(b))throw new Error('STOP');return null}
@@ -414,11 +414,15 @@ async function rGem(key,prompt){
   for(i=0;i<ns.length&&i<4;i++){if(tried[ns[i]])continue;t=await one(ns[i]);if(t)return t}}
  throw new Error('NOMODEL')}
 async function rAI(key,text){
- var ls=[];P.forEach(function(p,i){if(p[7]||isOut(p))return;ls.push(i+'|'+p[0]+'|'+(p[10]||'')+'|'+FL(p).map(function(f,j){return f[1]?'':j+'='+f[0]}).filter(Boolean).join(';'))});
- var pr='أنت مساعد استلام طلبات لمتجر جملة. العميل كتب طلبه بالعامية المصرية. طابق كل صنف في كلامه مع الكتالوج واستخرج الكمية.\nالكتالوج (رقم الصنف|الاسم|الحجم|النكهات بصيغة رقم=اسم):\n'+ls.join('\n')+'\nأرجع JSON فقط بالشكل: {"items":[{"i":0,"f":-1,"q":1}],"unknown":[""]}\nالقواعد:\n- i هو رقم الصنف من الكتالوج بالظبط، و f رقم النكهة أو -1 لو الصنف مالوش نكهات أو العميل ماحددش نكهة، و q الكمية.\n- لو ذكر العميل أكتر من نكهة لنفس الصنف اعمل عنصر لكل نكهة بكميتها.\n- لو الكمية مش مذكورة خليها 1.\n- ماتخترعش أصناف مش في الكتالوج، وحط أي كلام مش لاقي له صنف في unknown.\nطلب العميل:\n'+text;
- var raw=await rGem(key,pr),j=JSON.parse(raw.replace(/```json|```/g,'').trim()),items=[];
- (j.items||[]).forEach(function(x){var i=+x.i,f=x.f==null?-1:+x.f,q=Math.round(+x.q)||1,p=P[i];if(!p||p[7]||isOut(p))return;var fl=FL(p);if(fl.length){if(!(f>=0&&fl[f]&&!fl[f][1]))f=-1}else f=-1;items.push({i:i,f:f,q:Math.max(1,Math.min(q,99)),c:[i]})});
+ var ls=[];P.forEach(function(p,i){if(p[7]||isOut(p))return;ls.push(i+'|'+p[0]+'|'+(p[10]||'-')+'|'+(p[2]||'-')+'|'+p[3]+'|'+(FL(p).map(function(f,j){return f[1]?'':j+'='+f[0]}).filter(Boolean).join(';')||'-'))});
+ var pr='أنت مساعد دقيق لاستلام طلبات متجر جملة. العميل كتب أو قال طلبه بالعامية المصرية (ممكن يكون فيه أخطاء إملائية أو أخطاء من التعرف على الصوت). طابق كل صنف في كلامه مع الكتالوج بدقة واستخرج الكمية.\nالكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|النكهات بصيغة رقم=اسم):\n'+ls.join('\n')+'\nأرجع JSON فقط بالشكل: {"items":[{"i":0,"f":-1,"q":1,"a":false,"alt":[]}],"unknown":[""]}\nالقواعد:\n- i هو رقم الصنف من الكتالوج بالظبط، و f رقم النكهة أو -1 لو الصنف مالوش نكهات أو العميل ماحددش نكهة، و q الكمية.\n- لو الكتالوج فيه أكتر من صنف بنفس الاسم (أحجام أو أسعار مختلفة) اختار بالحجم أو السعر أو العبوة اللي ذكرها العميل (زي 5 جنيه أو 10 جنيه أو كبير أو صغير). لو ماذكرش حاجة تفرّق، اعتبر الصنف غير مؤكد.\n- a تكون true لو مش متأكد من الصنف أو في أكتر من صنف ممكن يكون المقصود، وحط في alt أرقام الأصناف البديلة المحتملة (لحد 4). لو متأكد خلي a=false و alt=[].\n- لو ذكر العميل أكتر من نكهة لنفس الصنف اعمل عنصر لكل نكهة بكميتها. لو ذكر نكهة بدون كمية خلي كميتها 1.\n- لو ذكر كمية واحدة لأكتر من نكهة (مثال: «٣ شيبسي ملح وشطة») وزّعها بعدل أو خليها لكل نكهة حسب المعنى الأقرب، وماتحسبهاش مرتين.\n- الكمية بالأرقام الإنجليزية. فهم الأرقام المكتوبة بالكلام (اتنين، تلاتة، دستة=12...) والكميات زي «كرتونتين» = 2.\n- ماتخلطش بين نكهة وصنف: كلمة بعد اسم الصنف غالبًا نكهته لو موجودة في نكهات الصنف.\n- ماتخترعش أصناف أو نكهات مش في الكتالوج، وحط أي كلام مش لاقي له صنف في unknown بنصه.\nطلب العميل:\n'+text;
+ var raw=await rGem(key,pr),j=JSON.parse(raw.replace(/```json|```/g,'').trim()),items=[],seen={};
+ (j.items||[]).forEach(function(x){var i=+x.i,f=x.f==null?-1:+x.f,q=Math.round(+x.q)||1,p=P[i];if(!p||p[7]||isOut(p))return;var fl=FL(p);if(fl.length){if(!(f>=0&&fl[f]&&!fl[f][1]))f=-1}else f=-1;
+  q=Math.max(1,Math.min(q,99));var k=i+':'+f;if(seen[k]){seen[k].q=Math.min(seen[k].q+q,99);return}
+  var c=[i];(Array.isArray(x.alt)?x.alt:[]).forEach(function(a){a=+a;if(P[a]&&!P[a][7]&&!isOut(P[a])&&c.indexOf(a)<0)c.push(a)});
+  var it={i:i,f:f,q:q,c:c,amb:x.a===true&&c.length>1};seen[k]=it;items.push(it)});
  return {items:items,unk:(j.unknown||[]).map(String)}}
+
 function rErr(m){var e=$('rerr');if(e){e.textContent=m;e.style.display=m?'block':'none'}}
 function rIn(){
  vStop(false);
