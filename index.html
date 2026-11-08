@@ -297,20 +297,29 @@ $('lines').onclick=function(e){var b=e.target.closest('[data-d]');if(b){chg(b.da
 $('open').onclick=function(){lines();$('sheet').classList.add('on')};
 $('close').onclick=function(){$('sheet').classList.remove('on')};
 $('sheet').onclick=function(e){if(e.target==this)this.classList.remove('on')};
-var fi=-1;
+var fi=-1,FM=false,FD={};
 function openF(i){fi=i;flav();$('fsheet').classList.add('on')}
 function flav(){
- var p=P[fi];if(!p)return;var fl=FL(p),n=pq(fi);
+ var p=P[fi];if(!p)return;var fl=FL(p),n=FM?Object.keys(FD).reduce(function(a,j){return a+FD[j]},0):pq(fi);
  $('ftitle').textContent=pname(fi);
  $('fsub').textContent='السعر '+money(p[3])+' لكل '+CFG.unit+' · اختار الكمية من كل نكهة';
- $('flist').innerHTML=fl.map(function(f,j){var k=fi+':'+j,q=cart[k]||0;
+ $('flist').innerHTML=fl.map(function(f,j){var k=fi+':'+j,q=FM?(FD[j]||0):(cart[k]||0);
   return '<div class="frow'+(f[1]?' off':'')+'"><b>'+esc(f[0])+'</b>'+(f[1]?'<span class="sold">خلصان</span>':stp(k,q,116,1))+'</div>'}).join('');
  $('fcnt').textContent='الكمية: '+n.toLocaleString('ar-EG')+' '+CFG.unit;
  $('fsum').textContent=money(n*p[3]);
 }
-$('flist').onclick=function(e){var b=e.target.closest('[data-d]');if(b)chg(b.dataset.k,+b.dataset.d)};
-$('fclose').onclick=$('fdone').onclick=function(){$('fsheet').classList.remove('on')};
-$('fsheet').onclick=function(e){if(e.target==this)this.classList.remove('on')};
+$('flist').onclick=function(e){var b=e.target.closest('[data-d]');if(!b)return;
+ if(FM){var j=pk(b.dataset.k).f,q=(FD[j]||0)+(+b.dataset.d);if(q<=0)delete FD[j];else FD[j]=Math.min(q,99);flav();return}
+ chg(b.dataset.k,+b.dataset.d)};
+function fClose(){$('fsheet').classList.remove('on');if(FM){FM=false;rApplyF()}}
+function rOpenF(n){var l=RL[n];if(!l)return;FD={};RL.forEach(function(o){if(o.i==l.i&&o.f>=0)FD[o.f]=(FD[o.f]||0)+o.q});FM=true;fi=l.i;flav();$('fsheet').classList.add('on')}
+function rApplyF(){var i=fi,fs=Object.keys(FD).map(Number).sort(function(a,b){return a-b}),c=null,pos=-1;
+ RL.forEach(function(o,n){if(o.i==i){if(pos<0){pos=n;c=o.c}}});
+ if(pos>=0&&fs.length){var nw=fs.map(function(j){return {i:i,f:j,q:FD[j],c:c,amb:false}}),out=[];
+  RL.forEach(function(o,n){if(n==pos)nw.forEach(function(x){out.push(x)});if(o.i!=i)out.push(o)});RL=out}
+ rRv()}
+$('fclose').onclick=$('fdone').onclick=fClose;
+$('fsheet').onclick=function(e){if(e.target==this)fClose()};
 function wa(){
  var t=totals(),m='طلب جديد من الموقع 📦\n\n';
  grp().forEach(function(g){var p=P[g.i],fl=FL(p),n=pq(g.i);
@@ -441,7 +450,7 @@ function rRv(){
   h+='<div class=\"rf\">'+(l.amb?'<small>⚠️ اتأكد من الصنف</small>':'<small>'+l.q.toLocaleString('ar-EG')+' × '+p[3].toLocaleString('ar-EG')+' جنيه</small>')+'<b>'+money(l.q*p[3])+'</b><span class=\"step\" style=\"margin:0;width:104px\"><button type=\"button\"'+a+' data-rd=\"1\" aria-label=\"زيادة\">+</button><span>'+l.q.toLocaleString('ar-EG')+'</span><button type=\"button\"'+a+' data-rd=\"-1\" aria-label=\"نقص\">−</button></span></div>';
   var last=!RL[n+1]||RL[n+1].i!=l.i;
   if(!first)h+='</div>';
-  if(last){if(fl.length&&rows<avail)h+='<button class=\"addmore\" type=\"button\"'+a+' data-rk=\"more\">+ نكهة تانية</button>';h+='</div>'}
+  if(last){if(fl.length)h+='<button class=\"addmore\" type=\"button\"'+a+' data-rk=\"more\">+ نكهة تانية</button>';h+='</div>'}
  });
  if(RU.length)h+='<p class=\"fsub\" style=\"margin-top:8px\">ما لقيتش في الأصناف: «'+RU.map(esc).join('»، «')+'»</p>';
  $('rpn').innerHTML=h+'<div class=\"tot\"><span>الإجمالي</span><span>'+money(tot)+'</span></div><div class=\"min\" id=\"rerr\"></div><button class=\"send\" id=\"rok\" type=\"button\">✅ ضيف للطلب</button><button class=\"addmore\" id=\"rbk\" type=\"button\" style=\"margin-top:10px\">← رجوع وعدّل كلامك</button>'}
@@ -457,7 +466,7 @@ $('rsheet').onclick=function(e){var t=e.target;
  if(t.id=='rok'){rAdd();return}
  var n=t.dataset.rn;if(n==null)return;var l=RL[+n];if(!l)return;
  if(t.dataset.rk=='del'){RL.splice(+n,1);rRv();return}
- if(t.dataset.rk=='more'){RL.splice(+n+1,0,{i:l.i,f:-1,q:1,c:l.c,amb:false});rRv();return}
+ if(t.dataset.rk=='more'){rOpenF(+n);return}
  if(t.dataset.rd){l.q+=+t.dataset.rd;if(l.q<1)RL.splice(+n,1);else if(l.q>99)l.q=99;rRv()}};
 $('rsheet').onchange=function(e){var t=e.target,l=RL[+t.dataset.rn];if(!l)return;
  if(t.dataset.rk=='i'){var oi=l.i,ni=+t.value;RL.forEach(function(o){if(o.i==oi){o.i=ni;o.f=-1;o.amb=false}});rRv()}
