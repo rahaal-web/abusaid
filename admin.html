@@ -120,7 +120,7 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
 <div id="app" hidden>
  <div class="top"><div class="trow"><b>🔧 أبو سعيد</b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
  <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="s">⚙️ الإعدادات</button></nav>
- <div id="qw" style="display:flex;gap:8px;align-items:center"><input id="q" placeholder="🔍 دوّر على صنف"><button class="pubb" id="smb" type="button" style="flex:none;padding:5px 10px;font-size:13px;background:var(--blue)">✨ إضافة ذكية</button></div></div>
+ <div id="qw" style="display:flex;gap:8px;align-items:center"><input id="q" placeholder="🔍 دوّر على صنف"><button class="pubb" id="smb" type="button" style="flex:none;padding:5px 12px;font-size:14px;font-family:inherit;letter-spacing:.3px;background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b">Rahal Ai</button></div></div>
  <div id="v"></div>
  <div class="cred">تصميم وتطوير <b>احمد رحال</b></div>
 </div>
@@ -260,7 +260,7 @@ $('app').addEventListener('click',function(e){var t=e.target,b;
 $('app').addEventListener('change',function(e){var t=e.target;
  if(t.dataset.ov!=null){OFS()[+t.dataset.ov].x=t.checked?0:1;mark();render()}});
 // ===== إضافة ذكية (مجانية): تحليل بالذكاء الاصطناعي (Gemini المجاني) أو بقواعد بسيطة بدون إنترنت =====
-var SM=[],SMT='';
+var SM=[],SMT='',SMP='',SMI='';
 function nd(s){return String(s||'').replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)})}
 var KW='(?:في|فيه|وفيه|عنده|بسعر|سعره|سعرها|سعر|النكهات|نكهات|الطعوم|طعوم|الطعم|طعم|نكهة|عبوة|العبوة|الحجم|قسم|القسم|بدل|قبل)';
 function sfl(v){var r=[],seen={};String(v||'').split(/[,،؛;\n\/|]+/).forEach(function(x){x.split(/\s+و\s+/).forEach(function(y){y=y.trim().replace(/[.\u061B]+$/,'');if(y&&!seen[y]){seen[y]=1;r.push(y)}})});return r}
@@ -304,9 +304,25 @@ async function askGemini(key,prompt){
  if(lr.ok){var ld=await lr.json(),ns=(ld.models||[]).filter(function(m){return (m.supportedGenerationMethods||[]).indexOf('generateContent')>-1&&/flash/i.test(m.name)&&!/image|tts|live|audio|embed|exp|robotics|computer/i.test(m.name)}).map(function(m){return m.name.replace('models/','')}).sort(function(a,b){return (/lite/.test(b)?1:0)-(/lite/.test(a)?1:0)});
   for(i=0;i<ns.length&&i<4;i++){if(tried[ns[i]])continue;t=await one(ns[i]);if(t)return t}}
  throw new Error('NOMODEL')}
+function smPv(){return SMI?'<div class="ip" style="margin-top:10px"><div class="ipv" style="width:110px;height:110px"><img src="'+SMI+'" alt=""></div><div class="btns"><button class="del" id="smirm" type="button">إزالة الصورة</button></div></div>':''}
+function viaImg(url){return new Promise(function(ok,no){var im=new Image();im.crossOrigin='anonymous';im.onload=function(){var k=Math.min(1,480/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);try{ok(c.toDataURL('image/jpeg',.78))}catch(e){no(e)}};im.onerror=no;im.src=url})}
+async function genImg(desc){
+ var k='',pr=desc;try{k=localStorage.getItem('abu_gk')||''}catch(z){}
+ if(k){try{var r0=await askGemini(k,'Convert this product description (may be Arabic) into one short English prompt for a clean studio product photo. Return JSON only: {"prompt":""}\n'+desc);pr=JSON.parse(r0.replace(/```json|```/g,'').trim()).prompt||desc}catch(z){}}
+ pr+=', professional product photo, centered, plain light background, no text';
+ var url='https://image.pollinations.ai/prompt/'+encodeURIComponent(pr)+'?width=512&height=512&nologo=true&model=flux&seed='+Math.floor(Math.random()*1e6);
+ try{var r=await fetch(url);if(!r.ok)throw new Error('IMG');var b=await r.blob();if(!/image/.test(b.type))throw new Error('IMG');return await shrink(b)}
+ catch(e){return await viaImg(url)}}
+async function smImg(){
+ var d=$('smi').value.trim(),er=$('sme'),b=$('smgi');SMP=d;SMT=$('smt').value;er.textContent='';er.style.color='';
+ if(!d){er.textContent='اكتب وصف الصورة الأول';return}
+ b.disabled=true;er.style.color='var(--mu)';er.textContent='⏳ بولّد الصورة، ممكن تاخد نص دقيقة...';
+ try{SMI=await genImg(d);var pv=$('smpv');if(pv)pv.innerHTML=smPv();var e2=$('sme');if(e2)e2.textContent=''}
+ catch(x){var e3=$('sme');if(e3){e3.style.color='';e3.textContent='معرفتش أولّد الصورة دلوقتي، جرّب تاني بعد شوية'}}
+ var b2=$('smgi');if(b2)b2.disabled=false}
 function smIn(t){
  var k='';try{k=localStorage.getItem('abu_gk')||''}catch(z){}
- $('ov').innerHTML='<div class="pn"><h2>✨ إضافة ذكية<button class="x" id="smx">✕</button></h2><p class="hint">اكتب أو الصق وصف الأصناف زي ما تتكلم، وتقدر تكتب أكتر من صنف. هتراجع النتيجة قبل ما تتضاف.</p><label>وصف الأصناف</label><textarea id="smt" rows="6" placeholder="مثال: شيبسي كبير عنده 15 طعم: ملح، طماطم، شطة، جبنة، خل... كرتونة 24 كيس بسعر 260 جنيه في قسم شيبسي">'+esc(t)+'</textarea><label>API</label><input id="smk" type="password" autocomplete="off" dir="ltr" value="'+esc(k)+'"><div class="r2"><button class="pubb big" id="smai">🤖 حلّل بالذكاء الاصطناعي</button></div><button class="mini" id="smlp" style="width:100%;margin-top:10px;padding:8px">⚡ حلّل بدون ذكاء اصطناعي (سطر لكل صنف)</button><div class="err" id="sme"></div></div>';
+ $('ov').innerHTML='<div class="pn"><h2>Rahal Ai<button class="x" id="smx">✕</button></h2><p class="hint">اكتب أو الصق وصف الأصناف زي ما تتكلم، وتقدر تكتب أكتر من صنف. هتراجع النتيجة قبل ما تتضاف.</p><label>وصف الأصناف</label><textarea id="smt" rows="6" placeholder="مثال: شيبسي كبير عنده 15 طعم: ملح، طماطم، شطة، جبنة، خل... كرتونة 24 كيس بسعر 260 جنيه في قسم شيبسي">'+esc(t)+'</textarea><label>وصف صورة المنتج (اختياري)</label><textarea id="smi" rows="2" placeholder="مثال: كيس شيبسي أصفر بنكهة الملح على خلفية بيضاء">'+esc(SMP)+'</textarea><button class="pubb big" id="smgi" type="button" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b">🎨 ولّد الصورة</button><div id="smpv">'+smPv()+'</div><label>API</label><input id="smk" type="password" autocomplete="off" dir="ltr" value="'+esc(k)+'"><div class="r2"><button class="pubb big" id="smai">🤖 حلّل بالذكاء الاصطناعي</button></div><button class="mini" id="smlp" style="width:100%;margin-top:10px;padding:8px">⚡ حلّل بدون ذكاء اصطناعي (سطر لكل صنف)</button><div class="err" id="sme"></div></div>';
  $('ov').classList.add('on')}
 function smOpen(){SM=[];smIn(SMT)}
 function pk(o){var n=o.n,mp=[['طماطم',1],['شطة',1],['حار',1],['جبن',2],['برتقال',2],['خل',3],['ملح',0],['شوكولات',5],['كاكاو',5],['فراولة',6],['ذرة',7],['فشار',7]];for(var i=0;i<mp.length;i++)if(n.indexOf(mp[i][0])>-1)return mp[i][1];var h=0;for(i=0;i<n.length;i++)h+=n.charCodeAt(i);return h%PAL.length}
@@ -315,7 +331,7 @@ function smRv(){
  SM.forEach(function(o,i){
   var cs=D.cats.slice();if(o.c&&cs.indexOf(o.c)<0)cs.push(o.c);var a=' data-si="'+i+'" data-sk=';
   h+='<div class="card2"><label class="ck" style="margin:0"><input type="checkbox"'+a+'"on"'+(o.on?' checked':'')+'> إضافة'+(o.dup?' <span style="color:var(--red)">⚠️ شبهه موجود</span>':'')+'</label>'+
-  '<label>الاسم</label><input'+a+'"n" value="'+esc(o.n)+'">'+
+  (o.im?'<div class="ip" style="margin-top:8px"><div class="ipv" style="width:64px;height:64px"><img src="'+o.im+'" alt=""></div><button class="del" type="button" data-si="'+i+'" data-sk="rmim">إزالة الصورة</button></div>':'')+'<label>الاسم</label><input'+a+'"n" value="'+esc(o.n)+'">'+
   '<div class="r2"><div><label>السعر</label><input type="number" inputmode="numeric"'+a+'"p" value="'+(o.p||'')+'"></div><div><label>الحجم / النوع</label><input'+a+'"v" value="'+esc(o.v)+'"></div><div style="max-width:70px"><label>إيموجي</label><input'+a+'"e" value="'+esc(o.e)+'" style="text-align:center"></div></div>'+
   '<label>العبوة / الوصف</label><input'+a+'"d" value="'+esc(o.d)+'">'+
   '<label>القسم</label><select'+a+'"c">'+cs.map(function(c){return '<option'+(c==o.c?' selected':'')+'>'+esc(c)+'</option>'}).join('')+'</select>'+
@@ -323,7 +339,7 @@ function smRv(){
  $('ov').innerHTML=h+'<div class="r2"><button class="pubb big" id="smok">➕ إضافة المحدد</button><button class="del big" id="smbk" style="background:var(--blue)">رجوع</button></div></div>';
  $('ov').classList.add('on')}
 async function smGo(ai){
- var tx=$('smt').value.trim(),er=$('sme'),bs=[$('smai'),$('smlp')];SMT=tx;er.textContent='';er.style.color='';
+ var tx=$('smt').value.trim(),er=$('sme'),bs=[$('smai'),$('smlp')];SMT=tx;SMP=($('smi')||{value:''}).value.trim();er.textContent='';er.style.color='';
  if(!tx){er.textContent='اكتب وصف الأصناف الأول';return}
  try{
   var list;
@@ -337,7 +353,7 @@ async function smGo(ai){
   list=list.filter(function(o){return o.n});
   if(!list.length){er.style.color='';er.textContent='ما قدرتش أفهم أي صنف من النص، جرّب توضحه أكتر';return}
   list.forEach(function(o){
-   o.c=o.c?mc(o.c):(D.cats[0]||'عام');
+   o.im=SMI;o.c=o.c?mc(o.c):(D.cats[0]||'عام');
    o.dup=D.p.some(function(p){return p[0]==o.n&&(p[10]||'')==o.v&&p[1]==o.c});if(o.dup)o.on=0});
   SM=list;smRv()}
  catch(x){
@@ -349,17 +365,22 @@ $('ov').addEventListener('click',function(e){var t=e.target;
  else if(t.id=='smbk')smIn(SMT);
  else if(t.id=='smai')smGo(true);
  else if(t.id=='smlp')smGo(false);
+ else if(t.id=='smgi')smImg();
+ else if(t.id=='smirm'){SMI='';$('smpv').innerHTML=''}
+ else if(t.dataset.sk=='rmim'&&SM[+t.dataset.si]){SM[+t.dataset.si].im='';smRv()}
  else if(t.id=='smok'){
   var sel=SM.filter(function(o){return o.on&&o.n});
   if(!sel.length){toast('اختار صنف واحد على الأقل');return}
   if(sel.some(function(o){return !(o.p>0)})){toast('فيه صنف من غير سعر، اكتبه');return}
+  var imap={};
   sel.forEach(function(o){
    var k=pk(o),a=[o.n,o.c,o.d,o.p,PAL[k][1],PAL[k][2],o.e||'🥔',0,''];
    if(o.f.length)a[9]=o.f.map(function(f){return [f,0]});
    if(o.v)a[10]=o.v;if(o.o>o.p)a[11]=o.o;
+   if(o.im){if(!imap[o.im]){var nid='i'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);IMG[nid]=o.im;PEND[nid]=1;imap[o.im]=nid}a[8]=imap[o.im]}
    if(D.cats.indexOf(o.c)<0)D.cats.push(o.c);
    D.p.push(a)});
-  SM=[];SMT='';mark();closeEd();render();toast('اتضاف '+sel.length+' صنف ✅ لا تنسى تدوس نشر')}});
+  SM=[];SMT='';SMP='';SMI='';mark();closeEd();render();toast('اتضاف '+sel.length+' صنف ✅ لا تنسى تدوس نشر')}});
 $('ov').addEventListener('change',function(e){var t=e.target;if(t.dataset.sk==null)return;
  var o=SM[+t.dataset.si],k=t.dataset.sk;if(!o)return;
  if(k=='on')o.on=t.checked?1:0;else if(k=='p')o.p=+t.value||0;else if(k=='f'){o.f=sfl(t.value)}else o[k]=t.value.trim()});
