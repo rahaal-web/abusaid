@@ -143,41 +143,29 @@ h1 small{display:block;font-size:24px;letter-spacing:2px;text-shadow:2px 2px 0 v
 .rf{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .rf small{color:var(--mu);font-weight:800}
 .rdel{flex:none;background:var(--red);color:#fff;border:3px solid var(--ink);border-radius:10px;width:40px;height:38px;font-size:16px}
+.pn.rchat{display:flex;flex-direction:column;height:92%;overflow:hidden}
+.pn.rchat>*{flex-shrink:0}
+.pn.rchat>.rcm{flex:1 1 auto;min-height:0}
+.rcm{overflow:auto;display:flex;flex-direction:column;gap:8px;padding:8px 2px}
+.rcb{max-width:88%;padding:8px 12px;border:3px solid var(--ink);border-radius:16px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.rcb.u{align-self:flex-start;background:var(--blue);color:#fff}
+.rcb.a{align-self:flex-end;background:#fff;color:#1b1b1b}
+.rcb small{color:#5c5238}
+.rcd{margin:8px 0 0;padding:8px 10px;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:14px}
+.rcl{max-height:104px;overflow:auto}
+.rcr{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:2px dashed var(--ink);font-size:13.5px}
+.rcr:last-child{border-bottom:0}
+.rw{color:var(--red);font-weight:800}
+.rct{display:flex;justify-content:space-between;font-weight:800;padding-top:6px}
+.rca{display:flex;gap:8px;margin-top:6px}
+.rca .send{margin:0;width:auto;flex:1;padding:8px;font-size:16px}
+.rca .rdel{width:48px;height:auto}
+.rcin{display:flex;gap:8px;align-items:stretch}
+.rcin textarea{flex:1;resize:none}
+.rcin .send{margin:0;width:auto;flex:none;padding:0 16px;font-size:16px}
+.vmic.sm{height:44px;margin:8px 0 6px}.vmic.sm.rec{height:52px}
 
-/* ===== ستايلات الموقع (بتتغير من لوحة التحكم > التصميم) ===== */
-html[data-st="soft"][lang]{--bg:#f7e9d9;--paper:#fffaf3;--ink:#2e1c14;--red:#b9502e;--blue:#b9502e;--green:#b9502e;--mu:#8c7262;--line:rgba(120,72,44,.16);--inp:#fff;--onac:#fff;--pbg:#fdeedd;--warn:#d64545;--sh:0 8px 22px rgba(120,72,44,.14);--sh2:0 3px 10px rgba(120,72,44,.2)}
-html[data-st="night"][lang]{--bg:#15110c;--paper:#211b14;--ink:#f5e9d0;--red:#f0b03a;--blue:#f0b03a;--green:#f0b03a;--mu:#b9a784;--line:rgba(255,220,160,.16);--inp:#2c2419;--onac:#1b1209;--pbg:#2c241a;--warn:#e2574c;--sh:0 8px 22px rgba(0,0,0,.5);--sh2:0 3px 10px rgba(0,0,0,.5)}
-html[data-st="fresh"][lang]{--bg:#eaf5ee;--paper:#fff;--ink:#16301f;--red:#1f9d5c;--blue:#1f9d5c;--green:#1f9d5c;--mu:#5f7d6b;--line:rgba(30,90,60,.16);--inp:#fff;--onac:#fff;--pbg:#f1f9f4;--warn:#d64545;--sh:0 8px 22px rgba(30,90,60,.14);--sh2:0 3px 10px rgba(30,90,60,.22)}
-html[data-sf] body{background-image:none}
-html[data-sf] h1{font-family:Cairo,sans-serif;font-weight:800;text-shadow:none;font-size:46px}
-html[data-sf] h1 small{text-shadow:none}
-html[data-sf] :is(.price,.tot,.otitle,.slide h3,.pn h2,.step span,.spr,.fcount){font-family:Cairo,sans-serif;font-weight:800}
-html[data-sf] :is(.badge,.kinds span,.perks span,.cats button,.card,.add,.step,.bar button,.send,.min,.slide,.stag,.spr,.sbtn,.simg,.vmic,.rai,.x,.addmore,.rdel,.dsc,.pn input,.pn textarea,.pn select,.fpick,.rgold,.vp){border:1px solid var(--line);box-shadow:none;transform:none}
-html[data-sf] :is(.card,.slide,.bar button){box-shadow:var(--sh)}
-html[data-sf] :is(.add,.send,.cats button,.perks span,.kinds span,.rai,.rgold,.spr,.step){box-shadow:var(--sh2)}
-html[data-sf] :is(.add,.send,.bar button):active{transform:scale(.97)}
-html[data-sf] .card{border-radius:22px}
-html[data-sf] .slide{border-radius:24px;color:#1b1b1b}
-html[data-sf] .slide :is(h3,p){color:#1b1b1b}
-html[data-sf] :is(.add,.send){border-radius:16px}
-html[data-sf] .bar button{border-radius:22px}
-html[data-sf] .pic{border-bottom:0;background:var(--pbg)}
-html[data-sf] .cats{background:var(--bg);border-bottom:1px solid var(--line)}
-html[data-sf] .cats button.on{background:var(--red);color:var(--onac);border-color:transparent}
-html[data-sf] .cats button.rai,html[data-sf] .rai,html[data-sf] .rgold{background:var(--red);color:var(--onac);border-color:transparent}
-html[data-sf] :is(.add,.send,.bar button,.addmore,.nfl,.dsc,.stag,.x,.step,.step button,.badge,.kinds span){color:var(--onac)}
-html[data-sf] :is(.min,.rdel){background:var(--warn);color:#fff}
-html[data-sf] .bar em{background:rgba(255,255,255,.92);color:#2b1a10}
-html[data-sf] .pn{border:0;border-radius:28px 28px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.2)}
-html[data-sf] :is(.row,.frow,.rrow){border-bottom:1px solid var(--line)}
-html[data-sf] :is(.pn input,.pn textarea,.pn select,.fpick,.vmic){background:var(--inp);color:var(--ink);border-radius:14px}
-html[data-sf] .dots i{border:2px solid var(--red)}
-html[data-sf] .dots i.on{background:var(--red)}
-html[data-sf] .vp{border-radius:10px}
-html[data-st="soft"] .logo img,html[data-st="fresh"] .logo img{-webkit-mask-image:none;mask-image:none;width:44%;max-width:170px;border-radius:30px;box-shadow:var(--sh);margin:10px auto 14px}
 </style>
-<script>try{var _t=localStorage.getItem('st');if(_t&&_t!='classic'){var _h=document.documentElement;_h.setAttribute('data-st',_t);_h.setAttribute('data-sf','1')}}catch(e){}</script>
-
 <!-- PWA: install support -->
 <script>
 (function(){
@@ -459,9 +447,9 @@ async function rAI(key,text){
 
 function rErr(m){var e=$('rerr');if(e){e.textContent=m;e.style.display=m?'block':'none'}}
 function rIn(){
- vStop(false);
+ vStop(false);RMODE='old';$('rpn').className='pn';
  $('rpn').innerHTML='<h2>Rahal Ai<button class="x" id="rx" type="button" aria-label="إغلاق">✕</button></h2><p class="fsub">اكتب طلبك زي ما بتتكلم وأنا هرتّبه لك، وبعدها تزوّد أو تنقّص زي ما تحب. مثال: ٥ كراتين شيبسي ملح و٣ طماطم و٢ ذرة</p><textarea id="rt" rows="5" placeholder="اكتب طلبك هنا...">'+esc(RT)+'</textarea>'+((SR||vCanAI())&&!(CFG&&CFG.rm)?'<button class="vmic" id="rmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="rmvl">اطلب بالصوت</span></button>':'')+'<div class="min" id="rerr"></div><button class="send rgold" id="rgo" type="button">حلّل طلبي 🤖</button>'}
-function openAI(){RL=[];RU=[];rIn();$('rsheet').classList.add('on')}
+function openAI(){chOpen();$('rsheet').classList.add('on')}
 function rClose(){$('rsheet').classList.remove('on');vStop(false)}
 var VENG='',VST=null,VSID=0,VSL=[],VPEND=0,VBASE='',VAIERR=0;
 function vBeep(ac){try{var o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.value=880;g.gain.setValueAtTime(.0001,ac.currentTime);g.gain.exponentialRampToValueAtTime(.25,ac.currentTime+.02);g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+.14);o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.16)}catch(z){}}
@@ -592,11 +580,103 @@ async function rGo(){
  var b2=$('rgo');if(b2){b2.disabled=false;b2.textContent='حلّل طلبي 🤖'}
  if(!res.items.length){rErr('ما فهمتش طلبك، جرّب تكتب اسم الصنف والكمية');return}
  RL=res.items;RU=res.unk;rRv()}
+// ===== شات Rahal Ai للعملاء: الطلب بالمحادثة =====
+var RMODE='chat',CH={msgs:[],busy:0,nf:0};
+function chReset(){CH.msgs=[];CH.busy=0;CH.nf=0;RL=[];RU=[];RT=''}
+function rCat(){var ls=[];P.forEach(function(p,i){if(p[7]||isOut(p))return;ls.push(i+'|'+p[0]+'|'+(p[10]||'-')+'|'+(p[2]||'-')+'|'+p[3]+'|'+(FL(p).map(function(f,j){return f[1]?'':j+'='+f[0]}).filter(Boolean).join(';')||'-'))});return ls.join('\n')}
+function rNorm(j){
+ var items=[],seen={};
+ (Array.isArray(j.items)?j.items:[]).forEach(function(x){var i=+x.i,f=x.f==null?-1:+x.f,q=Math.round(+x.q)||1,p=P[i];if(!p||p[7]||isOut(p))return;var fl=FL(p);if(fl.length){if(!(f>=0&&fl[f]&&!fl[f][1]))f=-1}else f=-1;
+  q=Math.max(1,Math.min(q,99));var k=i+':'+f;if(seen[k]){seen[k].q=Math.min(seen[k].q+q,99);return}
+  var c=[i];(Array.isArray(x.alt)?x.alt:[]).forEach(function(a){a=+a;if(P[a]&&!P[a][7]&&!isOut(P[a])&&c.indexOf(a)<0)c.push(a)});
+  var it={i:i,f:f,q:q,c:c,amb:x.a===true&&c.length>1};seen[k]=it;items.push(it)});
+ return chFix(items)}
+function chFix(L){var has={};L.forEach(function(o){if(o.f>=0)has[o.i]=1});return L.filter(function(o){return !(o.f<0&&has[o.i])})}
+function chOpen(){
+ vStop(false);RMODE='chat';
+ var p=$('rpn');p.className='pn rchat';
+ p.innerHTML='<h2>💬 Rahal Ai<button class="x" id="rx" type="button" aria-label="إغلاق">✕</button></h2>'+
+  '<div id="chm" class="rcm"></div><div id="chd"></div>'+
+  (((SR||vCanAI())&&!(CFG&&CFG.rm))?'<button class="vmic sm" id="rmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="rmvl">اطلب بالصوت</span></button>':'')+
+  '<div class="rcin"><textarea id="rt" rows="2" placeholder="اكتب هنا...">'+esc(RT)+'</textarea><button class="send rgold" id="chsend" type="button">إرسال</button></div>'+
+  '<div class="min" id="rerr"></div>'+
+  '<button class="addmore" id="chold" type="button" style="align-self:flex-start;margin-top:6px">✍️ الطلب القديم (كتابة مرة واحدة)</button>';
+ chRender()}
+function chRender(){
+ var m=$('chm');if(!m)return;var h='';
+ if(!CH.msgs.length)h='<div class="rcb a">أهلًا 👋 أنا Rahal Ai. قولّي عايز تطلب إيه وكام كرتونة، وأنا هرتّب لك الطلب وأسألك عن الناقص (النكهة أو الحجم).<br><small>مثال: «٥ كراتين شيبسي ملح و٣ طماطم و٢ ذرة»</small></div>';
+ CH.msgs.forEach(function(x){h+='<div class="rcb '+x.r+'">'+esc(x.t)+'</div>'});
+ if(CH.busy)h+='<div class="rcb a">⏳ بفكّر...</div>';
+ m.innerHTML=h;m.scrollTop=m.scrollHeight;
+ var d=$('chd');if(!d)return;
+ if(!RL.length){d.innerHTML='';return}
+ var tot=0,rows='';
+ RL.forEach(function(l){var p=P[l.i];if(!p)return;var fl=FL(p),fn=l.f>=0&&fl[l.f]?fl[l.f][0]:'';tot+=l.q*p[3];
+  rows+='<div class="rcr"><span>'+esc(pname(l.i))+(fn?' · '+esc(fn):(fl.length?' · <b class="rw">النكهة؟</b>':''))+(l.amb?' <b class="rw">⚠️</b>':'')+'</span><span>'+l.q.toLocaleString('ar-EG')+' ×</span></div>'});
+ d.innerHTML='<div class="rcd"><b>📝 طلبك لحد دلوقتي</b><div class="rcl">'+rows+'</div><div class="rct"><span>الإجمالي</span><span>'+money(tot)+'</span></div><div class="rca"><button class="send" id="chrv" type="button">✅ راجع وضيف للطلب</button><button class="rdel" id="chnw" type="button" aria-label="مسح">🗑</button></div></div>'}
+function chPrompt(){
+ var dr=RL.map(function(l){return {i:l.i,f:l.f,q:l.q}}),
+ tr=CH.msgs.slice(-14).map(function(x){return (x.r=='u'?'العميل: ':'المساعد: ')+x.t}).join('\n');
+ return 'أنت «Rahal Ai» مساعد متجر جملة اسمه «أبو سعيد». بتكلم العميل بالعامية المصرية بشكل ودود ومختصر (سطرين بالكتير)، ومهمتك تاخد طلبه بالمحادثة وترتبه من كتالوج المتجر. العميل ممكن يكتب بأخطاء إملائية أو أخطاء من التعرف على الصوت، فطابق بدقة.\n'+
+ 'الكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|النكهات بصيغة رقم=اسم):\n'+rCat()+'\n'+
+ 'ارجع JSON فقط (من غير أي كلام برّاه) بالشكل: {"reply":"","items":[{"i":0,"f":-1,"q":1,"a":false,"alt":[]}],"unknown":[""],"clear":false,"action":"none"}\n'+
+ 'القواعد:\n'+
+ '- items هي الطلب الكامل الحالي في كل رد: ابدأ من «الطلب الحالي»، طبّق عليه آخر كلام العميل (إضافة أو تعديل كمية أو حذف)، وارجعه كله. ماتشيلش صنف غير لو العميل طلب ده صراحة، ولو شال كل الأصناف خلّي clear=true.\n'+
+ '- i هو رقم الصنف من الكتالوج بالظبط، و f رقم النكهة أو -1 لو الصنف مالوش نكهات أو العميل ماحددش، و q الكمية بالأرقام الإنجليزية (فهم الأرقام بالكلام: اتنين، تلاتة، دستة=12، كرتونتين=2).\n'+
+ '- لو الكتالوج فيه أكتر من صنف بنفس الاسم (أحجام أو أسعار مختلفة) اختار بالحجم أو السعر اللي ذكره العميل (زي 5 جنيه أو 10 جنيه أو كبير أو صغير). لو ماذكرش حاجة تفرّق اعتبره غير مؤكد: a=true وحط في alt الأصناف البديلة (لحد 4) واسأله هو قصده أنهي واحد.\n'+
+ '- لو الصنف ليه نكهات والعميل ماحددش نكهة اسأله عن النكهة (اذكر له كام نكهة منها بالكتير). لو قال أي نكهة أو مش فارق سيب f=-1 وقوله هيختارها وهو بيراجع الطلب. لو ذكر أكتر من نكهة لنفس الصنف اعمل عنصر لكل نكهة بكميتها، ولو ذكر نكهة بدون كمية خلّي كميتها 1.\n'+
+ '- اسأل سؤال واحد بس في المرة، وماتسألش عن حاجة العميل قالها.\n'+
+ '- ماتخترعش أصناف ولا نكهات ولا أسعار مش في الكتالوج. أي كلام مش لاقي له صنف حطه في unknown بنصه وقوله في reply إنه مش موجود. ماتذكرش أسعار في reply لأن التطبيق بيعرضها.\n'+
+ '- لما الطلب كله يبقى واضح (كل صنف له نكهته لو له نكهات) لخّصه في reply في جملة واسأله «أراجع الطلب ونضيفه؟».\n'+
+ '- action تبقى "review" بس لو العميل وافق صراحة (قال أيوه أو تمام أو خلاص أو كده بس أو راجع أو يلا) والطلب مش فاضي، غير كده تبقى "none".\n'+
+ '- لو العميل سأل في حاجة بعيدة عن الطلب رد بجملة قصيرة وارجّعه للطلب، وارجع الطلب الحالي زي ما هو.\n'+
+ 'الطلب الحالي: '+JSON.stringify(dr)+'\nالمحادثة:\n'+tr}
+function chLocal(t){
+ var r=rlocal(t),names=[],go=false;
+ r.items.forEach(function(x){var e=null;RL.forEach(function(o){if(o.i==x.i&&o.f==x.f)e=o});
+  if(e)e.q=Math.min(e.q+x.q,99);else RL.push({i:x.i,f:x.f,q:x.q,c:x.c,amb:x.amb});
+  var p=P[x.i],fl=FL(p);names.push(x.q.toLocaleString('ar-EG')+' × '+pname(x.i)+(x.f>=0&&fl[x.f]?' · '+fl[x.f][0]:''))});
+ RL=chFix(RL);RU=r.unk;
+ if(!r.items.length&&RL.length&&/^(?:ايوه|تمام|خلاص|يلا|كده|راجع|ضيف|اضف|ماشي|اه)(?:\s|$)/.test(rn(t)))go=true;
+ var m='';
+ if(names.length)m='ضفتلك:\n'+names.join('\n');
+ if(r.unk.length)m+=(m?'\n':'')+'ما لقيتش في الأصناف: «'+r.unk.join('»، «')+'»';
+ if(go)m='تمام، هراجع معاك الطلب 👌';
+ else if(!names.length&&!r.unk.length)m='ما فهمتش طلبك، جرّب تكتب اسم الصنف والكمية.';
+ else if(names.length)m+='\nتزوّد حاجة؟ ولو خلصت دوس «راجع وضيف للطلب».';
+ return {m:m,go:go}}
+async function chSend(){
+ if(CH.busy)return;
+ if(VON||VR||VST||VPEND>0||VPOL){rErr('وقّف التسجيل واستنى لحد ما الكلام يتكتب، وبعدين دوس إرسال');return}
+ var ta=$('rt'),t=ta?ta.value.trim():'';if(!t)return;
+ rErr('');CH.msgs.push({r:'u',t:t});ta.value='';RT='';CH.busy=1;chRender();
+ var ok=false;
+ if(CFG&&CFG.gk){
+  try{
+   var raw=await rGem(CFG.gk,chPrompt()),j=JSON.parse(raw.replace(/```json|```/g,'').trim());
+   if(Array.isArray(j))j={items:j};
+   var L=rNorm(j);
+   if(L.length||j.clear===true||!RL.length)RL=L;
+   RU=(Array.isArray(j.unknown)?j.unknown:[]).map(String);
+   CH.msgs.push({r:'a',t:String(j.reply||'تمام')});
+   CH.busy=0;ok=true;chRender();
+   if(j.action=='review'&&RL.length)chReview()}
+  catch(x){ok=false}}
+ if(!ok){
+  var lr=chLocal(t),pre='';
+  if(CFG&&CFG.gk&&!CH.nf){CH.nf=1;pre='الذكاء الاصطناعي مش متاح دلوقتي فرتّبت طلبك بالطريقة العادية.\n'}
+  CH.msgs.push({r:'a',t:pre+lr.m});CH.busy=0;chRender();
+  if(lr.go)chReview()}}
+function chReview(){
+ vStop(false);
+ if(!RL.length){rErr('الطلب فاضي، اكتب اللي عايزه الأول');return}
+ rRv()}
+$('rsheet').addEventListener('keydown',function(e){if(e.key=='Enter'&&!e.shiftKey&&!e.isComposing&&RMODE=='chat'&&e.target&&e.target.id=='rt'&&window.matchMedia&&matchMedia('(hover:hover) and (pointer:fine)').matches){e.preventDefault();chSend()}});
 function ropts(l){var seen={},h='<optgroup label="الأقرب">';(l.c&&l.c.length?l.c:[l.i]).forEach(function(i){if(!P[i]||seen[i])return;seen[i]=1;h+='<option value="'+i+'"'+(i==l.i?' selected':'')+'>'+esc(pname(i))+'</option>'});
  h+='</optgroup><optgroup label="كل الأصناف">';P.forEach(function(p,i){if(seen[i]||p[7]||isOut(p))return;h+='<option value="'+i+'">'+esc(pname(i))+'</option>'});return h+'</optgroup>'}
 function rRv(){
- RL=RL.filter(function(l){return P[l.i]});
- if(!RL.length){rIn();return}
+ $('rpn').className='pn';RL=RL.filter(function(l){return P[l.i]});
+ if(!RL.length){if(RMODE=='old')rIn();else chOpen();return}
  var ord=[],gm={};
  RL.forEach(function(l){var p=P[l.i];if(!gm[l.i]){gm[l.i]=[l];ord.push(l.i)}else if(!FL(p).length){gm[l.i][0].q=Math.min(gm[l.i][0].q+l.q,99)}else gm[l.i].push(l)});
  RL=[];ord.forEach(function(i){gm[i].forEach(function(l){RL.push(l)})});
@@ -615,16 +695,20 @@ function rRv(){
   if(last){if(fl.length)h+='<button class=\"addmore\" type=\"button\"'+a+' data-rk=\"more\">+ نكهة تانية</button>';h+='</div>'}
  });
  if(RU.length)h+='<p class=\"fsub\" style=\"margin-top:8px\">ما لقيتش في الأصناف: «'+RU.map(esc).join('»، «')+'»</p>';
- $('rpn').innerHTML=h+'<div class=\"tot\"><span>الإجمالي</span><span>'+money(tot)+'</span></div><div class=\"min\" id=\"rerr\"></div><button class=\"send\" id=\"rok\" type=\"button\">✅ ضيف للطلب</button><button class=\"addmore\" id=\"rbk\" type=\"button\" style=\"margin-top:10px\">← رجوع وعدّل كلامك</button>'}
+ $('rpn').innerHTML=h+'<div class=\"tot\"><span>الإجمالي</span><span>'+money(tot)+'</span></div><div class=\"min\" id=\"rerr\"></div><button class=\"send\" id=\"rok\" type=\"button\">✅ ضيف للطلب</button><button class=\"addmore\" id=\"rbk\" type=\"button\" style=\"margin-top:10px\">'+(RMODE=='old'?'← رجوع وعدّل كلامك':'← رجوع للمحادثة')+'</button>'}
 function rAdd(){
  if(RL.some(function(l){return FL(P[l.i]).length&&l.f<0})){rErr('اختار النكهة في الأصناف اللي لسه ما اتحددتش');return}
  RL.forEach(function(l){var k=FL(P[l.i]).length?l.i+':'+l.f:String(l.i);cart[k]=Math.min((cart[k]||0)+l.q,99)});
- save();grid();upd();rClose();lines();$('sheet').classList.add('on')}
+ save();grid();upd();chReset();rClose();lines();$('sheet').classList.add('on')}
 $('rsheet').onclick=function(e){var t=e.target;if(t!=this){var cb=t.closest('button');if(cb)t=cb}
  if(t==this||t.id=='rx'){rClose();return}
  if(t.id=='rgo'){rGo();return}
+  if(t.id=='chsend'){chSend();return}
+  if(t.id=='chrv'){chReview();return}
+  if(t.id=='chnw'){if(confirm('تمسح المحادثة والطلب؟')){chReset();chRender()}return}
+  if(t.id=='chold'){RL=[];RU=[];rIn();return}
  if(t.id=='rmic'){rMic();return}
- if(t.id=='rbk'){rIn();return}
+ if(t.id=='rbk'){if(RMODE=='old')rIn();else chOpen();return}
  if(t.id=='rok'){rAdd();return}
  var n=t.dataset.rn;if(n==null)return;var l=RL[+n];if(!l)return;
  if(t.dataset.rk=='del'){RL.splice(+n,1);rRv();return}
@@ -641,8 +725,7 @@ function loadImgs(){if(DBU.indexOf('YOUR')>=0)return;P.forEach(function(p){var k
  fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;grid()}}).catch(function(){IMGQ[k]=0})});
  (D.offers||[]).forEach(function(o){var k=o.i;if(!k||IMGQ[k])return;IMGQ[k]=1;
   fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;offers()}}).catch(function(){IMGQ[k]=0})})}
-function applyTheme(){var t=(CFG&&CFG.theme)||'classic',h=document.documentElement;if(t=='classic'){h.removeAttribute('data-st');h.removeAttribute('data-sf')}else{h.setAttribute('data-st',t);h.setAttribute('data-sf','1')}try{localStorage.setItem('st',t)}catch(e){}}
-function ref(){applyTheme();CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';clean();save();tabs();grid();upd();offers();rapply();loadImgs()}
+function ref(){CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';clean();save();tabs();grid();upd();offers();rapply();loadImgs()}
 // ===== ربط قاعدة البيانات (Firebase Realtime Database) =====
 var DBU='abu-saied-a6b74-default-rtdb.firebaseio.com',ct=0;
 function sync(){
