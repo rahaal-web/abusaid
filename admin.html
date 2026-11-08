@@ -72,6 +72,13 @@ textarea{width:100%;min-width:0;font:inherit;font-weight:600;background:#fff;col
 .vmic.rec .vb i:nth-child(2){animation-delay:.1s}.vmic.rec .vb i:nth-child(3){animation-delay:.2s}.vmic.rec .vb i:nth-child(4){animation-delay:.3s}.vmic.rec .vb i:nth-child(5){animation-delay:.4s}
 @keyframes vbar{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1.5)}}
 @keyframes vring{0%{box-shadow:3px 3px 0 var(--ink),0 0 0 0 rgba(255,75,62,.55)}100%{box-shadow:3px 3px 0 var(--ink),0 0 0 14px rgba(255,75,62,0)}}
+.tb{overflow-x:auto;scrollbar-width:none}.tb::-webkit-scrollbar{display:none}.tb button{flex:1 0 auto;padding:6px 9px}
+.kcs{display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px;scrollbar-width:none}.kcs::-webkit-scrollbar{display:none}
+.kcs button{flex:none;background:var(--paper);border:3px solid var(--ink);border-radius:999px;padding:3px 12px;font-weight:800;font-size:13px}.kcs button.on{background:var(--ink);color:var(--bg)}
+.kv{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.kv button{background:var(--blue);color:#fff;border:2px solid var(--ink);border-radius:10px;padding:2px 10px;font-weight:800;font-size:12.5px;box-shadow:2px 2px 0 var(--ink)}
+.kv button.dn{background:var(--green)}
+.kit{display:flex;gap:10px;align-items:flex-start;background:var(--paper);border:3px solid var(--ink);border-radius:14px;padding:8px;margin-bottom:8px;box-shadow:3px 3px 0 var(--ink)}
 </style><!-- PWA: install support -->
 <script>
 (function(){
@@ -128,7 +135,7 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
 <form class="login" id="lf"><h3>🔧 لوحة التحكم</h3><div style="font-weight:800;color:var(--mu)">أبو سعيد</div><label>الإيميل</label><input id="lu" type="email" dir="ltr" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" dir="ltr" autocomplete="current-password"><button class="pubb" style="width:100%;margin-top:14px;padding:10px" type="submit">دخول</button><div class="err" id="le"></div><div class="cred">تصميم وتطوير <b>احمد رحال</b></div></form>
 <div id="app" hidden>
  <div class="top"><div class="trow"><b>🔧 أبو سعيد</b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
- <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="s">⚙️ الإعدادات</button></nav>
+ <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="k">📚 الكتالوج</button><button data-t="o">🎁 العروض</button><button data-t="s">⚙️ الإعدادات</button></nav>
  <div id="qw" style="display:flex;gap:8px;align-items:center"><input id="q" placeholder="🔍 دوّر على صنف"><button class="pubb" id="smb" type="button" style="flex:none;padding:5px 12px;font-size:14px;font-family:inherit;letter-spacing:.3px;background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b">Rahal Ai</button></div></div>
  <div id="v"></div>
  <div class="cred">تصميم وتطوير <b>احمد رحال</b></div>
@@ -149,7 +156,7 @@ function cnt(c){return D.p.filter(function(p){return p[1]==c}).length}
 function np(v){v=v.replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/\D/g,'');if(v.indexOf('00')==0)v=v.slice(2);if(v[0]=='0')v='20'+v.slice(1);return v}
 function render(){
  [].forEach.call(document.querySelectorAll('.tb button'),function(b){b.classList.toggle('on',b.dataset.t==tab)});
- $('qw').hidden=tab!='p';$('v').innerHTML=tab=='p'?vp():tab=='c'?vc():tab=='o'?vo():vs()}
+ $('qw').hidden=tab!='p';$('v').innerHTML=tab=='p'?vp():tab=='c'?vc():tab=='k'?vk():tab=='o'?vo():vs()}
 function vp(){
  var h='';
  D.cats.forEach(function(c){
@@ -173,10 +180,10 @@ function vs(){var c=D.cfg;
 '<label>الجملة اللي جنب Rahal Ai</label><input data-s="rt" value="'+esc(c.rt==null?'اطلب بالكتابة أو الصوت':c.rt)+'" placeholder="اطلب بالكتابة أو الصوت">'+
 '<div class="cr" style="border:0;background:transparent;padding:0;margin:12px 0 0"><b style="flex:1">الكتابة بالصوت 🎤</b><label class="sw"><input type="checkbox" data-s="rm"'+(c.rm?'':' checked')+'><i></i></label></div></div>'}
 var dupFrom=-1;
-function openEd(i,c,dup){
- var sp=null;if(dup&&D.p[i]){sp=D.p[i];dupFrom=i;i=-1}else dupFrom=-1;
+function openEd(i,c,dup,pre){
+ var sp=null;if(pre){sp=pre;dupFrom=-1;i=-1}else if(dup&&D.p[i]){sp=D.p[i];dupFrom=i;i=-1}else dupFrom=-1;
  ei=i;var p=sp?JSON.parse(JSON.stringify(sp)):(i>=0?D.p[i]:['',c,'',0,PAL[0][1],PAL[0][2],'🥔',0,'']);fls=(p[9]||[]).map(function(f){return [f[0],f[1]?1:0]});pal=0;eimg=p[8]||'';enew='';PAL.forEach(function(x,j){if(x[1]==p[4])pal=j});
- $('ov').innerHTML='<div class="pn"><h2>'+(i>=0?'تعديل صنف':sp?'نسخة جديدة من صنف':'صنف جديد')+'<button class="x" id="edx">✕</button></h2>'+(sp?'<p class="hint" style="margin:6px 0 0">📋 ده صنف جديد منسوخ من «'+esc(sp[0])+'». غيّر السعر أو العبوة أو القسم وبعدين دوس حفظ.</p>':'')+'<label>صورة المنتج</label><div class="ip"><div class="ipv" id="ipv">'+(eimg&&IMG[eimg]?'<img src="'+IMG[eimg]+'" alt="">':esc(p[6]))+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer">📷 اختر صورة<input type="file" id="ff" accept="image/*" hidden></label><button class="del" id="irm" type="button">إزالة الصورة</button></div></div><label>اسم الصنف</label><input id="fn" value="'+esc(p[0])+'"><div class="r2"><div><label>السعر (جنيه)</label><input id="fp" type="number" inputmode="numeric" value="'+(p[3]||'')+'"></div><div style="max-width:92px"><label>إيموجي</label><input id="fe" value="'+esc(p[6])+'" style="text-align:center"></div></div><div class="r2"><div><label>السعر قبل الخصم (اختياري)</label><input id="fo" type="number" inputmode="numeric" value="'+(+p[11]>0?p[11]:'')+'" placeholder="مثال: 220"></div><div><label>اسم الحجم / النوع (اختياري)</label><input id="fv" value="'+esc(p[10]||'')+'" placeholder="مثال: ١٠ جنيه"></div></div><p class="hint">لو فيه أكتر من صنف بنفس الاسم في نفس القسم، العميل هيشوفهم في كارت واحد ويختار بين الأحجام.</p><label>العبوة / الوصف</label><input id="fd" value="'+esc(p[2])+'" placeholder="مثال: كرتونة ٤٨ كيس"><label>القسم</label><select id="fc">'+D.cats.map(function(x){return '<option'+(x==p[1]?' selected':'')+'>'+esc(x)+'</option>'}).join('')+'</select><label>النكهات / الأطعمة (اختياري)</label><div id="fl"></div><div class="r2"><div><input id="fnew" placeholder="اكتب نكهة، أو كذا نكهة بفاصلة (،)"></div><button class="pubb" id="fadd" type="button" style="flex:none;margin-bottom:2px">+ إضافة</button></div><p class="hint">لو ضفت نكهات، العميل لما يدوس على الصنف بيختار الكمية من كل نكهة. السويتش جنب كل نكهة بيخليها متوفرة أو خلصانة. سيبها فاضية لو الصنف مالوش نكهات.</p><label>لون الكيس</label><div class="sws">'+PAL.map(function(x,j){return '<span class="swc'+(j==pal?' on':'')+'" data-pal="'+j+'" style="background:'+x[1]+'"></span>'}).join('')+'</div><label class="ck"><input type="checkbox" id="fa"'+(p[7]?'':' checked')+'> متوفر</label><div class="r2"><button class="pubb big" id="eok">حفظ</button>'+(i>=0?'<button class="del big" id="edl">حذف</button>':'')+'</div>'+(i>=0?'<button class="pubb" id="edup" type="button" style="width:100%;margin-top:10px;background:var(--blue)">📋 تكرار الصنف (نسخة جديدة أعدّل عليها)</button>':'')+'</div>';
+ $('ov').innerHTML='<div class="pn"><h2>'+(i>=0?'تعديل صنف':pre?'إضافة من الكتالوج':sp?'نسخة جديدة من صنف':'صنف جديد')+'<button class="x" id="edx">✕</button></h2>'+(pre?'<p class="hint" style="margin:6px 0 0">📚 البيانات جاية من الكتالوج، عدّل أي حاجة (خصوصًا السعر) وبعدين دوس حفظ.</p>':sp?'<p class="hint" style="margin:6px 0 0">📋 ده صنف جديد منسوخ من «'+esc(sp[0])+'». غيّر السعر أو العبوة أو القسم وبعدين دوس حفظ.</p>':'')+'<label>صورة المنتج</label><div class="ip"><div class="ipv" id="ipv">'+(eimg&&IMG[eimg]?'<img src="'+IMG[eimg]+'" alt="">':esc(p[6]))+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer">📷 اختر صورة<input type="file" id="ff" accept="image/*" hidden></label><button class="del" id="irm" type="button">إزالة الصورة</button></div></div><label>اسم الصنف</label><input id="fn" value="'+esc(p[0])+'"><div class="r2"><div><label>السعر (جنيه)</label><input id="fp" type="number" inputmode="numeric" value="'+(p[3]||'')+'"></div><div style="max-width:92px"><label>إيموجي</label><input id="fe" value="'+esc(p[6])+'" style="text-align:center"></div></div><div class="r2"><div><label>السعر قبل الخصم (اختياري)</label><input id="fo" type="number" inputmode="numeric" value="'+(+p[11]>0?p[11]:'')+'" placeholder="مثال: 220"></div><div><label>اسم الحجم / النوع (اختياري)</label><input id="fv" value="'+esc(p[10]||'')+'" placeholder="مثال: ١٠ جنيه"></div></div><p class="hint">لو فيه أكتر من صنف بنفس الاسم في نفس القسم، العميل هيشوفهم في كارت واحد ويختار بين الأحجام.</p><label>العبوة / الوصف</label><input id="fd" value="'+esc(p[2])+'" placeholder="مثال: كرتونة ٤٨ كيس"><label>القسم</label><select id="fc">'+D.cats.map(function(x){return '<option'+(x==p[1]?' selected':'')+'>'+esc(x)+'</option>'}).join('')+(p[1]&&D.cats.indexOf(p[1])<0?'<option selected value="'+esc(p[1])+'">'+esc(p[1])+' (قسم جديد)</option>':'')+'</select><label>النكهات / الأطعمة (اختياري)</label><div id="fl"></div><div class="r2"><div><input id="fnew" placeholder="اكتب نكهة، أو كذا نكهة بفاصلة (،)"></div><button class="pubb" id="fadd" type="button" style="flex:none;margin-bottom:2px">+ إضافة</button></div><p class="hint">لو ضفت نكهات، العميل لما يدوس على الصنف بيختار الكمية من كل نكهة. السويتش جنب كل نكهة بيخليها متوفرة أو خلصانة. سيبها فاضية لو الصنف مالوش نكهات.</p><label>لون الكيس</label><div class="sws">'+PAL.map(function(x,j){return '<span class="swc'+(j==pal?' on':'')+'" data-pal="'+j+'" style="background:'+x[1]+'"></span>'}).join('')+'</div><label class="ck"><input type="checkbox" id="fa"'+(p[7]?'':' checked')+'> متوفر</label><div class="r2"><button class="pubb big" id="eok">حفظ</button>'+(i>=0?'<button class="del big" id="edl">حذف</button>':'')+'</div>'+(i>=0?'<button class="pubb" id="edup" type="button" style="width:100%;margin-top:10px;background:var(--blue)">📋 تكرار الصنف (نسخة جديدة أعدّل عليها)</button>':'')+'</div>';
  $('ov').classList.add('on');renderFl();if(i<0)setTimeout(function(){var f=$(sp?'fp':'fn');f.focus();if(sp)f.select()},50)}
 function closeEd(){$('ov').classList.remove('on')}
 function renderFl(){var e=$('fl');if(!e)return;e.innerHTML=fls.length?fls.map(function(f,j){return '<div class="cr"><input data-fn="'+j+'" value="'+esc(f[0])+'" placeholder="اسم النكهة"><label class="sw" title="متوفر"><input type="checkbox" data-fa="'+j+'"'+(f[1]?'':' checked')+'><i></i></label><button class="del" data-fd="'+j+'" type="button" aria-label="حذف">🗑</button></div>'}).join(''):'<p class="emp">مفيش نكهات، الصنف هيظهر للعميل بزرار + عادي</p>'}
@@ -198,6 +205,7 @@ $('ov').addEventListener('click',function(e){var t=e.target;
   if(vl)p[10]=vl;if(ol)p[11]=ol;
   if(enew){var nid='i'+Date.now().toString(36);IMG[nid]=enew;PEND[nid]=1;p[8]=nid}
   if(!p[0]){toast('اكتب اسم الصنف');return}
+   if(p[1]&&D.cats.indexOf(p[1])<0)D.cats.push(p[1]);
   if(ei>=0)D.p[ei]=p;else if(dupFrom>=0&&D.p[dupFrom]&&D.p[dupFrom][1]==p[1])D.p.splice(dupFrom+1,0,p);else D.p.push(p);
   dupFrom=-1;mark();closeEd();render()}
  else if(t.id=='edup'&&ei>=0){openEd(ei,null,true)}
@@ -357,6 +365,39 @@ function catFill(list){
    if(!hit&&vs.length==1)hit=vs[0];
    if(hit&&hit[1]){o.d=hit[1];got.push('العبوة')}}
   if(got.length)o.w.push('📚 اتكمّل من الكتالوج: '+got.join('، ')+' (راجعه)')})}
+// ===== تبويب الكتالوج: اختار صنف جاهز، عدّل عليه، وضيفه =====
+var kq='',kc='',KI=null,KLIM=60;
+function kIdx(){if(!KI)KI=CAT.map(function(c){return an([c[0],c[1],c[2],(c[6]||[]).join(' '),(c[5]||[]).join(' ')].join(' '))});return KI}
+function kHas(name,v){return D.p.some(function(x){return x[0]==name&&(x[10]||'')==(v||'')})}
+function kRes(){
+ var T=an(kq).split(' ').filter(Boolean),ix=kIdx(),r=[];
+ CAT.forEach(function(c,i){if(kc&&c[1]!=kc)return;var ok=true;T.forEach(function(t){if(ix[i].indexOf(t)<0)ok=false});if(ok)r.push(i)});
+ return r}
+function kList(){
+ var r=kRes(),h='';
+ if(!r.length)return '<p class="emp">مفيش صنف بالاسم ده في الكتالوج. اضغط «+ صنف» من تبويب الأصناف أو استخدم Rahal Ai.</p>';
+ r.slice(0,KLIM).forEach(function(i){var c=CAT[i],vs=c[4]&&c[4].length?c[4]:[['','']];
+  h+='<div class="kit"><div class="mb" style="background:'+PAL[pk({n:c[0]})][1]+'">'+esc(c[3])+'</div><div class="tx"><b>'+esc(c[0])+'</b><small>'+esc(c[1])+' · '+esc(c[2])+((c[5]&&c[5].length)?' · '+c[5].length+' نكهة':'')+'</small><div class="kv">'+
+   vs.map(function(v,j){var dn=kHas(c[0],v[0]);return '<button type="button" class="'+(dn?'dn':'')+'" data-kv="'+i+':'+j+'">'+(dn?'✓ ':'+ ')+esc(v[0]||'إضافة')+'</button>'}).join('')+'</div></div></div>'});
+ if(r.length>KLIM)h+='<button class="pubb" type="button" data-kmore="1" style="width:100%;margin:6px 0">اعرض الباقي ('+(r.length-KLIM)+')</button>';
+ return h}
+function vk(){
+ var cs={};CAT.forEach(function(c){cs[c[1]]=(cs[c[1]]||0)+1});
+ return '<p class="hint" style="margin-top:10px">كتالوج جاهز ('+CAT.length+' صنف). دوّر، اضغط على الحجم اللي عايزه، عدّل السعر والنكهات، وبعدين حفظ. العلامة ✓ معناها الصنف ده مضاف عندك.</p>'+
+  '<input id="kq" placeholder="🔍 دوّر في الكتالوج (اسم، ماركة، نكهة)" value="'+esc(kq)+'" style="margin-top:8px">'+
+  '<div class="kcs"><button type="button" data-kc="" class="'+(kc?'':'on')+'">الكل</button>'+Object.keys(cs).map(function(k){return '<button type="button" data-kc="'+esc(k)+'" class="'+(kc==k?'on':'')+'">'+esc(k)+' ('+cs[k]+')</button>'}).join('')+'</div>'+
+  '<div id="klist">'+kList()+'</div>'}
+function kOpen(i,j){
+ var c=CAT[i],v=(c[4]&&c[4][j])||['',''],m=mc(c[1]),cat=D.cats.indexOf(m)>-1?m:c[1],k=pk({n:c[0]});
+ var p=[c[0],cat,v[1]||'',0,PAL[k][1],PAL[k][2],c[3]||'🥔',0,''];
+ if((c[5]||[]).length)p[9]=c[5].map(function(f){return [f,0]});
+ if(v[0])p[10]=v[0];
+ openEd(-1,null,false,p)}
+$('app').addEventListener('input',function(e){if(e.target.id=='kq'){kq=e.target.value;KLIM=60;$('klist').innerHTML=kList()}});
+$('app').addEventListener('click',function(e){var t=e.target,b;
+ if((b=t.closest('[data-kv]'))){var a=b.dataset.kv.split(':');kOpen(+a[0],+a[1]);return}
+ if((b=t.closest('[data-kc]'))){kc=b.dataset.kc;KLIM=60;$('v').innerHTML=vk();return}
+ if(t.closest('[data-kmore]')){KLIM+=60;$('klist').innerHTML=kList()}});
 function aiPrompt(text){return 'أنت مساعد لإدخال بيانات أصناف متجر جملة. حوّل النص التالي إلى JSON فقط (من غير أي كلام تاني) بالشكل: {"products":[{"name":"","category":"","pack":"","price":0,"oldPrice":0,"variant":"","emoji":"","flavors":[""]}]}\nالقواعد:\n- name هو اسم الصنف فقط.\n- category لازم يكون واحد من الأقسام الحالية بالظبط لو مناسب، وإلا اقترح اسم قسم قصير. الأقسام الحالية: '+JSON.stringify(D.cats)+'\n- pack العبوة أو الوصف (مثال: كرتونة ٤٨ كيس) وسيبه فاضي لو مش مذكور.\n- price رقم بالجنيه بالأرقام الإنجليزية، و oldPrice السعر قبل الخصم أو 0.\n- لو الصنف له أكتر من حجم أو نوع بأسعار مختلفة اعمل عنصر منفصل لكل واحد بنفس الاسم وحط الحجم أو النوع في variant.\n- flavors كل النكهات المذكورة بأسمائها بالظبط، ماتخترعش نكهات مش مذكورة، وسيبها [] لو مفيش.\n- emoji إيموجي واحد مناسب للصنف.\n- مهم: لو الكلام عن صنف واحد وبعده أكتر من طعم أو نكهة مفصولين بـ «و» أو فاصلة (زي «دوريتوس عنده طعم جبنة وكباب وملح وشطة») فده صنف واحد بس، وحط كل الطعوم في flavors بتاعته، وماتعملش عنصر لكل طعم.\n- لو في أكتر من صنف في النص اعمل عنصر لكل صنف.\n- انسخ الأسعار والأرقام زي ما هي في النص بالظبط من غير حساب أو تقريب، ولو السعر مش واضح خلّي price 0.\n- صحّح الإملاء بس في اسم الصنف والنكهات (زي ه/ة وأ/ا) من غير ما تبدّل الكلمة بكلمة تانية أو تضيف حاجة.\nمثال: النص «شيبسي كرتونة ٢٤ كيس بسعر ٢٦٠ جنيه في قسم شيبسي عنده طعم ملح وخل وشطة» يرجع: {"products":[{"name":"شيبسي","category":"شيبسي","pack":"كرتونة 24 كيس","price":260,"oldPrice":0,"variant":"","emoji":"🥔","flavors":["ملح","خل","شطة"]}]}\n'+catHints(text)+'النص:\n'+text}
 async function askGemini(key,prompt){
  var B='https://generativelanguage.googleapis.com/v1beta/',H={'Content-Type':'application/json','x-goog-api-key':key},tried={};
