@@ -63,15 +63,15 @@ label{display:block;font-size:13px;font-weight:800;margin:10px 0 4px}
 .ip{display:flex;gap:12px;align-items:center}.ipv{width:80px;height:80px;border:3px solid var(--ink);border-radius:14px;background:#fff;display:grid;place-items:center;font-size:32px;flex:none;overflow:hidden}.ipv img{width:100%;height:100%;object-fit:cover}
 .ip .btns{display:flex;flex-direction:column;gap:8px;align-items:flex-start}.ip .pubb{margin:0;font-size:14px}
 textarea{width:100%;min-width:0;font:inherit;font-weight:600;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:12px;padding:9px 12px;resize:vertical}
-.vmic{display:flex;align-items:center;justify-content:center;gap:5px;width:76px;height:76px;margin:20px auto 12px;padding:0;background:#1f1f1f;border:3px solid var(--ink);border-radius:22px;transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
-.vmic i{display:block;width:6px;background:#fff;border-radius:6px}
-.vmic i:nth-child(1),.vmic i:nth-child(5){height:16px}.vmic i:nth-child(2),.vmic i:nth-child(4){height:42px}.vmic i:nth-child(3){height:26px}
-.vmic.rec{transform:scale(1.3);animation:vring 1.4s infinite}
-.vmic.rec i{animation:vbar .8s ease-in-out infinite}
-.vmic.rec i:nth-child(2){animation-delay:.1s}.vmic.rec i:nth-child(3){animation-delay:.2s}.vmic.rec i:nth-child(4){animation-delay:.3s}.vmic.rec i:nth-child(5){animation-delay:.4s}
-@keyframes vbar{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1.2)}}
-@keyframes vring{0%{box-shadow:0 0 0 0 rgba(255,75,62,.55)}100%{box-shadow:0 0 0 16px rgba(255,75,62,0)}}
-.vt{text-align:center;font-weight:800;font-size:13px;color:var(--red);margin:6px 0 4px}
+.vmic{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;height:50px;margin:14px 0 6px;padding:0 16px;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:14px;box-shadow:3px 3px 0 var(--ink);font-weight:800;font-size:16px;transition:height .3s cubic-bezier(.34,1.56,.64,1),background .25s,color .25s,transform .3s cubic-bezier(.34,1.56,.64,1)}
+.vmic .vb{display:flex;align-items:center;gap:3px;height:28px;flex:none}
+.vmic .vb i{display:block;width:4px;border-radius:4px;background:var(--blue);transition:background .25s}
+.vmic .vb i:nth-child(1),.vmic .vb i:nth-child(5){height:9px}.vmic .vb i:nth-child(2),.vmic .vb i:nth-child(4){height:22px}.vmic .vb i:nth-child(3){height:15px}
+.vmic.rec{height:62px;transform:scale(1.03);background:var(--red);color:#fff;animation:vring 1.4s infinite}
+.vmic.rec .vb i{background:#fff;animation:vbar .8s ease-in-out infinite}
+.vmic.rec .vb i:nth-child(2){animation-delay:.1s}.vmic.rec .vb i:nth-child(3){animation-delay:.2s}.vmic.rec .vb i:nth-child(4){animation-delay:.3s}.vmic.rec .vb i:nth-child(5){animation-delay:.4s}
+@keyframes vbar{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1.5)}}
+@keyframes vring{0%{box-shadow:3px 3px 0 var(--ink),0 0 0 0 rgba(255,75,62,.55)}100%{box-shadow:3px 3px 0 var(--ink),0 0 0 14px rgba(255,75,62,0)}}
 </style><!-- PWA: install support -->
 <script>
 (function(){
@@ -318,16 +318,18 @@ async function askGemini(key,prompt){
   for(i=0;i<ns.length&&i<4;i++){if(tried[ns[i]])continue;t=await one(ns[i]);if(t)return t}}
  throw new Error('NOMODEL')}
 // ===== الكتابة بالصوت (مباشر + ظبط الكلام) =====
-var VSR=window.SpeechRecognition||window.webkitSpeechRecognition,VR=null,VON=false,VPOL=false;
+var VSR=window.SpeechRecognition||window.webkitSpeechRecognition,VR=null,VON=false,VPOL=false,VERR=0;
 function vfix(s){
  return nd(s).replace(/\s*(?:سطر جديد|سطر تاني|سطر تانيه|السطر الجديد|صنف جديد|صنف تاني|صنف تانيه)\s*/g,'\n').replace(/\s*(?:فاصلة|فاصله)\s*/g,'، ').replace(/[ \t]{2,}/g,' ').replace(/ *\n */g,'\n')}
-function vUI(on){var b=$('smmic'),w=$('smwv');if(b)b.classList.toggle('rec',on);if(w)w.hidden=!on}
+var VWL=null;
+function vUI(on){var b=$('smmic'),l=$('smvl');if(b)b.classList.toggle('rec',on);if(l)l.textContent=on?'بسمعك... دوس للإيقاف':'اكتب بالصوت';
+ try{if(on){if(navigator.wakeLock&&!VWL)navigator.wakeLock.request('screen').then(function(x){VWL=x;x.addEventListener('release',function(){VWL=null})}).catch(function(){})}else if(VWL){VWL.release();VWL=null}}catch(z){}}
 function vRun(){
  var ta=$('smt');if(!VON||!ta)return;
  var base=ta.value;if(base&&!/\s$/.test(base))base+=' ';
  var r=new VSR();VR=r;r.lang='ar-EG';r.interimResults=true;
  var cont=!/Android/i.test(navigator.userAgent);r.continuous=cont;
- r.onresult=function(e){var t2=$('smt');if(!t2)return;
+ r.onresult=function(e){VERR=0;var t2=$('smt');if(!t2)return;
   if(!cont){var lr=e.results[e.results.length-1],tt=lr[0].transcript;if(lr.isFinal){base+=vfix(tt).trim()+' ';t2.value=base}else t2.value=base+vfix(tt)}
   else{var fin=[],im='';
    for(var i=0;i<e.results.length;i++){var rr=e.results[i],t=rr[0].transcript.trim();if(!t)continue;
@@ -336,12 +338,12 @@ function vRun(){
    var lf2=fin.length?fin[fin.length-1]:'';if(lf2&&im.indexOf(lf2)==0)im=im.slice(lf2.length).trim();else if(lf2&&lf2.indexOf(im)>-1)im='';
    t2.value=base+vfix(fin.join(' ')+(im?' '+im:''))}
   t2.scrollTop=t2.scrollHeight;SMT=t2.value};
- r.onerror=function(e){if(e.error=='not-allowed'||e.error=='service-not-allowed'){VON=false;toast('اسمح للمايك من إعدادات المتصفح')}};
- r.onend=function(){if(VR===r)VR=null;if(VON){setTimeout(vRun,150);return}vUI(false);if(VPOL){VPOL=false;vPolish()}};
- try{r.start()}catch(x){VR=null;VON=false;vUI(false)}}
+ r.onerror=function(e){if(e.error=='not-allowed'||e.error=='service-not-allowed'){VON=false;toast('اسمح للمايك من إعدادات المتصفح')}else if(e.error=='network'||e.error=='audio-capture')VERR++};
+ r.onend=function(){if(VR===r)VR=null;if(VON){if(VERR>20){VON=false;vUI(false);toast('فيه مشكلة في الاتصال أو المايك، الكتابة بالصوت وقفت');return}setTimeout(vRun,VERR?600:120);return}vUI(false);if(VPOL){VPOL=false;vPolish()}};
+ try{r.start()}catch(x){VR=null;if(VON){VERR++;if(VERR>20){VON=false;vUI(false)}else setTimeout(vRun,400)}}}
 function vStart(){
  if(!VSR){toast('المتصفح ده مش بيدعم الكتابة بالصوت، جرّب Chrome');return}
- VON=true;VPOL=false;vUI(true);vRun()}
+ VON=true;VPOL=false;VERR=0;vUI(true);vRun()}
 function vStop(polish){
  var was=VON||!!VR;VON=false;
  if(VR){VPOL=!!polish;try{VR.stop()}catch(x){VR=null;vUI(false);if(polish)vPolish()}}
@@ -364,7 +366,7 @@ $('ov').addEventListener('click',function(e){var b=e.target.closest&&e.target.cl
 function smIn(t){
  vStop(false);
  var k='';try{k=localStorage.getItem('abu_gk')||''}catch(z){}
- $('ov').innerHTML='<div class="pn"><h2>Rahal Ai<button class="x" id="smx">✕</button></h2><p class="hint">اكتب أو الصق وصف الأصناف زي ما تتكلم، وتقدر تكتب أكتر من صنف. هتراجع النتيجة قبل ما تتضاف.</p><label>وصف الأصناف</label><textarea id="smt" rows="6" placeholder="مثال: شيبسي كبير عنده 15 طعم: ملح، طماطم، شطة، جبنة، خل... كرتونة 24 كيس بسعر 260 جنيه في قسم شيبسي">'+esc(t)+'</textarea><button class=\"vmic\" id=\"smmic\" type=\"button\" aria-label=\"تسجيل صوتي\"><i></i><i></i><i></i><i></i><i></i></button><div class=\"vt\" id=\"smwv\" hidden>🎙️ بسمعك... اتكلم وأنا بكتب معاك · دوس تاني للإيقاف</div><p class=\"hint\">تقدر تقول «سطر جديد» عشان تبدأ صنف تاني، و«فاصلة» لو عايز فاصلة.</p><label>API</label><input id="smk" type="password" autocomplete="off" dir="ltr" value="'+esc(k)+'"><div class="r2"><button class="pubb big" id="smai">🤖 حلّل بالذكاء الاصطناعي</button></div><button class="mini" id="smlp" style="width:100%;margin-top:10px;padding:8px">⚡ حلّل بدون ذكاء اصطناعي (سطر لكل صنف)</button><div class="err" id="sme"></div></div>';
+ $('ov').innerHTML='<div class="pn"><h2>Rahal Ai<button class="x" id="smx">✕</button></h2><p class="hint">اكتب أو الصق وصف الأصناف زي ما تتكلم، وتقدر تكتب أكتر من صنف. هتراجع النتيجة قبل ما تتضاف.</p><label>وصف الأصناف</label><textarea id="smt" rows="6" placeholder="مثال: شيبسي كبير عنده 15 طعم: ملح، طماطم، شطة، جبنة، خل... كرتونة 24 كيس بسعر 260 جنيه في قسم شيبسي">'+esc(t)+'</textarea><button class=\"vmic\" id=\"smmic\" type=\"button\"><span class=\"vb\"><i></i><i></i><i></i><i></i><i></i></span><span id=\"smvl\">اكتب بالصوت</span></button><p class=\"hint\">تقدر تقول «سطر جديد» عشان تبدأ صنف تاني، و«فاصلة» لو عايز فاصلة.</p><label>API</label><input id="smk" type="password" autocomplete="off" dir="ltr" value="'+esc(k)+'"><div class="r2"><button class="pubb big" id="smai">🤖 حلّل بالذكاء الاصطناعي</button></div><button class="mini" id="smlp" style="width:100%;margin-top:10px;padding:8px">⚡ حلّل بدون ذكاء اصطناعي (سطر لكل صنف)</button><div class="err" id="sme"></div></div>';
  $('ov').classList.add('on')}
 function smOpen(){SM=[];smIn(SMT)}
 function pk(o){var n=o.n,mp=[['طماطم',1],['شطة',1],['حار',1],['جبن',2],['برتقال',2],['خل',3],['ملح',0],['شوكولات',5],['كاكاو',5],['فراولة',6],['ذرة',7],['فشار',7]];for(var i=0;i<mp.length;i++)if(n.indexOf(mp[i][0])>-1)return mp[i][1];var h=0;for(i=0;i<n.length;i++)h+=n.charCodeAt(i);return h%PAL.length}
