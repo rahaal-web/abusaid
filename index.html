@@ -129,6 +129,7 @@ h1 small{display:block;font-size:24px;letter-spacing:2px;text-shadow:2px 2px 0 v
 .rgold{background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b;border:3px solid var(--ink);cursor:pointer;font-family:inherit;font-weight:800}
 .rrow{border-bottom:2px dashed var(--ink);padding:10px 0;display:flex;flex-direction:column;gap:6px}
 .rh{display:flex;gap:6px;align-items:center}
+.fpick{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;font:inherit;font-weight:700;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:12px;padding:7px 10px;text-align:right}.fpick i{font-style:normal;font-size:12px}
 .pn select{width:100%;min-width:0;font:inherit;font-weight:700;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:12px;padding:7px 10px}
 .rf{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .rf small{color:var(--mu);font-weight:800}
@@ -443,7 +444,7 @@ function rRv(){
   var used={},rows=0,avail=0;
   RL.forEach(function(o){if(o.i==l.i){rows++;if(o!==l&&o.f>=0)used[o.f]=1}});
   fl.forEach(function(f){if(!f[1])avail++});
-  var fs=fl.length?'<select'+a+' data-rk=\"f\">'+(l.f<0?'<option value=\"-1\" selected>— اختار النكهة —</option>':'')+fl.map(function(f,j){return (f[1]||(used[j]&&j!=l.f))?'':'<option value=\"'+j+'\"'+(j==l.f?' selected':'')+'>'+esc(f[0])+'</option>'}).join('')+'</select>':'';
+  var fs=fl.length?'<button type=\"button\" class=\"fpick\"'+a+' data-rk=\"more\"><span>'+(l.f<0?'— اختار النكهة —':esc(fl[l.f][0]))+'</span><i>▾</i></button>':'';
   var del='<button class=\"rdel\" type=\"button\"'+a+' data-rk=\"del\" aria-label=\"حذف\">🗑</button>';
   if(first)h+='<div class=\"rrow\"><div class=\"rh\"><select'+a+' data-rk=\"i\">'+ropts(l)+'</select>'+del+'</div>'+fs;
   else h+='<div style=\"display:flex;flex-direction:column;gap:6px;padding-top:8px\"><div class=\"rh\">'+fs+del+'</div>';
