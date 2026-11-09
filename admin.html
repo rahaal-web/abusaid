@@ -77,6 +77,7 @@ textarea{width:100%;min-width:0;font:inherit;font-weight:600;background:#fff;col
 .cm.u{align-self:flex-start;background:var(--blue);color:#fff}
 .cm.a{align-self:flex-end;background:#fff;color:#1b1b1b}
 .vmic.sm{height:44px;margin:8px 0 6px}.vmic.sm.rec{height:52px}
+input[type=range]{padding:0;border:0;height:30px;background:transparent;accent-color:var(--blue)}
 </style><!-- PWA: install support -->
 <script>
 (function(){
@@ -169,10 +170,17 @@ function vc(){
  var h='<p class="hint">رتّب الأقسام بالأسهم، أو اضغط على الاسم عشان تعدله.</p><div style="margin-top:10px">';
  D.cats.forEach(function(c,i){h+='<div class="cr"><div class="ar"><button data-up="'+i+'">▲</button><button data-dn="'+i+'">▼</button></div><input data-rn="'+i+'" value="'+esc(c)+'"><small>'+cnt(c)+' صنف</small><button class="del" data-dc="'+i+'">🗑</button></div>'});
  return h+'</div><div class="cr"><input id="nc" placeholder="اسم قسم جديد"><button class="pubb" id="addc">+ إضافة</button></div>'}
+function rg(k,l,min,max,st,def,u){var v=D.cfg[k]!=null&&D.cfg[k]!==''?+D.cfg[k]:def;return '<label>'+l+': <b id="nv_'+k+'">'+v+u+'</b></label><input type="range" data-n="'+k+'" data-u="'+u+'" min="'+min+'" max="'+max+'" step="'+st+'" value="'+v+'">'}
+function designCard(){var c=D.cfg,im=c.logo&&IMG[c.logo];
+ return '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🎨 شكل الصفحة</b>'+
+ rg('cols','عدد الأصناف في الصف',2,5,1,3,'')+'<p class="hint">٣ هو الأنسب للموبايل.</p>'+
+ '<label>لوجو الصفحة</label><div class="ip"><div class="ipv" style="width:96px;background:#19160f">'+(im?'<img src="'+im+'" alt="">':'<span style="font-size:12px;color:#fff3cf">الأصلي</span>')+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer;margin:0">📷 اختار صورة<input type="file" id="lgf" accept="image/*" hidden></label>'+(c.logo?'<button class="del" type="button" id="lgrm">رجوع للأصلي</button>':'')+'</div></div>'+
+ rg('bh','ارتفاع البانر',100,320,10,150,' px')+rg('ls','حجم اللوجو جوه البانر',40,100,5,100,'%')+rg('cs','حجم أزرار الأقسام',80,150,5,100,'%')+'</div>'}
 function vs(){var c=D.cfg;
  return '<div class="card2"><label>رقم واتساب الطلبات</label><input dir="ltr" inputmode="tel" data-s="phone" value="'+esc(c.phone)+'" placeholder="مثال: 01012345678"><p class="hint">اكتبه بأي شكل (01… أو 20…) وهيتظبط لوحده. <a href="https://wa.me/'+esc(c.phone)+'" target="_blank" rel="noopener">جرّب الرقم 📲</a></p>'+
  '<label>أقل قيمة للطلب (جنيه)</label><input type="number" inputmode="numeric" data-s="min" value="'+c.min+'"><p class="hint">اكتب 0 لو مفيش حد أدنى.</p>'+
  '<label>اسم الوحدة</label><input data-s="unit" value="'+esc(c.unit)+'"><p class="hint">زي: كرتونة، دستة، شوال.</p><label>API (Rahal Ai للعملاء)</label><input type="password" autocomplete="off" dir="ltr" data-s="gk" value="'+esc(c.gk||'')+'"></div>'+
+designCard()+
 '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🤖 Rahal Ai</b>'+
 '<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار Rahal Ai للعملاء</b><label class="sw"><input type="checkbox" data-s="ro"'+(c.ro?'':' checked')+'><i></i></label></div>'+
 '<label>الجملة اللي جنب Rahal Ai</label><input data-s="rt" value="'+esc(c.rt==null?'اطلب بالكتابة أو الصوت':c.rt)+'" placeholder="اطلب بالكتابة أو الصوت">'+
@@ -617,6 +625,9 @@ $('ov').addEventListener('change',function(e){var t=e.target;if(t.dataset.sk==nu
  if(k=='on')o.on=t.checked?1:0;else if(k=='p')o.p=+t.value||0;else if(k=='f'){o.f=sfl(t.value)}else o[k]=t.value.trim()});
 $('smb').onclick=chOpen;
 
+$('app').addEventListener('input',function(e){var t=e.target;if(t.dataset&&t.dataset.n){var v=+t.value;D.cfg[t.dataset.n]=v;var l=$('nv_'+t.dataset.n);if(l)l.textContent=v+(t.dataset.u||'');mark()}});
+$('app').addEventListener('change',function(e){var t=e.target;if(t.id=='lgf'&&t.files&&t.files[0]){shrink(t.files[0]).then(function(u){var nid='i'+Date.now().toString(36);IMG[nid]=u;PEND[nid]=1;D.cfg.logo=nid;mark();render()}).catch(function(){toast('الصورة دي مش شغالة، جرّب غيرها')})}});
+$('app').addEventListener('click',function(e){if(e.target.id=='lgrm'){delete D.cfg.logo;mark();render()}});
 var RT=null,TKEXP=0;
 async function fresh(){
  if(TK&&Date.now()<TKEXP-120000)return;
@@ -633,6 +644,7 @@ async function pub(){
  var b=$('pub');b.disabled=true;D.v=(D.v||0)+1;var A='https://'+FB.db+'/chips/',used={};
  D.p.forEach(function(p){if(p[8])used[p[8]]=1});
  OFS().forEach(function(o){if(o.i)used[o.i]=1});
+  if(D.cfg.logo)used[D.cfg.logo]=1;
  try{
   await fresh();
   for(var k in PEND){if(used[k]){await put(A+'img/'+k+'.json',JSON.stringify(IMG[k]))}}
@@ -657,7 +669,7 @@ async function loadAll(){
  var v=await (await fetch('https://'+FB.db+'/chips/data.json')).json();
  if(v&&v.json)D=JSON.parse(v.json);
  D.offers=D.offers||[];
- var ks=D.p.map(function(p){return p[8]}).concat(D.offers.map(function(o){return o.i})).filter(Boolean);
+ var ks=D.p.map(function(p){return p[8]}).concat(D.offers.map(function(o){return o.i})).concat(D.cfg&&D.cfg.logo?[D.cfg.logo]:[]).filter(Boolean);
  await Promise.all(ks.map(function(k){return fetch('https://'+FB.db+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(x){if(x)IMG[k]=x}).catch(function(){})}))}
 (async function(){
  var rt,em;try{rt=localStorage.getItem('abu_rt');em=localStorage.getItem('abu_em')}catch(z){}

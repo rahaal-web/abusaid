@@ -168,8 +168,8 @@ h1 small{display:block;font-size:24px;letter-spacing:2px;text-shadow:2px 2px 0 v
 
 /* ===== v2: banner + motion + AI page ===== */
 .hero{padding:0}
-.banner{position:relative;height:clamp(230px,70vw,320px);overflow:hidden;background:#19160f;border:3px solid var(--ink);border-top:0;border-radius:0 0 30px 30px}
-.banner img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;animation:bin 1.1s cubic-bezier(.2,.7,.2,1) backwards;-webkit-mask-image:radial-gradient(ellipse 60% 70% at 50% 50%,#000 70%,transparent 100%);mask-image:radial-gradient(ellipse 60% 70% at 50% 50%,#000 70%,transparent 100%)}
+.banner{position:relative;height:var(--bh,150px);overflow:hidden;background:#19160f;border:3px solid var(--ink);border-top:0;border-radius:0 0 30px 30px}
+.banner img{position:absolute;inset:0;margin:auto;width:100%;height:var(--ls,100%);object-fit:contain;object-position:center;animation:bin 1.1s cubic-bezier(.2,.7,.2,1) backwards;-webkit-mask-image:radial-gradient(ellipse 60% 70% at 50% 50%,#000 70%,transparent 100%);mask-image:radial-gradient(ellipse 60% 70% at 50% 50%,#000 70%,transparent 100%)}
 @keyframes bin{from{opacity:0;transform:scale(1.18)}}
 .btxt{position:absolute;inset-inline:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:36px 16px 14px;background:linear-gradient(transparent,rgba(25,22,15,.94));color:#fff3cf;animation:bup .8s .5s ease backwards}
 .btxt b{font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:26px;line-height:1.2;color:#ffd93d}
@@ -207,6 +207,56 @@ h1 small{display:block;font-size:24px;letter-spacing:2px;text-shadow:2px 2px 0 v
 .spw{max-width:560px;margin-inline:auto;padding-bottom:110px}
 .shead{position:sticky;top:0;z-index:2;display:flex;gap:10px;align-items:center;padding:calc(12px + env(safe-area-inset-top,0px)) 14px 12px;background:var(--bg);border-bottom:3px solid var(--ink)}
 .shead .x{flex:none;width:44px;height:44px;border-radius:12px}
+.grid{grid-template-columns:repeat(var(--cols,3),1fr);gap:10px 7px;padding:14px 8px}
+.grid .card{border-width:2px;border-radius:12px;box-shadow:3px 3px 0 var(--ink)}
+.grid .pic{border-bottom-width:2px}
+.grid .info{padding:6px 5px;gap:2px}
+.grid .info b{font-size:11.5px;line-height:1.25}
+.grid .info small{font-size:9.5px;line-height:1.3}
+.grid .price{font-size:16px;padding-top:2px}
+.grid .price i{display:block;font-size:8.5px;margin:0}
+.grid .price s{font-size:10px;margin-inline-end:3px}
+.grid .add{margin:0 5px 6px;padding:5px 2px;font-size:11px;border-width:2px;border-radius:8px;box-shadow:2px 2px 0 var(--ink)}
+.grid .fcount{font-size:12px;padding:0 6px;margin-inline-start:3px}
+.grid .step{margin:0 5px 6px;border-width:2px;border-radius:8px}
+.grid .step button{width:28px;height:30px;font-size:18px}
+.grid .step span{font-size:16px}
+.grid .dsc{font-size:9px;top:4px;inset-inline-start:4px;padding:0 4px;border-width:1.5px;border-radius:6px}
+.grid .nfl{font-size:9.5px;padding:0 6px}
+.grid .vars{grid-template-columns:repeat(auto-fit,minmax(26px,1fr));gap:3px}
+.grid .vp{font-size:10px;min-height:24px;border-width:1.5px;border-radius:7px}
+.grid .pic{aspect-ratio:1/.8;padding:6px}
+.grid .info{padding:5px 5px 2px}
+.grid .info b{font-size:10.5px}
+.grid .info small{font-size:8.5px}
+.grid .price{font-size:14px;margin-top:2px}
+.grid .price i{font-size:7.5px}
+.grid .add{font-size:10px;padding:4px 1px;margin:0 5px 5px;border-radius:7px;white-space:nowrap}
+.grid .step{margin:0 5px 5px}
+.grid .step button{width:24px;height:26px;font-size:15px}
+.grid .step span{font-size:14px}
+.grid .fcount{font-size:10px;padding:0 5px}
+.intro{padding-top:12px}
+.intro .raiH{height:38px;padding:0 14px;font-size:13px;border-width:2px;box-shadow:2px 2px 0 var(--ink)}
+.strip{font-size:11px;margin:10px 14px 4px}.strip li{padding:0 10px}
+.srow{padding:4px 14px 12px}
+.sbox input{height:38px;font-size:13px;border-width:2px;box-shadow:2px 2px 0 var(--ink);border-radius:10px}
+.browse{height:38px;padding:0 14px;font-size:13px;border-width:2px;box-shadow:2px 2px 0 var(--ink);border-radius:10px}
+.cats{padding:9px 12px;gap:6px;border-bottom-width:2px}
+.cats button{font-size:12.5px;padding:3px 13px;border-width:2px;box-shadow:2px 2px 0 var(--ink)}
+.cats button.on{transform:translate(2px,2px)}
+.grid .info b{font-size:calc(10.5px*var(--k,1.15))}
+.grid .info small{font-size:calc(8.5px*var(--k,1.15))}
+.grid .price{font-size:calc(14px*var(--k,1.15))}
+.grid .price i{font-size:calc(7.5px*var(--k,1.15))}
+.grid .add{font-size:calc(10px*var(--k,1.15));padding:calc(4px*var(--k,1.15)) 1px}
+.grid .step button{width:calc(24px*var(--k,1.15));height:calc(26px*var(--k,1.15));font-size:calc(15px*var(--k,1.15))}
+.grid .step span{font-size:calc(14px*var(--k,1.15))}
+.grid .fcount{font-size:calc(10px*var(--k,1.15))}
+.grid .vp{font-size:calc(10px*var(--k,1.15));min-height:calc(24px*var(--k,1.15))}
+.grid .nfl{font-size:calc(9.5px*var(--k,1.15))}
+.grid .dsc{font-size:calc(9px*var(--k,1.15))}
+.cats button{font-size:calc(12.5px*var(--cs,1));padding:calc(3px*var(--cs,1)) calc(13px*var(--cs,1))}
 </style>
 <!-- PWA: install support -->
 <script>
@@ -331,10 +381,10 @@ function vlab(i){var p=P[i],g=gidx(p);if(g.length<2)return '';var l=p[10]||p[2]|
 function pname(i){var l=vlab(i);return P[i][0]+(l?' · '+l:'')}
 function pills(gi,sel){if(gi.length<2)return '';
  return '<div class="vars">'+gi.map(function(j){var q=pq(j);return '<button type="button" class="vp'+(j==sel?' on':'')+(isOut(P[j])?' x':'')+'" data-v="'+j+'">'+esc(vlab(j))+(q?'<b>'+q.toLocaleString('ar-EG')+'</b>':'')+'</button>'}).join('')+'</div>'}
-function gridH(q){
+function gridH(qq){
  var h='',seen={};
  P.forEach(function(p0){
-  if(q){if(rn(p0[0]+' '+p0[1]+' '+(p0[10]||'')+' '+FL(p0).map(function(f){return f[0]}).join(' ')).indexOf(q)<0)return}else if(cat!='الكل'&&p0[1]!=cat)return;
+  if(qq){if(rn(p0[0]+' '+p0[1]+' '+(p0[10]||'')+' '+FL(p0).map(function(f){return f[0]}).join(' ')).indexOf(qq)<0)return}else if(cat!='الكل'&&p0[1]!=cat)return;
   var key=gk(p0);if(seen[key])return;seen[key]=1;
   var gi=gidx(p0),i=SEL[key];
   if(gi.indexOf(i)<0){i=gi[0];for(var z=0;z<gi.length;z++){if(!isOut(P[gi[z]])){i=gi[z];break}}}
@@ -342,7 +392,7 @@ function gridH(q){
   var fl=FL(p),hf=fl.length>0,out=p[7]||(hf&&fl.every(function(f){return f[1]})),q=hf?pq(i):(cart[i]||0),im=p[8]&&IMGS[p[8]];
   var ol=+p[11]>p[3]?+p[11]:0,ds=ol?Math.round((ol-p[3])/ol*100):0;
   h+='<div class="card'+(hf&&!out?' hasfl':'')+'"'+(out?' style="opacity:.6"':'')+(hf&&!out?' data-o="'+i+'"':'')+'><div class="pic'+(im?' has':'')+'">'+(im?'<img src="'+im+'" alt="" loading="lazy">':bag(p[4],p[5],p[6]))+(ds?'<span class="dsc">خصم '+ds.toLocaleString('ar-EG')+'٪</span>':'')+'</div><div class="info"><b>'+p[0]+'</b><small>'+p[2]+'</small>'+pills(gi,i)+(hf?'<span class="nfl">'+nk(fl.length)+'</span>':'')+'<div class="price">'+(ol?'<s>'+ol.toLocaleString('ar-EG')+'</s>':'')+p[3].toLocaleString('ar-EG')+'<i>جنيه / '+CFG.unit+'</i></div></div>'+
-  (out?'<button class="add" disabled style="background:#8a8a8a">خلصان</button>':hf?(q?'<button class="add fl" data-o="'+i+'">تعديل النكهات<b class="fcount">'+q.toLocaleString('ar-EG')+'</b></button>':'<button class="add" data-o="'+i+'">+ اختار النكهات</button>'):q?'<div class="step"><button data-k="'+i+'" data-d="1" aria-label="زيادة">+</button><span>'+q.toLocaleString('ar-EG')+'</span><button data-k="'+i+'" data-d="-1" aria-label="نقص">−</button></div>':'<button class="add" data-k="'+i+'" data-d="1">+ ضيف للطلب</button>')+'</div>';
+  (out?'<button class="add" disabled style="background:#8a8a8a">خلصان</button>':hf?(q?'<button class="add fl" data-o="'+i+'">النكهات<b class="fcount">'+q.toLocaleString('ar-EG')+'</b></button>':'<button class="add" data-o="'+i+'">+ النكهات</button>'):q?'<div class="step"><button data-k="'+i+'" data-d="1" aria-label="زيادة">+</button><span>'+q.toLocaleString('ar-EG')+'</span><button data-k="'+i+'" data-d="-1" aria-label="نقص">−</button></div>':'<button class="add" data-k="'+i+'" data-d="1">+ ضيف</button>')+'</div>';
  });
  return h
 }
@@ -779,7 +829,7 @@ $('rsheet').onclick=function(e){var t=e.target;if(t!=this){var cb=t.closest('but
 $('rsheet').onchange=function(e){var t=e.target,l=RL[+t.dataset.rn];if(!l)return;
  if(t.dataset.rk=='i'){var oi=l.i,ni=+t.value;RL.forEach(function(o){if(o.i==oi){o.i=ni;o.f=-1;o.amb=false}});rRv()}
  else if(t.dataset.rk=='f'){l.f=+t.value;rRv()}};
-function rapply(){var h=$('raiH'),t=CFG&&CFG.rt!=null?CFG.rt:'اطلب بالكتابة أو الصوت';h.style.display=CFG&&CFG.ro?'none':'';h.textContent='Rahal Ai 🤖'}
+function rapply(){var h=$('raiH'),t=CFG&&CFG.rt!=null?CFG.rt:'اطلب بالكتابة أو الصوت';h.style.display=CFG&&CFG.ro?'none':'';h.textContent='Rahal Ai 🤖';applyCfg()}
 $('raiH').onclick=openAI;
 
 $('q').onkeydown=function(e){if(e.key=='Enter'){e.preventDefault();openS(this.value)}};
@@ -787,11 +837,17 @@ $('sgo').onclick=function(){openS($('q').value)};
 $('q2').oninput=function(){QS=rn(this.value.trim());grid()};
 $('sback').onclick=sClose;
 clean();tabs();grid();upd();offers();rapply();
+function applyCfg(){var c=CFG||{},r=document.documentElement.style,n=Math.max(2,Math.min(5,+c.cols||3)),k={2:1.5,3:1.15,4:1,5:.85}[n];
+ ['grid','sgrid'].forEach(function(i){var g=$(i);g.style.setProperty('--cols',n);g.style.setProperty('--k',k)});
+ r.setProperty('--bh',(+c.bh||150)+'px');r.setProperty('--ls',(+c.ls||100)+'%');r.setProperty('--cs',(+c.cs||100)/100);
+ var b=$('bimg');if(!window.L0)window.L0=b.getAttribute('src');var want=(c.logo&&IMGS[c.logo])||window.L0;if(b.getAttribute('src')!=want)b.src=want}
+function logoLoad(){var k=CFG&&CFG.logo;if(!k||IMGQ[k]||IMGS[k])return;IMGQ[k]=1;
+ fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;applyCfg()}}).catch(function(){IMGQ[k]=0})}
 function loadImgs(){if(DBU.indexOf('YOUR')>=0)return;P.forEach(function(p){var k=p[8];if(!k||IMGQ[k])return;IMGQ[k]=1;
  fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;grid()}}).catch(function(){IMGQ[k]=0})});
  (D.offers||[]).forEach(function(o){var k=o.i;if(!k||IMGQ[k])return;IMGQ[k]=1;
   fetch('https://'+DBU+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(v){if(v){IMGS[k]=v;offers()}}).catch(function(){IMGQ[k]=0})})}
-function ref(){CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';clean();save();tabs();grid();upd();offers();rapply();loadImgs()}
+function ref(){CATS=['الكل'].concat(D.cats);if(CATS.indexOf(cat)<0)cat='الكل';clean();save();tabs();grid();upd();offers();rapply();loadImgs();logoLoad()}
 // ===== ربط قاعدة البيانات (Firebase Realtime Database) =====
 var DBU='abu-saied-a6b74-default-rtdb.firebaseio.com',ct=0;
 function sync(){
