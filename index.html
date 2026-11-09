@@ -543,7 +543,7 @@ async function rAI(key,text){
 function rErr(m){var e=$('rerr');if(e){e.textContent=m;e.style.display=m?'block':'none'}}
 function rIn(){
  vStop(false);RMODE='old';$('rpn').className='pn';
- $('rpn').innerHTML='<h2>'+esc(AN())+'<button class="x" id="rx" type="button" aria-label="رجوع">→</button></h2><p class="fsub">اكتب طلبك زي ما بتتكلم وأنا هرتّبه لك، وبعدها تزوّد أو تنقّص زي ما تحب. مثال: ٥ كراتين شيبسي ملح و٣ طماطم و٢ ذرة</p><textarea id="rt" rows="5" placeholder="اكتب طلبك هنا...">'+esc(RT)+'</textarea>'+((SR||vCanAI())&&!(CFG&&CFG.rm)?'<button class="vmic" id="rmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="rmvl">اطلب بالصوت</span></button>':'')+'<div class="min" id="rerr"></div><button class="send rgold" id="rgo" type="button">حلّل طلبي 🤖</button>'}
+ $('rpn').innerHTML='<h2>Rahal Ai<button class="x" id="rx" type="button" aria-label="رجوع">→</button></h2><p class="fsub">اكتب طلبك زي ما بتتكلم وأنا هرتّبه لك، وبعدها تزوّد أو تنقّص زي ما تحب. مثال: ٥ كراتين شيبسي ملح و٣ طماطم و٢ ذرة</p><textarea id="rt" rows="5" placeholder="اكتب طلبك هنا...">'+esc(RT)+'</textarea>'+((SR||vCanAI())&&!(CFG&&CFG.rm)?'<button class="vmic" id="rmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="rmvl">اطلب بالصوت</span></button>':'')+'<div class="min" id="rerr"></div><button class="send rgold" id="rgo" type="button">حلّل طلبي 🤖</button>'}
 var LY=[];
 if(/^#(ai|s)$/.test(location.hash)){try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}}
 function lyPush(f){var h=f===aiHide?'#ai':'#s',p=1;try{history.pushState({ly:1},'',h)}catch(e){try{history.pushState({ly:1},'')}catch(e2){try{location.hash=h}catch(e3){p=0}}}LY.push({f:f,p:p})}
@@ -707,7 +707,7 @@ function chFix(L){var has={};L.forEach(function(o){if(o.f>=0)has[o.i]=1});return
 function chOpen(){
  vStop(false);RMODE='chat';
  var p=$('rpn');p.className='pn rchat';
- p.innerHTML='<h2>💬 '+esc(AN())+'<button class="x" id="rx" type="button" aria-label="رجوع">→</button></h2>'+
+ p.innerHTML='<h2>💬 Rahal Ai<button class="x" id="rx" type="button" aria-label="رجوع">→</button></h2>'+
   '<div id="chm" class="rcm"></div><div id="chd"></div>'+
   (((SR||vCanAI())&&!(CFG&&CFG.rm))?'<button class="vmic sm" id="rmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="rmvl">اطلب بالصوت</span></button>':'')+
   '<div class="rcin"><textarea id="rt" rows="2" placeholder="اكتب هنا...">'+esc(RT)+'</textarea><button class="send rgold" id="chsend" type="button">إرسال</button></div>'+
@@ -716,7 +716,7 @@ function chOpen(){
  chRender()}
 function chRender(){
  var m=$('chm');if(!m)return;var h='';
- if(!CH.msgs.length)h='<div class="rcb a">أهلًا 👋 أنا '+esc(AN())+'. قولّي عايز تطلب إيه وكام كرتونة، وأنا هرتّب لك الطلب وأسألك عن الناقص (النكهة أو الحجم).<br><small>مثال: «٥ كراتين شيبسي ملح و٣ طماطم و٢ ذرة»</small></div>';
+ if(!CH.msgs.length)h='<div class="rcb a">أهلًا 👋 أنا Rahal Ai. قولّي عايز تطلب إيه وكام كرتونة، وأنا هرتّب لك الطلب وأسألك عن الناقص (النكهة أو الحجم).<br><small>مثال: «٥ كراتين شيبسي ملح و٣ طماطم و٢ ذرة»</small></div>';
  CH.msgs.forEach(function(x){h+='<div class="rcb '+x.r+'">'+esc(x.t)+'</div>'});
  if(CH.busy)h+='<div class="rcb a">⏳ بفكّر...</div>';
  m.innerHTML=h;m.scrollTop=m.scrollHeight;
@@ -729,7 +729,7 @@ function chRender(){
 function chPrompt(){
  var dr=RL.map(function(l){return {i:l.i,f:l.f,q:l.q}}),
  tr=CH.msgs.slice(-14).map(function(x){return (x.r=='u'?'العميل: ':'المساعد: ')+x.t}).join('\n');
- return 'أنت «'+AN()+'» مساعد متجر جملة اسمه «أبو سعيد». بتكلم العميل بالعامية المصرية بشكل ودود ومختصر (سطرين بالكتير)، ومهمتك تاخد طلبه بالمحادثة وترتبه من كتالوج المتجر. العميل ممكن يكتب بأخطاء إملائية أو أخطاء من التعرف على الصوت، فطابق بدقة.\n'+
+ return 'أنت «Rahal Ai» مساعد متجر جملة اسمه «أبو سعيد». بتكلم العميل بالعامية المصرية بشكل ودود ومختصر (سطرين بالكتير)، ومهمتك تاخد طلبه بالمحادثة وترتبه من كتالوج المتجر. العميل ممكن يكتب بأخطاء إملائية أو أخطاء من التعرف على الصوت، فطابق بدقة.\n'+
  'الكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|النكهات بصيغة رقم=اسم):\n'+rCat()+'\n'+
  'ارجع JSON فقط (من غير أي كلام برّاه) بالشكل: {"reply":"","items":[{"i":0,"f":-1,"q":1,"a":false,"alt":[]}],"unknown":[""],"clear":false,"action":"none"}\n'+
  'القواعد:\n'+
@@ -792,7 +792,7 @@ function rRv(){
  var ord=[],gm={};
  RL.forEach(function(l){var p=P[l.i];if(!gm[l.i]){gm[l.i]=[l];ord.push(l.i)}else if(!FL(p).length){gm[l.i][0].q=Math.min(gm[l.i][0].q+l.q,99)}else gm[l.i].push(l)});
  RL=[];ord.forEach(function(i){gm[i].forEach(function(l){RL.push(l)})});
- var h='<h2>'+esc(AN())+'<button class=\"x\" id=\"rx\" type=\"button\" aria-label=\"رجوع\">→</button></h2><p class=\"fsub\">دي طلباتك زي ما فهمتها. زوّد أو نقّص أو غيّر أي صنف، ولو عايز أكتر من نكهة دوس «+ نكهة تانية».</p>',tot=0,seen={};
+ var h='<h2>Rahal Ai<button class=\"x\" id=\"rx\" type=\"button\" aria-label=\"رجوع\">→</button></h2><p class=\"fsub\">دي طلباتك زي ما فهمتها. زوّد أو نقّص أو غيّر أي صنف، ولو عايز أكتر من نكهة دوس «+ نكهة تانية».</p>',tot=0,seen={};
  RL.forEach(function(l,n){var p=P[l.i],fl=FL(p),a=' data-rn=\"'+n+'\"',first=!seen[l.i];seen[l.i]=1;tot+=l.q*p[3];
   var used={},rows=0,avail=0;
   RL.forEach(function(o){if(o.i==l.i){rows++;if(o!==l&&o.f>=0)used[o.f]=1}});
@@ -829,8 +829,7 @@ $('rsheet').onclick=function(e){var t=e.target;if(t!=this){var cb=t.closest('but
 $('rsheet').onchange=function(e){var t=e.target,l=RL[+t.dataset.rn];if(!l)return;
  if(t.dataset.rk=='i'){var oi=l.i,ni=+t.value;RL.forEach(function(o){if(o.i==oi){o.i=ni;o.f=-1;o.amb=false}});rRv()}
  else if(t.dataset.rk=='f'){l.f=+t.value;rRv()}};
-function AN(){var n=CFG&&CFG.rn!=null?String(CFG.rn).trim():'';return n||'Rahal Ai'}
-function rapply(){var h=$('raiH'),t=CFG&&CFG.rt!=null?CFG.rt:'اطلب بالكتابة أو الصوت';h.style.display=CFG&&CFG.ro?'none':'';h.textContent=AN()+' 🤖';applyCfg()}
+function rapply(){var h=$('raiH'),t=CFG&&CFG.rt!=null?CFG.rt:'اطلب بالكتابة أو الصوت';h.style.display=CFG&&CFG.ro?'none':'';h.textContent='Rahal Ai 🤖';applyCfg()}
 $('raiH').onclick=openAI;
 
 $('q').onkeydown=function(e){if(e.key=='Enter'){e.preventDefault();openS(this.value)}};
