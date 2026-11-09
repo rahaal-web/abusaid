@@ -148,12 +148,14 @@ var PAL=[['أصفر','#ffd23f','#e8a400'],['أحمر','#ff4b3e','#b3201a'],['ب�
 var $=function(i){return document.getElementById(i)};
 var fls=[];
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}
+function AN(){var n=D&&D.cfg&&D.cfg.rn!=null?String(D.cfg.rn).trim():'';return n||'Rahal Ai'}
 function toast(m){var t=$('ts');t.textContent=m;t.className='toast on';clearTimeout(toast.t);toast.t=setTimeout(function(){t.className='toast'},2800)}
 function mark(){dirty=true;$('st').textContent='• فيه تعديلات لسه ما اتنشرتش';$('pub').classList.add('hot')}
 window.onbeforeunload=function(){if(dirty)return 'x'};
 function cnt(c){return D.p.filter(function(p){return p[1]==c}).length}
 function np(v){v=v.replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/\D/g,'');if(v.indexOf('00')==0)v=v.slice(2);if(v[0]=='0')v='20'+v.slice(1);return v}
 function render(){
+ var sb=$('smb');if(sb)sb.textContent=AN();
  [].forEach.call(document.querySelectorAll('.tb button'),function(b){b.classList.toggle('on',b.dataset.t==tab)});
  $('qw').hidden=tab!='p';$('v').innerHTML=tab=='p'?vp():tab=='c'?vc():tab=='o'?vo():vs()}
 function vp(){
@@ -179,12 +181,13 @@ function designCard(){var c=D.cfg,im=c.logo&&IMG[c.logo];
 function vs(){var c=D.cfg;
  return '<div class="card2"><label>رقم واتساب الطلبات</label><input dir="ltr" inputmode="tel" data-s="phone" value="'+esc(c.phone)+'" placeholder="مثال: 01012345678"><p class="hint">اكتبه بأي شكل (01… أو 20…) وهيتظبط لوحده. <a href="https://wa.me/'+esc(c.phone)+'" target="_blank" rel="noopener">جرّب الرقم 📲</a></p>'+
  '<label>أقل قيمة للطلب (جنيه)</label><input type="number" inputmode="numeric" data-s="min" value="'+c.min+'"><p class="hint">اكتب 0 لو مفيش حد أدنى.</p>'+
- '<label>اسم الوحدة</label><input data-s="unit" value="'+esc(c.unit)+'"><p class="hint">زي: كرتونة، دستة، شوال.</p><label>API (Rahal Ai للعملاء)</label><input type="password" autocomplete="off" dir="ltr" data-s="gk" value="'+esc(c.gk||'')+'"></div>'+
+ '<label>اسم الوحدة</label><input data-s="unit" value="'+esc(c.unit)+'"><p class="hint">زي: كرتونة، دستة، شوال.</p><label>API ('+esc(AN())+' للعملاء)</label><input type="password" autocomplete="off" dir="ltr" data-s="gk" value="'+esc(c.gk||'')+'"></div>'+
 designCard()+
 '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🎁 عنوان العروض</b>'+'<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار العنوان للعملاء</b><label class="sw"><input type="checkbox" data-s="oh"'+(c.oh?'':' checked')+'><i></i></label></div>'+'<label>نص العنوان</label><input data-s="ot" value="'+esc(c.ot==null?'🎁 العروض':c.ot)+'" placeholder="🎁 العروض">'+rg('os','حجم العنوان',60,200,5,100,'%')+'</div>'+
-'<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🤖 Rahal Ai</b>'+
-'<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار Rahal Ai للعملاء</b><label class="sw"><input type="checkbox" data-s="ro"'+(c.ro?'':' checked')+'><i></i></label></div>'+
-'<label>الجملة اللي جنب Rahal Ai</label><input data-s="rt" value="'+esc(c.rt==null?'اطلب بالكتابة أو الصوت':c.rt)+'" placeholder="اطلب بالكتابة أو الصوت">'+
+'<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🤖 '+esc(AN())+'</b>'+
+'<label>اسم الزر</label><input data-s="rn" value="'+esc(c.rn==null?'Rahal Ai':c.rn)+'" placeholder="Rahal Ai"><p class="hint">الاسم ده بيظهر على الزر عند العميل وفي لوحة التحكم. بعد التغيير دوس نشر عشان يتغير عند العملاء.</p>'+
+'<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار '+esc(AN())+' للعملاء</b><label class="sw"><input type="checkbox" data-s="ro"'+(c.ro?'':' checked')+'><i></i></label></div>'+
+'<label>الجملة اللي جنب '+esc(AN())+'</label><input data-s="rt" value="'+esc(c.rt==null?'اطلب بالكتابة أو الصوت':c.rt)+'" placeholder="اطلب بالكتابة أو الصوت">'+
 '<div class="cr" style="border:0;background:transparent;padding:0;margin:12px 0 0"><b style="flex:1">الكتابة بالصوت 🎤</b><label class="sw"><input type="checkbox" data-s="rm"'+(c.rm?'':' checked')+'><i></i></label></div></div>'}
 var dupFrom=-1;
 function openEd(i,c,dup){
@@ -242,7 +245,7 @@ $('app').addEventListener('change',function(e){var t=e.target;
   if(!v||(v!=o&&D.cats.indexOf(v)>-1)){toast('الاسم فاضي أو مكرر');render();return}
   D.p.forEach(function(p){if(p[1]==o)p[1]=v});D.cats[i]=v;mark()}
  else if(t.dataset.s){var k=t.dataset.s;
-  if(k=='phone'){D.cfg.phone=np(t.value);render()}else if(k=='min')D.cfg.min=+t.value||0;else if(k=='gk')D.cfg.gk=t.value.trim();else if(k=='ro')D.cfg.ro=t.checked?0:1;else if(k=='rm')D.cfg.rm=t.checked?0:1;else if(k=='rt')D.cfg.rt=t.value.trim();else if(k=='oh')D.cfg.oh=t.checked?0:1;else if(k=='ot')D.cfg.ot=t.value.trim();else D.cfg.unit=t.value.trim()||'كرتونة';mark()}});
+  if(k=='phone'){D.cfg.phone=np(t.value);render()}else if(k=='min')D.cfg.min=+t.value||0;else if(k=='gk')D.cfg.gk=t.value.trim();else if(k=='ro')D.cfg.ro=t.checked?0:1;else if(k=='rm')D.cfg.rm=t.checked?0:1;else if(k=='rn'){D.cfg.rn=t.value.trim();render()}else if(k=='rt')D.cfg.rt=t.value.trim();else if(k=='oh')D.cfg.oh=t.checked?0:1;else if(k=='ot')D.cfg.ot=t.value.trim();else D.cfg.unit=t.value.trim()||'كرتونة';mark()}});
 $('q').addEventListener('input',function(){q=this.value.trim();$('v').innerHTML=vp()});
 
 // ===== العروض =====
@@ -484,7 +487,7 @@ $('ov').addEventListener('click',function(e){var b=e.target.closest&&e.target.cl
 function smIn(t){
  vStop(false);CHF=false;
  var k='';try{k=localStorage.getItem('abu_gk')||''}catch(z){}
- $('ov').innerHTML='<div class="pn"><h2>Rahal Ai<button class="x" id="smx">✕</button></h2><p class="hint">اكتب أو الصق وصف الأصناف زي ما تتكلم، وتقدر تكتب أكتر من صنف. هتراجع النتيجة قبل ما تتضاف.</p><label>وصف الأصناف</label><textarea id="smt" rows="6" placeholder="مثال: شيبسي كبير عنده 15 طعم: ملح، طماطم، شطة، جبنة، خل... كرتونة 24 كيس بسعر 260 جنيه في قسم شيبسي">'+esc(t)+'</textarea><button class=\"vmic\" id=\"smmic\" type=\"button\"><span class=\"vb\"><i></i><i></i><i></i><i></i><i></i></span><span id=\"smvl\">اكتب بالصوت</span></button><p class=\"hint\">تقدر تقول «سطر جديد» عشان تبدأ صنف تاني، و«فاصلة» لو عايز فاصلة.</p><label>API</label><input id="smk" type="password" autocomplete="off" dir="ltr" value="'+esc(k)+'"><div class="r2"><button class="pubb big" id="smai">🤖 حلّل بالذكاء الاصطناعي</button></div><button class="mini" id="smlp" style="width:100%;margin-top:10px;padding:8px">⚡ حلّل بدون ذكاء اصطناعي (سطر لكل صنف)</button><div class="err" id="sme"></div></div>';
+ $('ov').innerHTML='<div class="pn"><h2>'+esc(AN())+'<button class="x" id="smx">✕</button></h2><p class="hint">اكتب أو الصق وصف الأصناف زي ما تتكلم، وتقدر تكتب أكتر من صنف. هتراجع النتيجة قبل ما تتضاف.</p><label>وصف الأصناف</label><textarea id="smt" rows="6" placeholder="مثال: شيبسي كبير عنده 15 طعم: ملح، طماطم، شطة، جبنة، خل... كرتونة 24 كيس بسعر 260 جنيه في قسم شيبسي">'+esc(t)+'</textarea><button class=\"vmic\" id=\"smmic\" type=\"button\"><span class=\"vb\"><i></i><i></i><i></i><i></i><i></i></span><span id=\"smvl\">اكتب بالصوت</span></button><p class=\"hint\">تقدر تقول «سطر جديد» عشان تبدأ صنف تاني، و«فاصلة» لو عايز فاصلة.</p><label>API</label><input id="smk" type="password" autocomplete="off" dir="ltr" value="'+esc(k)+'"><div class="r2"><button class="pubb big" id="smai">🤖 حلّل بالذكاء الاصطناعي</button></div><button class="mini" id="smlp" style="width:100%;margin-top:10px;padding:8px">⚡ حلّل بدون ذكاء اصطناعي (سطر لكل صنف)</button><div class="err" id="sme"></div></div>';
  $('ov').classList.add('on')}
 function smOpen(){SM=[];smIn(SMT)}
 // ===== شات Rahal Ai: إضافة أصناف بالمحادثة (إضافة بس) =====
@@ -494,7 +497,7 @@ function chKey(){var k='';try{k=localStorage.getItem('abu_gk')||''}catch(z){}ret
 function chOpen(){
  vStop(false);CHF=true;var k=chKey();
  $('ov').innerHTML='<div class="pn" id="chp" style="display:flex;flex-direction:column;height:92%;max-height:92%;overflow:hidden">'+
-  '<h2>💬 Rahal Ai<button class="x" id="smx">✕</button></h2>'+
+  '<h2>💬 '+esc(AN())+'<button class="x" id="smx">✕</button></h2>'+
   '<div id="chm" class="chm"></div><div id="chd"></div>'+
   (k?'<input id="smk" type="hidden" value="'+esc(k)+'">':'<input id="smk" type="password" autocomplete="off" dir="ltr" placeholder="الصق مفتاح Gemini هنا (API)" style="margin-top:8px">')+
   '<button class="vmic sm" id="smmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="smvl">اكتب بالصوت</span></button>'+
