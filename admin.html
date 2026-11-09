@@ -492,7 +492,7 @@ function smIn(t){
 function smOpen(){SM=[];smIn(SMT)}
 // ===== شات Rahal Ai: إضافة أصناف بالمحادثة (إضافة بس) =====
 var CH={msgs:[],draft:[],busy:0},CHF=false;
-function chReset(){CH.msgs=[];CH.draft=[];CH.busy=0}
+function chReset(){CH.msgs=[];CH.draft=[];CH.busy=0;CH.pend=null;CH.undo=null}
 function chKey(){var k='';try{k=localStorage.getItem('abu_gk')||''}catch(z){}return k||(D.cfg&&D.cfg.gk)||''}
 function chOpen(){
  vStop(false);CHF=true;var k=chKey();
@@ -507,18 +507,18 @@ function chOpen(){
  $('ov').classList.add('on');chRender()}
 function chRender(){
  var m=$('chm');if(!m)return;var h='';
- if(!CH.msgs.length)h='<div class="cm a">أهلًا 👋 قولّي عايز تضيف إيه، وأنا هسألك عن الناقص (السعر والأحجام والنكهات)، وبعدها تراجع وتضيف.<br><small>مثال: «ضيف دوريتوس صغير بـ ٥ جنيه ووسط بـ ١٠»</small></div>';
+ if(!CH.msgs.length)h='<div class="cm a">أهلًا 👋 قولّي عايز تضيف إيه، وأنا هسألك عن الناقص (السعر والأحجام والنكهات)، وبعدها تراجع وتضيف.<br><small>مثال: «ضيف دوريتوس صغير بـ ٥ جنيه ووسط بـ ١٠»</small><br><small>أو عدّل: «زوّد كل الشيبسي ٥ جنيه» · «اقفل أصناف دوريتوس» · «خصم ١٠٪ على المشروبات»</small></div>';
  CH.msgs.forEach(function(x){h+='<div class="cm '+x.r+'">'+esc(x.t)+'</div>'});
  if(CH.busy)h+='<div class="cm a">⏳ بفكّر...</div>';
  m.innerHTML=h;m.scrollTop=m.scrollHeight;
  var d=$('chd');if(!d)return;var L=CH.draft;
- d.innerHTML=L.length?'<div class="card2" style="margin:8px 0 0;padding:8px 10px"><b>📝 المسودة ('+L.length+')</b><div class="hint">'+L.map(function(o){return esc(o.n+(o.v?' · '+o.v:''))+' — '+(o.p>0?o.p+' جنيه':'⚠️ من غير سعر')+(o.f.length?' — '+o.f.length+' نكهة':'')}).join('<br>')+'</div><div class="r2"><button class="pubb big" id="chrv" type="button" style="margin-top:8px;padding:8px">✅ راجع وأضف</button><button class="del big" id="chnw" type="button" style="margin-top:8px;padding:8px;flex:none">مسح</button></div></div>':''}
+ d.innerHTML=(L.length?'<div class="card2" style="margin:8px 0 0;padding:8px 10px"><b>📝 المسودة ('+L.length+')</b><div class="hint">'+L.map(function(o){return esc(o.n+(o.v?' · '+o.v:''))+' — '+(o.p>0?o.p+' جنيه':'⚠️ من غير سعر')+(o.f.length?' — '+o.f.length+' نكهة':'')}).join('<br>')+'</div><div class="r2"><button class="pubb big" id="chrv" type="button" style="margin-top:8px;padding:8px">✅ راجع وأضف</button><button class="del big" id="chnw" type="button" style="margin-top:8px;padding:8px;flex:none">مسح</button></div></div>':'')+chEdCard()}
 function chPrompt(){
  var names=[];D.p.forEach(function(p){if(p[0]&&names.indexOf(p[0])<0)names.push(p[0])});
  var dr=CH.draft.map(function(o){return {name:o.n,category:o.c,pack:o.d,price:o.p,oldPrice:o.o,variant:o.v,emoji:o.e,flavors:o.f}});
  var tr=CH.msgs.slice(-14).map(function(x){return (x.r=='u'?'التاجر: ':'المساعد: ')+x.t}).join('\n');
- return 'أنت مساعد بيتكلم مع تاجر جملة مصري بالعامية المصرية، ومهمتك تساعده يضيف أصناف لمتجره بالمحادثة. ردودك قصيرة وودودة (سطرين بالكتير) وبتسأل سؤال واحد بس في المرة.\n'+
- 'ارجع JSON فقط (من غير أي كلام برّاه) بالشكل: {"reply":"","products":[{"name":"","category":"","pack":"","price":0,"oldPrice":0,"variant":"","emoji":"","flavors":[""]}],"action":"none"}\n'+
+ return 'أنت مساعد بيتكلم مع تاجر جملة مصري بالعامية المصرية، ومهمتك تساعده يضيف أصناف جديدة لمتجره، أو يعدّل أي حاجة موجودة (أسعار، أصناف، أقسام، عروض، إعدادات) بالمحادثة. ردودك قصيرة وودودة (سطرين بالكتير) وبتسأل سؤال واحد بس في المرة.\n'+
+ 'ارجع JSON فقط (من غير أي كلام برّاه) بالشكل: {"reply":"","products":[{"name":"","category":"","pack":"","price":0,"oldPrice":0,"variant":"","emoji":"","flavors":[""]}],"ops":[],"action":"none"}\n'+
  'القواعد:\n'+
  '- products هي المسودة الكاملة الحالية في كل رد: ابدأ من المسودة الحالية، طبّق عليها آخر كلام التاجر (إضافة أو تعديل)، وارجعها كلها. ماتشيلش صنف غير لو التاجر طلب ده صراحة.\n'+
  '- ماتخترعش أسعار ولا نكهات ولا عبوات: اكتب بس اللي التاجر قاله بالظبط. السعر يفضل 0 لحد ما التاجر يقوله. انسخ الأرقام زي ما هي من غير حساب.\n'+
@@ -531,7 +531,127 @@ function chPrompt(){
  '- لما كل صنف في المسودة يبقى له اسم وسعر وقسم، لخّصهم في reply في جملة واسأله «أضيفهم؟».\n'+
  '- action تبقى "review" بس لو التاجر وافق صراحة (قال أيوه أو ضيف أو تمام أو يلا) والمسودة كلها جاهزة، غير كده تبقى "none".\n'+
  '- لو التاجر سأل في حاجة بعيدة عن إضافة الأصناف رد بجملة قصيرة وارجّعه للموضوع، وارجع المسودة زي ما هي.\n'+
- 'المسودة الحالية: '+JSON.stringify(dr)+'\nالمحادثة:\n'+tr}
+ edRules()+'المسودة الحالية: '+JSON.stringify(dr)+'\nالمحادثة:\n'+tr}
+
+// ===== تعديل شامل بالذكاء الاصطناعي =====
+function nr(s){return String(s==null?'':s).replace(/[\u064B-\u0652\u0640]/g,'').replace(/[أإآٱ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).toLowerCase().trim()}
+function nn(v){if(v==null||v==='')return null;v=parseFloat(nr(v));return isFinite(v)?v:null}
+function ar(v){return v==null?[]:[].concat(v)}
+function sv(b,i,v){if(v||b.length>i)b[i]=v}
+function pl(p){return p[0]+(p[10]?' · '+p[10]:'')}
+function catEx(X,n){var k=nr(n);if(!k)return null;for(var i=0;i<X.cats.length;i++)if(nr(X.cats[i])==k)return X.cats[i];return null}
+function catOf(X,n){var c=catEx(X,n);if(c)return c;var k=nr(n);if(!k)return null;for(var i=0;i<X.cats.length;i++){var x=nr(X.cats[i]);if(x.indexOf(k)>-1||k.indexOf(x)>-1)return X.cats[i]}return null}
+function edMatch(X,p,w){
+ if(!w||typeof w!='object')return false;var any=0,ok=1,t;
+ var nm=ar(w.name).map(nr).filter(Boolean);
+ if(nm.length){any=1;var n=nr(p[0]);if(!nm.some(function(x){return n.indexOf(x)>-1}))ok=0}
+ if(w.category){any=1;var c=catOf(X,w.category);if(!c||p[1]!=c)ok=0}
+ if(w.flavor){any=1;var f=nr(w.flavor);if(!(p[9]||[]).some(function(x){return nr(x[0]).indexOf(f)>-1}))ok=0}
+ if(w.variant){any=1;if(nr(p[10]||'').indexOf(nr(w.variant))<0)ok=0}
+ if(w.pack){any=1;if(nr(p[2]||'').indexOf(nr(w.pack))<0)ok=0}
+ if((t=nn(w.minPrice))!=null){any=1;if(!(p[3]>=t))ok=0}
+ if((t=nn(w.maxPrice))!=null){any=1;if(!(p[3]<=t))ok=0}
+ if(w.hidden===true||w.hidden===false){any=1;if(!!p[7]!=w.hidden)ok=0}
+ if(w.all===true)any=1;
+ return !!(any&&ok)}
+function dsc(a,b){var r=[];
+ if(a[3]!=b[3])r.push('السعر '+a[3]+' ← '+b[3]);
+ if((+a[11]||0)!=(+b[11]||0))r.push('قبل الخصم '+(a[11]||'—')+' ← '+(b[11]||'—'));
+ if(a[0]!=b[0])r.push('الاسم ← '+b[0]);
+ if(a[1]!=b[1])r.push('القسم ← '+b[1]);
+ if((a[2]||'')!=(b[2]||''))r.push('العبوة ← '+(b[2]||'—'));
+ if((a[10]||'')!=(b[10]||''))r.push('النوع ← '+(b[10]||'—'));
+ if(a[6]!=b[6])r.push('الإيموجي ← '+b[6]);
+ if(!!a[7]!=!!b[7])r.push(b[7]?'إخفاء':'إظهار');
+ if(JSON.stringify(a[9]||[])!=JSON.stringify(b[9]||[]))r.push('النكهات اتغيّرت');
+ return r.join('، ')}
+function edProd(X,o,R){
+ var d=o['do']||{},w=o.where||{},keep=[];
+ X.p.forEach(function(p){
+  if(!edMatch(X,p,w)){keep.push(p);return}
+  if(d['delete']===true){R.lines.push('🗑 حذف: '+pl(p));R.del++;R.n++;return}
+  var a=JSON.parse(JSON.stringify(p)),b=p,pr=+b[3],bo=+b[11]||0,t;
+  if((t=nn(d.setPrice))!=null)pr=t;
+  if((t=nn(d.addPrice))!=null)pr+=t;
+  if((t=nn(d.pctPrice))!=null)pr*=1+t/100;
+  if((t=nn(d.discountPct))!=null){var bs=bo>pr?bo:pr;bo=bs;pr=bs*(1-t/100)}
+  if((t=nn(d.setOldPrice))!=null)bo=t;
+  if(d.clearOldPrice===true)bo=0;
+  pr=Math.round(pr*100)/100;
+  if(!(pr>0)){R.lines.push('⚠️ اتخطّى '+pl(p)+' (السعر هيبقى صفر)');keep.push(p);return}
+  b[3]=pr;sv(b,11,bo>pr?bo:0);
+  if(d.rename&&d.rename.find){var fd=String(d.rename.find),rp=String(d.rename.replace==null?'':d.rename.replace);if(b[0].indexOf(fd)>-1)b[0]=b[0].split(fd).join(rp).replace(/\s+/g,' ').trim()||b[0]}
+  if(d.setName&&String(d.setName).trim())b[0]=String(d.setName).trim();
+  if(d.setCategory){var cc=catOf(X,d.setCategory);if(!cc){cc=String(d.setCategory).trim();if(cc)X.cats.push(cc)}if(cc)b[1]=cc}
+  if(d.setPack!=null)b[2]=String(d.setPack).trim();
+  if(d.setVariant!=null)sv(b,10,String(d.setVariant).trim());
+  if(d.setEmoji&&String(d.setEmoji).trim())b[6]=String(d.setEmoji).trim().slice(0,8);
+  if(d.hide===true)b[7]=1;else if(d.hide===false)b[7]=0;
+  var fl=(b[9]||[]).map(function(f){return [f[0],f[1]?1:0]}),chg=0;
+  ar(d.addFlavors).forEach(function(x){x=String(x).trim();if(x&&!fl.some(function(f){return nr(f[0])==nr(x)})){fl.push([x,0]);chg=1}});
+  ar(d.removeFlavors).forEach(function(x){var k=nr(x);if(!k)return;var n0=fl.length;fl=fl.filter(function(f){return nr(f[0])!=k});if(fl.length!=n0)chg=1});
+  ar(d.hideFlavors).forEach(function(x){var k=nr(x);if(k)fl.forEach(function(f){if(nr(f[0]).indexOf(k)>-1&&!f[1]){f[1]=1;chg=1}})});
+  ar(d.showFlavors).forEach(function(x){var k=nr(x);if(k)fl.forEach(function(f){if(nr(f[0]).indexOf(k)>-1&&f[1]){f[1]=0;chg=1}})});
+  if(chg)sv(b,9,fl.length?fl:0);
+  var ln=dsc(a,b);if(ln){R.lines.push(pl(a)+': '+ln);R.n++}
+  keep.push(b)});
+ X.p=keep}
+function edCat(X,o,R){
+ var a=o['do'],f=o.from||o.name,t=String(o.to==null?'':o.to).trim(),c;
+ if(a=='add'){var n=String(o.name||o.to||'').trim();if(n&&!catEx(X,n)){X.cats.push(n);R.lines.push('➕ قسم جديد: '+n);R.n++}}
+ else if(a=='rename'){c=catOf(X,f);if(!c||!t||t==c)return;var ex=catEx(X,t),k=X.p.filter(function(p){return p[1]==c}).length;
+  if(ex&&ex!=c){X.p.forEach(function(p){if(p[1]==c)p[1]=ex});X.cats.splice(X.cats.indexOf(c),1);R.lines.push('🗂 دمج قسم «'+c+'» في «'+ex+'» ('+k+' صنف)')}
+  else{X.p.forEach(function(p){if(p[1]==c)p[1]=t});X.cats[X.cats.indexOf(c)]=t;R.lines.push('🗂 تغيير اسم القسم «'+c+'» ← «'+t+'»')}R.n++}
+ else if(a=='delete'){c=catEx(X,f);if(!c)return;var k2=X.p.filter(function(p){return p[1]==c}).length;
+  X.p=X.p.filter(function(p){return p[1]!=c});X.cats.splice(X.cats.indexOf(c),1);R.lines.push('🗑 حذف قسم «'+c+'»'+(k2?' ومعاه '+k2+' صنف':''));R.del+=k2||1;R.n++}}
+function edOff(X,o,R){
+ var L=X.offers||(X.offers=[]),a=o['do'],s=o.set||{},w=o.where||{};
+ if(a=='add'){var t=String(o.title||'').trim();if(!t)return;L.push({t:t,d:String(o.desc||''),pr:String(o.price==null?'':o.price),g:String(o.badge||''),c:PAL[0][1],i:'',x:0});R.lines.push('🎁 عرض جديد: '+t);R.n++;return}
+ var k=nr(w.title!=null?w.title:o.title||''),all=w.all===true;if(!k&&!all)return;
+ var keep=[];
+ L.forEach(function(x){
+  if(!(all||nr(x.t).indexOf(k)>-1)){keep.push(x);return}
+  if(a=='delete'){R.lines.push('🗑 حذف عرض: '+x.t);R.del++;R.n++;return}
+  var b0=JSON.stringify(x);
+  if(a=='hide')x.x=1;else if(a=='show')x.x=0;
+  if(s.title!=null&&String(s.title).trim())x.t=String(s.title).trim();
+  if(s.desc!=null)x.d=String(s.desc);
+  if(s.price!=null)x.pr=String(s.price);
+  if(s.badge!=null)x.g=String(s.badge);
+  if(JSON.stringify(x)!=b0){R.lines.push('🎁 '+x.t+': '+(a=='hide'?'إخفاء':a=='show'?'إظهار':'تعديل'));R.n++}
+  keep.push(x)});
+ X.offers=keep}
+function edSet(X,o,R){
+ var d=o['do']||o.set||{},c=X.cfg,t;
+ if((t=nn(d.min))!=null&&t>=0&&t!=c.min){R.lines.push('⚙️ أقل قيمة للطلب: '+c.min+' ← '+t);c.min=t;R.n++}
+ if(d.unit){var u=String(d.unit).trim();if(u&&u!=c.unit){R.lines.push('⚙️ اسم الوحدة: '+c.unit+' ← '+u);c.unit=u;R.n++}}
+ if(d.phone){var ph=np(String(d.phone));if(ph.length>=11&&ph!=c.phone){R.lines.push('⚙️ رقم الواتساب: '+c.phone+' ← '+ph);c.phone=ph;R.n++}}}
+function edApply(X,ops){
+ var R={lines:[],n:0,del:0};
+ (ops||[]).forEach(function(o){if(!o||typeof o!='object')return;
+  try{if(o.type=='product')edProd(X,o,R);else if(o.type=='category')edCat(X,o,R);else if(o.type=='offer')edOff(X,o,R);else if(o.type=='settings')edSet(X,o,R)}catch(z){console.error(z)}});
+ return R}
+function edRules(){
+ var cat=D.p.slice(0,500).map(function(p){return p[0]+(p[10]?' ('+p[10]+')':'')+' | '+p[1]+' | '+p[3]+(+p[11]>p[3]?' (قبل '+p[11]+')':'')+(p[7]?' | مخفي':'')+(p[9]&&p[9].length?' | نكهات: '+p[9].slice(0,12).map(function(f){return f[0]+(f[1]?'(خلص)':'')}).join('،'):'')}).join('\n');
+ var of=(D.offers||[]).map(function(o){return o.t+(o.x?' (مخفي)':'')}).join(' / ');
+ return '- التعديل على الموجود: لو التاجر عايز يغيّر أو يحذف أو يخفي أو يزوّد أو ينقّص حاجة موجودة (أسعار، أصناف، أقسام، عروض، إعدادات) املا ops (مصفوفة عمليات) وسيب products زي المسودة الحالية. التطبيق هو اللي بيطبّق العمليات على كل الأصناف المطابقة ويعرضها للتاجر يراجعها وينفّذها، فماتحسبش أسعار بنفسك وماتسردش أصناف: اوصف الفلتر والتغيير بس، وماتخترعش أرقام التاجر ماقالهاش. reply تبقى جملة قصيرة تقول إنك جهّزت التعديلات تحت عشان يراجعها وينفّذها (ماتقولش إنها اتنفّذت).\n'+
+ '- شكل عملية الأصناف: {"type":"product","where":{"name":["كلمة"],"category":"","flavor":"","variant":"","pack":"","minPrice":0,"maxPrice":0,"hidden":false,"all":false},"do":{}}. where لازم فيه شرط واحد على الأقل (ولو التاجر قال كل الأصناف حط all:true). name مصفوفة كلمات والصنف يطابق لو اسمه فيه أي كلمة منها. استعمل بس الحقول المطلوبة.\n'+
+ '- do للأصناف (استعمل اللي محتاجه): setPrice سعر جديد ثابت | addPrice زيادة أو نقص بمبلغ (سالب للنقص) | pctPrice زيادة أو نقص بنسبة (سالب للنقص) | discountPct خصم بنسبة (والسعر القديم يتحفظ كسعر قبل الخصم) | setOldPrice | clearOldPrice:true | rename:{"find":"","replace":""} لاستبدال كلمة في الاسم | setName | setCategory | setPack للعبوة | setVariant | setEmoji | hide:true أو false للإخفاء والإظهار | delete:true | addFlavors:[] | removeFlavors:[] | hideFlavors:[] نكهة خلصت | showFlavors:[].\n'+
+ '- الأقسام: {"type":"category","do":"add أو rename أو delete","name":"","from":"","to":""}. العروض: {"type":"offer","do":"add أو update أو hide أو show أو delete","title":"","desc":"","price":"","badge":"","where":{"title":"","all":false},"set":{"title":"","desc":"","price":"","badge":""}}. الإعدادات: {"type":"settings","do":{"min":0,"unit":"","phone":""}} (أقل طلب، اسم الوحدة، رقم الواتساب).\n'+
+ '- ops بتخص رسالة التاجر الحالية بس، فماتكررش عمليات اتنفّذت قبل كده. لو الطلب مش واضح اسأل سؤال واحد وسيب ops فاضية. وماتحطش ops وإضافة أصناف جديدة في نفس الرد.\n'+
+ 'الأصناف الحالية بالتفصيل (الاسم | القسم | السعر):\n'+cat+'\nالعروض الحالية: '+of+'\nالإعدادات الحالية: أقل طلب '+D.cfg.min+'، الوحدة '+D.cfg.unit+'، الواتساب '+D.cfg.phone+'\n'}
+function chEdCard(){var P=CH.pend,h='';
+ if(P){h+='<div class="card2" style="margin:8px 0 0;padding:8px 10px"><b>✏️ التعديلات المقترحة ('+P.n+')</b><div class="hint" style="max-height:26vh;overflow:auto">'+P.lines.slice(0,60).map(esc).join('<br>')+(P.lines.length>60?'<br>... و'+(P.lines.length-60)+' كمان':'')+'</div><div class="r2"><button class="pubb big" id="chex" type="button" style="margin-top:8px;padding:8px">✅ نفّذ</button><button class="del big" id="chcx" type="button" style="margin-top:8px;padding:8px;flex:none">إلغاء</button></div></div>'}
+ if(CH.undo)h+='<button class="mini" id="chun" type="button" style="margin-top:8px">↩️ تراجع عن آخر تعديل</button>';
+ return h}
+function chExec(){
+ var P=CH.pend;if(!P)return;
+ if(P.del&&!confirm('العملية دي هتحذف '+P.del+' عنصر. متأكد؟'))return;
+ CH.undo=JSON.stringify(D);var R=edApply(D,P.ops);D.offers=D.offers||[];CH.pend=null;mark();
+ CH.msgs.push({r:'a',t:'اتنفّذ ✅ ('+R.n+' تعديل). راجع الأصناف ولما تخلّص دوس 🚀 نشر.'});chRender();render()}
+function chUndo(){
+ if(!CH.undo)return;D=JSON.parse(CH.undo);D.offers=D.offers||[];CH.undo=null;CH.pend=null;mark();
+ CH.msgs.push({r:'a',t:'رجّعت آخر تعديل ↩️'});chRender();render()}
 async function chSend(){
  if(CH.busy)return;
  if(VON||VR||VST||VPEND>0){toast('وقّف التسجيل واستنى لحد ما الكلام يتكتب');return}
@@ -548,6 +668,8 @@ async function chSend(){
    var tx=CH.msgs.filter(function(x){return x.r=='u'}).map(function(x){return x.t}).join('\n');
    CH.draft=fixList(L,tx)}
   CH.msgs.push({r:'a',t:String(j.reply||'تمام')});
+  var ops=Array.isArray(j.ops)?j.ops:[];CH.pend=null;
+  if(ops.length){var R1=edApply(JSON.parse(JSON.stringify(D)),ops);if(R1.n){R1.ops=ops;CH.pend=R1}else CH.msgs.push({r:'a',t:'مالقيتش حاجة تتغيّر بالطلب ده، اكتب اسم الصنف أو القسم أوضح.'})}
   CH.busy=0;chRender();
   if(j.action=='review'&&CH.draft.length)chReview()}
  catch(x){
@@ -564,6 +686,9 @@ function chReview(){
 $('ov').addEventListener('click',function(e){var t=e.target,b;
  if(!(b=t.closest&&t.closest('button')))return;
  if(b.id=='chsend')chSend();
+ else if(b.id=='chex')chExec();
+ else if(b.id=='chcx'){CH.pend=null;chRender()}
+ else if(b.id=='chun')chUndo();
  else if(b.id=='chrv')chReview();
  else if(b.id=='chnw'){if(confirm('تمسح المحادثة والمسودة؟')){chReset();chRender()}}
  else if(b.id=='chold'){vStop(false);smOpen()}});
