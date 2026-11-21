@@ -173,11 +173,48 @@ function vc(){
  D.cats.forEach(function(c,i){h+='<div class="cr"><div class="ar"><button data-up="'+i+'">▲</button><button data-dn="'+i+'">▼</button></div><input data-rn="'+i+'" value="'+esc(c)+'"><small>'+cnt(c)+' صنف</small><button class="del" data-dc="'+i+'">🗑</button></div>'});
  return h+'</div><div class="cr"><input id="nc" placeholder="اسم قسم جديد"><button class="pubb" id="addc">+ إضافة</button></div>'}
 function rg(k,l,min,max,st,def,u){var v=D.cfg[k]!=null&&D.cfg[k]!==''?+D.cfg[k]:def;return '<label>'+l+': <b id="nv_'+k+'">'+v+u+'</b></label><input type="range" data-n="'+k+'" data-u="'+u+'" min="'+min+'" max="'+max+'" step="'+st+'" value="'+v+'">'}
+function fontPreviewStyle(id,name){
+ var im=id&&IMG[id];
+ if(!im)return '';
+ var fn=name||'CustomFont';
+ return '<style>@font-face{font-family:"prev_'+esc(id)+'";src:url("'+im+'");font-display:swap}</style><div style="font-family:\'prev_'+esc(id)+'\',Cairo,sans-serif;font-size:16px;padding:8px 10px;background:#fff;color:#1b1b1b;border:2px solid var(--ink);border-radius:10px;margin-top:6px">معاينة الفونت: <b>أبو سعيد – اطلب بضاعتك ١٩٠ جنيه</b></div>';
+}
 function designCard(){var c=D.cfg,im=c.logo&&IMG[c.logo];
- return '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🎨 شكل الصفحة</b>'+
- rg('cols','عدد الأصناف في الصف',2,5,1,3,'')+'<p class="hint">٣ هو الأنسب للموبايل.</p>'+
- '<label>لوجو الصفحة</label><div class="ip"><div class="ipv" style="width:96px;background:#19160f">'+(im?'<img src="'+im+'" alt="">':'<span style="font-size:12px;color:#fff3cf">الأصلي</span>')+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer;margin:0">📷 اختار صورة<input type="file" id="lgf" accept="image/*" hidden></label>'+(c.logo?'<button class="del" type="button" id="lgrm">رجوع للأصلي</button>':'')+'</div></div>'+
- rg('bh','ارتفاع البانر',100,320,10,150,' px')+rg('ls','حجم اللوجو جوه البانر',40,100,5,100,'%')+rg('cs','حجم أزرار الأقسام',80,150,5,100,'%')+'</div>'}
+ var fonts=['','Tajawal','Almarai','Alexandria','Readex Pro','Changa','Rubik','IBM Plex Sans Arabic','Noto Kufi Arabic'];
+ return '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🔤 الخطوط وأحجام النصوص</b>'+
+ '<label>اختيار خط عربي جاهز (اختياري)</label><select data-s="fontPreset">'+fonts.map(function(f){return '<option value="'+esc(f)+'"'+((c.fontPreset||'')==f?' selected':'')+'>'+(f?esc(f):'الافتراضي (Cairo + Lalezar)')+'</option>'}).join('')+'</select>'+
+ '<div class="cr" style="border:0;background:transparent;padding:0;margin:10px 0 4px"><b style="flex:1">تطبيق الخط الأساسي على كل الموقع (العناوين والنصوص)</b><label class="sw"><input type="checkbox" data-s="fontUnified"'+(c.fontUnified?' checked':'')+'><i></i></label></div>'+
+ '<label>رفع خط مخصص للنصوص (TTF / OTF / WOFF / WOFF2)</label>'+
+ '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="pubb" style="display:inline-block;cursor:pointer;margin:0">📁 ارفع ملف خط<input type="file" id="fntBody" accept=".ttf,.otf,.woff,.woff2,font/*" hidden></label>'+(c.fontBodyId?'<span style="font-size:12px;font-weight:800">'+esc(c.fontBodyName||'خط مخصص')+'</span><button class="del" type="button" id="fntBodyRm">حذف الخط</button>':'<span class="hint" style="margin:0">مفيش ملف خط مرفوع</span>')+'</div>'+
+ (c.fontBodyId?fontPreviewStyle(c.fontBodyId,c.fontBodyName):'')+
+ '<label>رفع خط مخصص للعناوين والأسعار (اختياري)</label>'+
+ '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="pubb" style="display:inline-block;cursor:pointer;margin:0;background:var(--blue)">📁 ارفع خط عناوين<input type="file" id="fntHead" accept=".ttf,.otf,.woff,.woff2,font/*" hidden></label>'+(c.fontHeadId?'<span style="font-size:12px;font-weight:800">'+esc(c.fontHeadName||'خط عناوين')+'</span><button class="del" type="button" id="fntHeadRm">حذف خط العناوين</button>':'<span class="hint" style="margin:0">يستخدم خط العناوين الافتراضي أو الأساسي</span>')+'</div>'+
+ (c.fontHeadId?fontPreviewStyle(c.fontHeadId,c.fontHeadName):'')+
+ rg('fsBase','حجم الخط العام',12,20,1,15,' px')+
+ rg('fsTitle','حجم اسم الصنف',13,22,1,16,' px')+
+ rg('fsPrice','حجم سعر الصنف',18,32,1,22,' px')+
+ rg('fsHero','حجم العنوان الرئيسي (الهيرو)',24,54,1,38,' px')+
+ '</div>'+
+ '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🎨 شكل الصفحة والألوان</b>'+
+ '<label>مظهر الموقع الافتراضي</label><select data-s="themeMode"><option value="auto"'+((c.themeMode||'auto')=='auto'?' selected':'')+'>تلقائي حسب جهاز العميل</option><option value="light"'+(c.themeMode=='light'?' selected':'')+'>نهاري (أصفر أبو سعيد)</option><option value="dark"'+(c.themeMode=='dark'?' selected':'')+'>ليلي داكن</option></select>'+
+ '<div class="cr" style="border:0;background:transparent;padding:0;margin:10px 0 4px"><b style="flex:1">إظهار زر تبديل الوضع للعميل</b><label class="sw"><input type="checkbox" data-s="hideThemeBtn"'+(c.hideThemeBtn?'':' checked')+'><i></i></label></div>'+
+ '<div class="r2" style="margin-top:6px"><div><label>لون الخلفية الأساسي</label><input type="color" data-s="cBg" value="'+esc(c.cBg||'#ffd93d')+'" style="height:40px;padding:3px"></div><div><label>لون العناوين والخصم</label><input type="color" data-s="cRed" value="'+esc(c.cRed||'#ff4b3e')+'" style="height:40px;padding:3px"></div></div>'+
+ '<div class="r2" style="margin-top:4px"><div><label>لون أزرار الإضافة</label><input type="color" data-s="cBlue" value="'+esc(c.cBlue||'#2b6cff')+'" style="height:40px;padding:3px"></div><div><label>لون السلة وواتساب</label><input type="color" data-s="cGreen" value="'+esc(c.cGreen||'#17b26a')+'" style="height:40px;padding:3px"></div></div>'+
+ '<button class="mini" type="button" id="resetColors" style="margin-top:8px">↩️ رجوع للألوان الأصلية</button>'+
+ rg('cols','عدد الأصناف في الصف (كمبيوتر)',2,5,1,4,'')+
+ '<label>لوجو وبانر الصفحة</label><div class="ip"><div class="ipv" style="width:96px;background:#19160f">'+(im?'<img src="'+im+'" alt="">':'<span style="font-size:12px;color:#fff3cf">الأصلي</span>')+'</div><div class="btns"><label class="pubb" style="display:inline-block;cursor:pointer;margin:0">📷 اختار صورة<input type="file" id="lgf" accept="image/*" hidden></label>'+(c.logo?'<button class="del" type="button" id="lgrm">رجوع للأصلي</button>':'')+'</div></div>'+
+ rg('bh','ارتفاع البانر',100,320,10,160,' px')+rg('ls','حجم اللوجو جوه البانر',40,120,5,100,'%')+rg('cs','حجم أزرار الأقسام',80,130,5,100,'%')+'</div>'+
+ '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🏠 نصوص الواجهة والأقسام</b>'+
+ '<label>اسم المتجر في الهيدر</label><input data-s="brandName" value="'+esc(c.brandName==null?'أبو سعيد':c.brandName)+'" placeholder="أبو سعيد">'+
+ '<label>الوصف تحت الاسم</label><input data-s="brandSub" value="'+esc(c.brandSub==null?'جملة الشيبسي والسناكس':c.brandSub)+'" placeholder="جملة الشيبسي والسناكس">'+
+ '<div class="r2"><div><label>الشارة الأولى</label><input data-s="heroBadge" value="'+esc(c.heroBadge==null?'🔥 جملة الجملة':c.heroBadge)+'"></div><div><label>الشارة الثانية</label><input data-s="heroBadge2" value="'+esc(c.heroBadge2==null?'توصيل سريع للمحلات':c.heroBadge2)+'"></div></div>'+
+ '<label>العنوان الترحيبي الرئيسي</label><input data-s="heroTitle" value="'+esc(c.heroTitle==null?'اطلب بضاعتك من أبو سعيد في دقايق':c.heroTitle)+'">'+
+ '<label>الوصف التسويقي</label><textarea rows="2" data-s="heroDesc">'+esc(c.heroDesc==null?'شيبسي، سناكس، حلويات ومشروبات بأسعار الجملة الحقيقية. اختار الكراتين والنكهات اللي تناسب محلك وابعت طلبك مباشرة على واتساب.':c.heroDesc)+'</textarea>'+
+ '<label>بداية رسالة الطلب على واتساب</label><input data-s="waHeader" value="'+esc(c.waHeader==null?'طلب جديد من الموقع 📦':c.waHeader)+'">'+
+ '<div class="cr" style="border:0;background:transparent;padding:0;margin:10px 0 0"><b style="flex:1">إظهار بانر وشعار الموقع فوق</b><label class="sw"><input type="checkbox" data-s="hideBanner"'+(c.hideBanner?'':' checked')+'><i></i></label></div>'+
+ '<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار بطاقة أصناف سريعة الطلب</b><label class="sw"><input type="checkbox" data-s="hideSpotlight"'+(c.hideSpotlight?'':' checked')+'><i></i></label></div>'+
+ '<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار شبكة الأقسام الرئيسية</b><label class="sw"><input type="checkbox" data-s="hideCatsBox"'+(c.hideCatsBox?'':' checked')+'><i></i></label></div>'+
+ '</div>'}
 function vs(){var c=D.cfg;
  return '<div class="card2"><label>رقم واتساب الطلبات</label><input dir="ltr" inputmode="tel" data-s="phone" value="'+esc(c.phone)+'" placeholder="مثال: 01012345678"><p class="hint">اكتبه بأي شكل (01… أو 20…) وهيتظبط لوحده. <a href="https://wa.me/'+esc(c.phone)+'" target="_blank" rel="noopener">جرّب الرقم 📲</a></p>'+
  '<label>أقل قيمة للطلب (جنيه)</label><input type="number" inputmode="numeric" data-s="min" value="'+c.min+'"><p class="hint">اكتب 0 لو مفيش حد أدنى.</p>'+
@@ -185,6 +222,7 @@ function vs(){var c=D.cfg;
 designCard()+
 '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🎁 عنوان العروض</b>'+'<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار العنوان للعملاء</b><label class="sw"><input type="checkbox" data-s="oh"'+(c.oh?'':' checked')+'><i></i></label></div>'+'<label>نص العنوان</label><input data-s="ot" value="'+esc(c.ot==null?'🎁 العروض':c.ot)+'" placeholder="🎁 العروض">'+rg('os','حجم العنوان',60,200,5,100,'%')+'</div>'+
 '<div class="card2"><b style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:20px">🤖 '+esc(AN())+'</b>'+
+'<label>نظام تشغيل المساعد الذكي</label><select data-s="aiMode"><option value="auto"'+((c.aiMode||'auto')=='auto'?' selected':'')+'>تلقائي (Gemini القوي + الموديل المحلي الذكي)</option><option value="local"'+(c.aiMode=='local'?' selected':'')+'>الموديل المحلي الذكي فقط (فوري وبدون API)</option></select>'+
 '<label>اسم الزر</label><input data-s="rn" value="'+esc(c.rn==null?'Rahal Ai':c.rn)+'" placeholder="Rahal Ai"><p class="hint">الاسم ده بيظهر على الزر عند العميل وفي لوحة التحكم. بعد التغيير دوس نشر عشان يتغير عند العملاء.</p>'+
 '<div class="cr" style="border:0;background:transparent;padding:0;margin:8px 0 0"><b style="flex:1">إظهار '+esc(AN())+' للعملاء</b><label class="sw"><input type="checkbox" data-s="ro"'+(c.ro?'':' checked')+'><i></i></label></div>'+
 '<label>الجملة اللي جنب '+esc(AN())+'</label><input data-s="rt" value="'+esc(c.rt==null?'اطلب بالكتابة أو الصوت':c.rt)+'" placeholder="اطلب بالكتابة أو الصوت">'+
@@ -245,7 +283,15 @@ $('app').addEventListener('change',function(e){var t=e.target;
   if(!v||(v!=o&&D.cats.indexOf(v)>-1)){toast('الاسم فاضي أو مكرر');render();return}
   D.p.forEach(function(p){if(p[1]==o)p[1]=v});D.cats[i]=v;mark()}
  else if(t.dataset.s){var k=t.dataset.s;
-  if(k=='phone'){D.cfg.phone=np(t.value);render()}else if(k=='min')D.cfg.min=+t.value||0;else if(k=='gk')D.cfg.gk=t.value.trim();else if(k=='ro')D.cfg.ro=t.checked?0:1;else if(k=='rm')D.cfg.rm=t.checked?0:1;else if(k=='rn'){D.cfg.rn=t.value.trim();render()}else if(k=='rt')D.cfg.rt=t.value.trim();else if(k=='oh')D.cfg.oh=t.checked?0:1;else if(k=='ot')D.cfg.ot=t.value.trim();else D.cfg.unit=t.value.trim()||'كرتونة';mark()}});
+  if(k=='phone'){D.cfg.phone=np(t.value);render()}
+  else if(k=='min')D.cfg.min=+t.value||0;
+  else if(k=='gk')D.cfg.gk=t.value.trim();
+  else if(k=='ro'||k=='rm'||k=='oh'||k=='hideThemeBtn'||k=='hideBanner'||k=='hideSpotlight'||k=='hideCatsBox')D.cfg[k]=t.checked?0:1;
+  else if(k=='fontUnified')D.cfg.fontUnified=t.checked?1:0;
+  else if(k=='rn'){D.cfg.rn=t.value.trim();render()}
+  else if(k=='unit')D.cfg.unit=t.value.trim()||'كرتونة';
+  else D.cfg[k]=t.value.trim();
+  mark()}});
 $('q').addEventListener('input',function(){q=this.value.trim();$('v').innerHTML=vp()});
 
 // ===== العروض =====
@@ -754,9 +800,39 @@ $('ov').addEventListener('change',function(e){var t=e.target;if(t.dataset.sk==nu
  if(k=='on')o.on=t.checked?1:0;else if(k=='p')o.p=+t.value||0;else if(k=='f'){o.f=sfl(t.value)}else o[k]=t.value.trim()});
 $('smb').onclick=chOpen;
 
+function readFontFile(f){
+ return new Promise(function(ok,no){
+  if(!/\.(ttf|otf|woff2?)$/i.test(f.name)&&!String(f.type||'').match(/font/i)){no(new Error('TYPE'));return}
+  if(f.size>2600000){no(new Error('SIZE'));return}
+  var r=new FileReader();
+  r.onload=function(){ok(r.result)};
+  r.onerror=no;
+  r.readAsDataURL(f);
+ });
+}
 $('app').addEventListener('input',function(e){var t=e.target;if(t.dataset&&t.dataset.n){var v=+t.value;D.cfg[t.dataset.n]=v;var l=$('nv_'+t.dataset.n);if(l)l.textContent=v+(t.dataset.u||'');mark()}});
-$('app').addEventListener('change',function(e){var t=e.target;if(t.id=='lgf'&&t.files&&t.files[0]){shrink(t.files[0]).then(function(u){var nid='i'+Date.now().toString(36);IMG[nid]=u;PEND[nid]=1;D.cfg.logo=nid;mark();render()}).catch(function(){toast('الصورة دي مش شغالة، جرّب غيرها')})}});
-$('app').addEventListener('click',function(e){if(e.target.id=='lgrm'){delete D.cfg.logo;mark();render()}});
+$('app').addEventListener('change',function(e){var t=e.target;
+ if(t.id=='lgf'&&t.files&&t.files[0]){shrink(t.files[0]).then(function(u){var nid='i'+Date.now().toString(36);IMG[nid]=u;PEND[nid]=1;D.cfg.logo=nid;mark();render()}).catch(function(){toast('الصورة دي مش شغالة، جرّب غيرها')})}
+ else if((t.id=='fntBody'||t.id=='fntHead')&&t.files&&t.files[0]){
+  var file=t.files[0],isBody=(t.id=='fntBody');
+  readFontFile(file).then(function(u){
+   var nid='f'+Date.now().toString(36)+Math.random().toString(36).slice(2,4);
+   IMG[nid]=u;PEND[nid]=1;
+   if(isBody){D.cfg.fontBodyId=nid;D.cfg.fontBodyName=file.name}
+   else{D.cfg.fontHeadId=nid;D.cfg.fontHeadName=file.name}
+   mark();render();toast('تم رفع الخط ✅ دوس نشر لتفعيله عند العملاء');
+  }).catch(function(err){
+   toast(err&&err.message=='SIZE'?'ملف الخط كبير أوي (الحد الأقصى ٢.٥ ميجا)':'اختار ملف خط بصيغة TTF أو OTF أو WOFF أو WOFF2');
+  });
+ }
+});
+$('app').addEventListener('click',function(e){
+ var id=e.target.id;
+ if(id=='lgrm'){delete D.cfg.logo;mark();render()}
+ else if(id=='fntBodyRm'){delete D.cfg.fontBodyId;delete D.cfg.fontBodyName;mark();render()}
+ else if(id=='fntHeadRm'){delete D.cfg.fontHeadId;delete D.cfg.fontHeadName;mark();render()}
+ else if(id=='resetColors'){delete D.cfg.cBg;delete D.cfg.cRed;delete D.cfg.cBlue;delete D.cfg.cGreen;mark();render();toast('تم استرجاع الألوان الأصلية')}
+});
 var RT=null,TKEXP=0;
 async function fresh(){
  if(TK&&Date.now()<TKEXP-120000)return;
@@ -774,6 +850,8 @@ async function pub(){
  D.p.forEach(function(p){if(p[8])used[p[8]]=1});
  OFS().forEach(function(o){if(o.i)used[o.i]=1});
   if(D.cfg.logo)used[D.cfg.logo]=1;
+  if(D.cfg.fontBodyId)used[D.cfg.fontBodyId]=1;
+  if(D.cfg.fontHeadId)used[D.cfg.fontHeadId]=1;
  try{
   await fresh();
   for(var k in PEND){if(used[k]){await put(A+'img/'+k+'.json',JSON.stringify(IMG[k]))}}
@@ -798,7 +876,7 @@ async function loadAll(){
  var v=await (await fetch('https://'+FB.db+'/chips/data.json')).json();
  if(v&&v.json)D=JSON.parse(v.json);
  D.offers=D.offers||[];
- var ks=D.p.map(function(p){return p[8]}).concat(D.offers.map(function(o){return o.i})).concat(D.cfg&&D.cfg.logo?[D.cfg.logo]:[]).filter(Boolean);
+ var ks=D.p.map(function(p){return p[8]}).concat(D.offers.map(function(o){return o.i})).concat([D.cfg&&D.cfg.logo,D.cfg&&D.cfg.fontBodyId,D.cfg&&D.cfg.fontHeadId]).filter(Boolean);
  await Promise.all(ks.map(function(k){return fetch('https://'+FB.db+'/chips/img/'+k+'.json').then(function(r){return r.json()}).then(function(x){if(x)IMG[k]=x}).catch(function(){})}))}
 (async function(){
  var rt,em;try{rt=localStorage.getItem('abu_rt');em=localStorage.getItem('abu_em')}catch(z){}

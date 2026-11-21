@@ -48,12 +48,16 @@ function applyTheme(theme) {
   }
 }
 
-function initTheme() {
-  let saved = '';
+function getSavedTheme() {
   try {
-    saved = localStorage.getItem('abu_theme') || '';
-  } catch (e) {}
-  applyTheme(saved);
+    return localStorage.getItem('abu_theme') || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function initTheme() {
+  applyTheme(getSavedTheme());
 
   const btn = $('themeToggle');
   if (btn) {
@@ -70,6 +74,172 @@ function initTheme() {
       applyTheme(next);
     });
   }
+}
+
+function escHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function applyCustomFonts() {
+  const r = document.documentElement.style;
+  const C = state.CFG || {};
+  const preset = C.fontPreset && String(C.fontPreset).trim();
+
+  let linkEl = document.getElementById('customGoogleFont');
+  if (preset) {
+    const href =
+      'https://fonts.googleapis.com/css2?family=' +
+      encodeURIComponent(preset).replace(/%20/g, '+') +
+      ':wght@400;600;700;800&display=swap';
+    if (!linkEl) {
+      linkEl = document.createElement('link');
+      linkEl.id = 'customGoogleFont';
+      linkEl.rel = 'stylesheet';
+      document.head.appendChild(linkEl);
+    }
+    if (linkEl.href !== href) linkEl.href = href;
+  } else if (linkEl) {
+    linkEl.remove();
+  }
+
+  const bodyData = C.fontBodyId && state.IMGS[C.fontBodyId];
+  const headData = C.fontHeadId && state.IMGS[C.fontHeadId];
+  let css = '';
+  if (bodyData) {
+    css +=
+      '@font-face{font-family:"AbuCustomBody";src:url("' +
+      bodyData +
+      '");font-display:swap;font-weight:100 900;}';
+  }
+  if (headData) {
+    css +=
+      '@font-face{font-family:"AbuCustomHead";src:url("' +
+      headData +
+      '");font-display:swap;font-weight:100 900;}';
+  }
+
+  const presetFamily = preset ? '"' + preset.replace(/"/g, '') + '", ' : '';
+  const bodyStack = bodyData
+    ? '"AbuCustomBody", ' + presetFamily + "'Cairo', Tahoma, Arial, sans-serif"
+    : preset
+    ? presetFamily + "'Cairo', Tahoma, Arial, sans-serif"
+    : "'Cairo', Tahoma, Arial, sans-serif";
+
+  const headStack = headData
+    ? '"AbuCustomHead", ' + bodyStack
+    : C.fontUnified
+    ? bodyStack
+    : "'Lalezar', 'Cairo', sans-serif";
+
+  if (headData || C.fontUnified) {
+    css +=
+      '.brand-txt strong,.hero-title,.sec-title,.otl,.st h3,.pn-head h2,.rhead h2{font-weight:800;}';
+  }
+
+  let styleEl = document.getElementById('customFontsStyle');
+  if (css) {
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'customFontsStyle';
+      document.head.appendChild(styleEl);
+    }
+    if (styleEl.textContent !== css) styleEl.textContent = css;
+  } else if (styleEl) {
+    styleEl.remove();
+  }
+
+  r.setProperty('--font-body', bodyStack);
+  r.setProperty('--font-head', headStack);
+}
+
+function applyCustomColors() {
+  const C = state.CFG || {};
+  const isHex = (v) => /^#[0-9a-f]{3,8}$/i.test(String(v || '').trim());
+  const rules = [];
+  const lightRules = [];
+
+  if (isHex(C.cBg) && C.cBg.toLowerCase() !== '#ffd93d') {
+    lightRules.push(
+      '--bg:' +
+        C.cBg +
+        ';--bg-soft:color-mix(in srgb,' +
+        C.cBg +
+        ' 75%,#ffffff);'
+    );
+  }
+  if (isHex(C.cRed) && C.cRed.toLowerCase() !== '#ff4b3e') {
+    rules.push(
+      '--red:' +
+        C.cRed +
+        ';--red-dark:color-mix(in srgb,' +
+        C.cRed +
+        ' 82%,#000);'
+    );
+  }
+  if (isHex(C.cBlue) && C.cBlue.toLowerCase() !== '#2b6cff') {
+    rules.push(
+      '--blue:' +
+        C.cBlue +
+        ';--blue-dark:color-mix(in srgb,' +
+        C.cBlue +
+        ' 82%,#000);'
+    );
+  }
+  if (isHex(C.cGreen) && C.cGreen.toLowerCase() !== '#17b26a') {
+    rules.push(
+      '--green:' +
+        C.cGreen +
+        ';--green-dark:color-mix(in srgb,' +
+        C.cGreen +
+        ' 82%,#000);'
+    );
+  }
+
+  let css = '';
+  if (rules.length) css += ':root{' + rules.join('') + '}';
+  if (lightRules.length) {
+    css +=
+      ':root[data-theme="light"]{' +
+      lightRules.join('') +
+      '}@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){' +
+      lightRules.join('') +
+      '}}';
+  }
+
+  let styleEl = document.getElementById('customColorsStyle');
+  if (css) {
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'customColorsStyle';
+      document.head.appendChild(styleEl);
+    }
+    if (styleEl.textContent !== css) styleEl.textContent = css;
+  } else if (styleEl) {
+    styleEl.remove();
+  }
+}
+
+function loadFontAssets() {
+  const C = state.CFG || {};
+  [C.fontBodyId, C.fontHeadId].filter(Boolean).forEach((k) => {
+    if (state.IMGS[k] || state.IMGQ[k]) return;
+    state.IMGQ[k] = 1;
+    fetch('https://' + DBU + '/chips/img/' + encodeURIComponent(k) + '.json')
+      .then((r) => r.json())
+      .then((v) => {
+        delete state.IMGQ[k];
+        if (v) {
+          state.IMGS[k] = v;
+          applyCustomFonts();
+        }
+      })
+      .catch(() => {
+        delete state.IMGQ[k];
+      });
+  });
 }
 
 export function applyCfg() {
@@ -92,6 +262,86 @@ export function applyCfg() {
 
   const csScale = Math.max(0.8, Math.min(1.3, (+C.cs || 100) / 100));
   r.setProperty('--cs', String(csScale));
+
+  const clampPx = (v, min, max, def) =>
+    Math.max(min, Math.min(max, +v || def)) + 'px';
+  r.setProperty('--fs-base', clampPx(C.fsBase, 12, 20, 15));
+  r.setProperty('--fs-title', clampPx(C.fsTitle, 13, 22, 16));
+  r.setProperty('--fs-price', clampPx(C.fsPrice, 18, 32, 22));
+  r.setProperty('--fs-hero', clampPx(C.fsHero, 24, 54, 38));
+
+  applyCustomFonts();
+  applyCustomColors();
+
+  const savedTheme = getSavedTheme();
+  if (C.hideThemeBtn || !savedTheme) {
+    const mode = C.themeMode;
+    applyTheme(mode === 'light' || mode === 'dark' ? mode : '');
+  }
+  const themeBtn = $('themeToggle');
+  if (themeBtn) themeBtn.hidden = !!C.hideThemeBtn;
+
+  const brandName =
+    C.brandName != null && String(C.brandName).trim()
+      ? String(C.brandName).trim()
+      : 'أبو سعيد';
+  const brandSub =
+    C.brandSub != null && String(C.brandSub).trim()
+      ? String(C.brandSub).trim()
+      : 'جملة الشيبسي والسناكس';
+
+  const brandNameEl = $('brandNameHdr');
+  if (brandNameEl) brandNameEl.textContent = brandName;
+  const brandSubEl = $('brandSubHdr');
+  if (brandSubEl) brandSubEl.textContent = brandSub;
+  document.title = brandName + ' – اطلب بضاعتك';
+
+  const b1 = $('heroBadge1');
+  if (b1) {
+    const t = C.heroBadge != null ? String(C.heroBadge).trim() : '🔥 جملة الجملة';
+    b1.textContent = t;
+    b1.hidden = !t;
+  }
+  const b2 = $('heroBadge2');
+  if (b2) {
+    const t =
+      C.heroBadge2 != null ? String(C.heroBadge2).trim() : 'توصيل سريع للمحلات';
+    b2.textContent = t;
+    b2.hidden = !t;
+  }
+
+  const hTitle = $('heroTitleTxt');
+  if (hTitle) {
+    const rawTitle =
+      C.heroTitle != null && String(C.heroTitle).trim()
+        ? String(C.heroTitle).trim()
+        : 'اطلب بضاعتك من ' + brandName + ' في دقايق';
+    const escBrand = escHtml(brandName);
+    const escFull = escHtml(rawTitle);
+    hTitle.innerHTML =
+      brandName && escFull.indexOf(escBrand) > -1
+        ? escFull.replace(escBrand, '<span>' + escBrand + '</span>')
+        : escFull;
+  }
+
+  const hDesc = $('heroDescTxt');
+  if (hDesc) {
+    hDesc.textContent =
+      C.heroDesc != null && String(C.heroDesc).trim()
+        ? String(C.heroDesc).trim()
+        : 'شيبسي، سناكس، حلويات ومشروبات بأسعار الجملة الحقيقية. اختار الكراتين والنكهات اللي تناسب محلك وابعت طلبك مباشرة على واتساب.';
+  }
+
+  const bannerSec = $('topBannerSec');
+  if (bannerSec) bannerSec.hidden = !!C.hideBanner;
+
+  const heroVis = $('heroVisualBox');
+  const heroCard = $('heroCard');
+  if (heroVis) heroVis.hidden = !!C.hideSpotlight;
+  if (heroCard) heroCard.classList.toggle('no-visual', !!C.hideSpotlight);
+
+  const catsSec = $('categoriesSec');
+  if (catsSec) catsSec.hidden = !!C.hideCatsBox;
 
   const otl = $('otl');
   if (otl) {
@@ -211,6 +461,7 @@ function ref() {
   if ($('sheet') && $('sheet').classList.contains('on')) lines();
   loadImgs();
   logoLoad();
+  loadFontAssets();
   observeReveals();
 }
 

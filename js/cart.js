@@ -85,7 +85,11 @@ export function updCartSummary() {
 
 export function wa() {
   const t = totals();
-  let m = 'طلب جديد من الموقع 📦\n\n';
+  const hdr =
+    state.CFG && state.CFG.waHeader && String(state.CFG.waHeader).trim()
+      ? String(state.CFG.waHeader).trim()
+      : 'طلب جديد من الموقع 📦';
+  let m = hdr + '\n\n';
   grp().forEach((g) => {
     const p = state.P[g.i];
     const fl = FL(p);

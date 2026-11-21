@@ -5,14 +5,21 @@ import {
   updCartSummary,
 } from './cart.js';
 import { lyClose, lyPush, ovf } from './store.js';
-import { $, AN, pname, saveCart, state } from './state.js';
+import { $, AN, pname, saveCart, state, totals } from './state.js';
 import { esc, FL, isOut, money, numAr, rnd, rn, rtk } from './utils.js';
 
 let RL = [];
 let RU = [];
 let RT = '';
 let RMODE = 'chat';
-const CH = { msgs: [], busy: 0, nf: 0 };
+const CH = {
+  msgs: [],
+  busy: 0,
+  nf: 0,
+  quick: [],
+  pendingFlavorIdx: -1,
+  pendingAltCands: null,
+};
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let VR = null;
@@ -38,6 +45,9 @@ const RNUM = {};
   ['اتنتين', 2],
   ['تنين', 2],
   ['كرتونتين', 2],
+  ['كارتونتين', 2],
+  ['علبتين', 2],
+  ['دستتين', 24],
   ['تلاته', 3],
   ['ثلاثه', 3],
   ['تلات', 3],
@@ -60,9 +70,15 @@ const RNUM = {};
   ['عشر', 10],
   ['احداشر', 11],
   ['اتناشر', 12],
+  ['دسته', 12],
+  ['دستة', 12],
   ['تلتاشر', 13],
   ['اربعتاشر', 14],
   ['خمستاشر', 15],
+  ['ستاشر', 16],
+  ['سبعتاشر', 17],
+  ['تمنتاشر', 18],
+  ['تسعتاشر', 19],
   ['عشرين', 20],
   ['تلاتين', 30],
   ['ثلاثين', 30],
@@ -70,14 +86,71 @@ const RNUM = {};
   ['خمسين', 50],
   ['ميه', 100],
 ].forEach((a) => {
-  RNUM[a[0]] = a[1];
+  RNUM[rn(a[0])] = a[1];
 });
 
+const ALIAS_MAP = {
+  شبسي: 'شيبسي',
+  شيبس: 'شيبسي',
+  تشيبس: 'شيبسي',
+  تشيبسي: 'شيبسي',
+  شبس: 'شيبسي',
+  دريتوس: 'دوريتوس',
+  دوريتس: 'دوريتوس',
+  دريتس: 'دوريتوس',
+  فرسكا: 'فريسكا',
+  فرسكه: 'فريسكا',
+  فريسكه: 'فريسكا',
+  بسكوت: 'بسكويت',
+  بسكوته: 'بسكويت',
+  بسكويته: 'بسكويت',
+  شيكولاته: 'شوكولاته',
+  شكولاته: 'شوكولاته',
+  شوكولات: 'شوكولاته',
+  شيكولات: 'شوكولاته',
+  شوكلاته: 'شوكولاته',
+  شوكليت: 'شوكولاته',
+  فانيلا: 'فانيليا',
+  فنليا: 'فانيليا',
+  ستريبس: 'ستربس',
+  ستربز: 'ستربس',
+  كارتيه: 'كراتيه',
+  لمون: 'ليمون',
+  شطا: 'شطه',
+  شتة: 'شطه',
+  شط: 'شطه',
+  مشاطه: 'شطه',
+  مشطه: 'شطه',
+  كتشب: 'كاتشب',
+  كاتشاب: 'كاتشب',
+  طماط: 'طماطم',
+  قوطه: 'طماطم',
+  جبن: 'جبنه',
+  شدر: 'شيدر',
+  مقرمشات: 'سناكس',
+  سناك: 'سناكس',
+  عصاير: 'عصير',
+  حلويات: 'حلوي',
+  عايلي: 'عائلي',
+  كبيره: 'كبير',
+  صغيره: 'صغير',
+};
+
+function normTok(t) {
+  let x = rn(t);
+  if (x.length > 3 && x.indexOf('ال') === 0) x = x.slice(2);
+  return ALIAS_MAP[x] || x;
+}
+
+function ntk(s) {
+  return rtk(s).map((t) => ALIAS_MAP[t] || t);
+}
+
 const RSTOP = {};
-'عايز عاوز عايزه عاوزه اريد ابغي محتاج محتاجه هات هاتلي ضيف ضيفلي كمان طلب اطلب ابعت بعت ممكن لو سمحت من فضلك يا باشا معلم استاذ كرتونه كراتين كرتون كارتونه كرتونتين علبه علب دسته شوال عدد حبه قطعه وحده وحدات في عندي انا لي ده دي مع معاهم ورقم صنف نوع طعم نكهه نكهات بتاع بتاعه'
+'عايز عاوز عايزه عاوزه اريد ابغي محتاج محتاجه هات هاتلي ضيف ضيفلي كمان طلب اطلب ابعت بعت ممكن لو سمحت من فضلك يا باشا معلم استاذ ريس كرتونه كراتين كرتون كارتونه كرتونتين علبه علب دسته دستتين شوال عدد حبه قطعه وحده وحدات في عندي انا لي ده دي مع معاهم ورقم صنف نوع طعم نكهه نكهات بطعم بنكهة بتاع بتاعه متوفر موجود بكام سعر كام جنيه جني ج ابو ام فئه خليهم يبقي'
   .split(' ')
   .forEach((w) => {
-    RSTOP[rn(w)] = 1;
+    RSTOP[normTok(w)] = 1;
   });
 
 const RSP = new RegExp(
@@ -89,6 +162,46 @@ const RSP = new RegExp(
     ')(?:\\s|$))|\\s+ومعاهم\\s+|\\s+وكمان\\s+|\\s+كمان\\s+|\\s+ثم\\s+'
 );
 
+function lev(a, b) {
+  if (a === b) return 0;
+  const la = a.length;
+  const lb = b.length;
+  if (!la) return lb;
+  if (!lb) return la;
+  if (Math.abs(la - lb) > 2) return 9;
+  const d = [];
+  for (let i = 0; i <= la; i++) d[i] = [i];
+  for (let j = 0; j <= lb; j++) d[0][j] = j;
+  for (let i = 1; i <= la; i++) {
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+    }
+  }
+  return d[la][lb];
+}
+
+function tokSim(qTok, targetToks) {
+  if (!qTok || !targetToks.length) return 0;
+  if (targetToks.indexOf(qTok) > -1) return 1;
+  let best = 0;
+  for (let i = 0; i < targetToks.length; i++) {
+    const t = targetToks[i];
+    if (qTok.length >= 3 && t.length >= 3) {
+      if (t.indexOf(qTok) === 0 || qTok.indexOf(t) === 0) {
+        best = Math.max(best, 0.85);
+        continue;
+      }
+      const dist = lev(qTok, t);
+      const maxL = Math.max(qTok.length, t.length);
+      if (dist <= 1 || (maxL >= 5 && dist <= 2)) {
+        best = Math.max(best, 1 - dist / maxL);
+      }
+    }
+  }
+  return best >= 0.7 ? best : 0;
+}
+
 function rseg(t) {
   return rnd(t)
     .replace(/\r/g, '')
@@ -97,93 +210,189 @@ function rseg(t) {
     .filter(Boolean);
 }
 
+function extractHints(sg) {
+  const hints = [];
+  let clean = rnd(sg);
+  clean = clean.replace(
+    /(?:^|\s)(?:بـ?|ابو|ام|فئه|فئة|سعر)\s*(\d+)(?:\s*(?:جنيه|جني|ج))?(?=\s|$)/g,
+    (_, num) => {
+      hints.push(+num);
+      return ' ';
+    }
+  );
+  clean = clean.replace(/(\d+)\s*(?:جنيه|جني|ج)(?=\s|$)/g, (_, num) => {
+    hints.push(+num);
+    return ' ';
+  });
+  return { clean: clean.trim(), hints };
+}
+
 function rq(toks) {
   let q = 0;
   const rest = [];
   toks.forEach((t) => {
+    const nt = normTok(t);
     let v = null;
     if (/^\d+$/.test(t)) v = +t;
-    else if (RNUM[t] != null) v = RNUM[t];
-    else if (t[0] === 'و' && RNUM[t.slice(1)] != null) v = RNUM[t.slice(1)];
+    else if (RNUM[nt] != null) v = RNUM[nt];
+    else if (t[0] === 'و' && RNUM[normTok(t.slice(1))] != null) {
+      v = RNUM[normTok(t.slice(1))];
+    }
     if (v != null && !q && v > 0 && v < 1000) q = v;
-    else rest.push(t);
+    else rest.push(nt);
   });
   return [q || 1, rest];
 }
 
-function rmatch(rest) {
-  const S = {};
+function rmatch(rest, priceHints = [], includeSoldOut = false) {
+  const S = [];
   rest.forEach((t) => {
-    if (RSTOP[t]) return;
-    S[t] = 1;
-    if (t.length > 3 && t[0] === 'و') S[t.slice(1)] = 1;
+    const nt = normTok(t);
+    if (!nt || RSTOP[nt]) return;
+    if (S.indexOf(nt) < 0) S.push(nt);
+    if (nt.length > 3 && nt[0] === 'و') {
+      const sub = normTok(nt.slice(1));
+      if (sub && !RSTOP[sub] && S.indexOf(sub) < 0) S.push(sub);
+    }
   });
-  if (!Object.keys(S).length) return null;
+  if (!S.length) return null;
+
   const cs = [];
   state.P.forEach((p, i) => {
-    if (p[7] || isOut(p)) return;
-    const N = rtk(p[0] + ' ' + (p[10] || '')).filter((t) => !RSTOP[t]);
+    const out = p[7] || isOut(p);
+    if (out && !includeSoldOut) return;
+    const nameToks = ntk(p[0] + ' ' + (p[10] || '') + ' ' + (p[2] || '')).filter(
+      (t) => !RSTOP[t]
+    );
+    const catToks = ntk(p[1] || '').filter((t) => !RSTOP[t]);
+
     let m = 0;
-    N.forEach((t) => {
-      if (S[t]) m++;
+    let exactHits = 0;
+    S.forEach((qt) => {
+      const sim = tokSim(qt, nameToks);
+      if (sim > 0) {
+        m += sim;
+        if (sim === 1) exactHits++;
+      } else {
+        const cSim = tokSim(qt, catToks);
+        if (cSim > 0) m += cSim * 0.35;
+      }
     });
+
     let fm = 0;
     FL(p).forEach((f) => {
-      if (f[1]) return;
+      if (f[1] && !includeSoldOut) return;
+      const ft = ntk(f[0]);
       let c = 0;
-      rtk(f[0]).forEach((t) => {
-        if (S[t]) c++;
+      S.forEach((qt) => {
+        c += tokSim(qt, ft);
       });
       if (c > fm) fm = c;
     });
-    if (m || fm) cs.push({ i, s: m * 10 + (N.length ? (m / N.length) * 5 : 0) + fm * 3 });
+
+    let hintBoost = 0;
+    if (priceHints.length) {
+      const vStr = rnd(String(p[10] || '') + ' ' + String(p[2] || ''));
+      priceHints.forEach((h) => {
+        if (+p[3] === h) hintBoost += 14;
+        else if (new RegExp('(?:^|\\D)' + h + '(?:\\D|$)').test(vStr)) hintBoost += 10;
+      });
+    }
+
+    const totalScore =
+      m * 11 +
+      exactHits * 3 +
+      (nameToks.length ? (m / nameToks.length) * 6 : 0) +
+      fm * 4 +
+      hintBoost -
+      (out ? 2 : 0);
+
+    if (m >= 0.7 || fm >= 0.8) {
+      cs.push({ i, s: totalScore, out: !!out });
+    }
   });
+
   cs.sort((a, b) => b.s - a.s);
   return cs.length ? { cs, S } : null;
+}
+
+function splitMultiFlavors(fl, queryToks) {
+  const matches = [];
+  fl.forEach((f, j) => {
+    const fToks = ntk(f[0]).filter((t) => !RSTOP[t]);
+    if (!fToks.length) return;
+    let score = 0;
+    queryToks.forEach((qt) => {
+      score += tokSim(qt, fToks);
+    });
+    if (score >= 0.8) {
+      matches.push({ j, score, out: !!f[1], name: f[0] });
+    }
+  });
+  return matches.sort((a, b) => b.score - a.score);
 }
 
 function rlocal(text) {
   const items = [];
   const unk = [];
-  rseg(text).forEach((sg) => {
-    const r = rq(rtk(sg));
-    const m = rmatch(r[1]);
+  const soldOutHits = [];
+
+  rseg(text).forEach((rawSg) => {
+    const { clean, hints } = extractHints(rawSg);
+    const r = rq(ntk(clean || rawSg));
+    const m = rmatch(r[1], hints, false);
+
     if (!m) {
-      unk.push(sg);
+      const mOut = rmatch(r[1], hints, true);
+      if (mOut && mOut.cs[0] && mOut.cs[0].out) {
+        soldOutHits.push(pname(mOut.cs[0].i));
+      } else {
+        unk.push(rawSg);
+      }
       return;
     }
+
     const top = m.cs[0];
     const p = state.P[top.i];
     const fl = FL(p);
     const fs = [];
+    const outFlavors = [];
+
     if (fl.length) {
-      let best = 0;
-      const sc = [];
-      fl.forEach((f, j) => {
-        let c = 0;
-        if (!f[1]) {
-          rtk(f[0]).forEach((t) => {
-            if (m.S[t]) c++;
-          });
-        }
-        sc[j] = c;
-        if (c > best) best = c;
-      });
-      if (best > 0) {
-        sc.forEach((c, j) => {
-          if (c === best) fs.push(j);
+      const fMatches = splitMultiFlavors(fl, m.S);
+      if (fMatches.length) {
+        const bestScore = fMatches[0].score;
+        fMatches.forEach((fm) => {
+          if (fm.score >= bestScore * 0.65) {
+            if (fm.out) outFlavors.push(fm.name);
+            else fs.push(fm.j);
+          }
         });
       }
     }
+
+    if (!fs.length && outFlavors.length) {
+      soldOutHits.push(pname(top.i) + ' (' + outFlavors[0] + ')');
+      return;
+    }
+
     const cands = m.cs.slice(0, 5).map((c) => c.i);
-    const amb = m.cs.length > 1 && m.cs[1].s >= top.s * 0.95;
+    const sameNameAlts = m.cs.filter(
+      (c) => c.i !== top.i && rn(state.P[c.i][0]) === rn(p[0])
+    );
+    const amb =
+      !hints.length &&
+      ((m.cs.length > 1 && m.cs[1].s >= top.s * 0.94) ||
+        (sameNameAlts.length > 0 && sameNameAlts[0].s >= top.s * 0.88));
+
     if (fs.length) {
       fs.forEach((j) => items.push({ i: top.i, f: j, q: r[0], c: cands, amb }));
     } else {
       items.push({ i: top.i, f: -1, q: r[0], c: cands, amb });
     }
   });
-  return { items, unk };
+
+  return { items, unk, soldOutHits };
 }
 
 async function rGem(key, prompt) {
@@ -194,7 +403,7 @@ async function rGem(key, prompt) {
   async function one(m) {
     tried[m] = 1;
     const ac = new AbortController();
-    const tm = setTimeout(() => ac.abort(), 15000);
+    const tm = setTimeout(() => ac.abort(), 18000);
     try {
       const r = await fetch(B + 'models/' + m + ':generateContent', {
         method: 'POST',
@@ -202,7 +411,7 @@ async function rGem(key, prompt) {
         signal: ac.signal,
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+          generationConfig: { temperature: 0.15, responseMimeType: 'application/json' },
         }),
       });
       if (r.ok) {
@@ -237,7 +446,12 @@ async function rGem(key, prompt) {
     const sv = localStorage.getItem('rai_m');
     if (sv) first.push(sv);
   } catch (z) {}
-  first.push('gemini-flash-lite-latest', 'gemini-flash-latest');
+  first.push(
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest'
+  );
 
   for (let i = 0; i < first.length; i++) {
     if (tried[first[i]]) continue;
@@ -256,7 +470,7 @@ async function rGem(key, prompt) {
           !/image|tts|live|audio|embed|exp|robotics|computer/i.test(m.name)
       )
       .map((m) => m.name.replace('models/', ''))
-      .sort((a, b) => (/lite/.test(b) ? 1 : 0) - (/lite/.test(a) ? 1 : 0));
+      .sort((a, b) => (/2\.5/.test(b) ? 1 : 0) - (/2\.5/.test(a) ? 1 : 0));
 
     for (let i = 0; i < ns.length && i < 4; i++) {
       if (tried[ns[i]]) continue;
@@ -281,6 +495,9 @@ function rCat() {
         (p[2] || '-') +
         '|' +
         p[3] +
+        (+p[11] > p[3] ? '(قبل:' + p[11] + ')' : '') +
+        '|' +
+        p[1] +
         '|' +
         (FL(p)
           .map((f, j) => (f[1] ? '' : j + '=' + f[0]))
@@ -335,7 +552,7 @@ function chFix(L) {
 async function rAI(key, text) {
   const pr =
     'أنت مساعد دقيق لاستلام طلبات متجر جملة. العميل كتب أو قال طلبه بالعامية المصرية (ممكن يكون فيه أخطاء إملائية أو أخطاء من التعرف على الصوت). طابق كل صنف في كلامه مع الكتالوج بدقة واستخرج الكمية.\n' +
-    'الكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|النكهات بصيغة رقم=اسم):\n' +
+    'الكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|القسم|النكهات بصيغة رقم=اسم):\n' +
     rCat() +
     '\nأرجع JSON فقط بالشكل: {"items":[{"i":0,"f":-1,"q":1,"a":false,"alt":[]}],"unknown":[""]}\nالقواعد:\n' +
     '- i هو رقم الصنف من الكتالوج بالظبط، و f رقم النكهة أو -1 لو الصنف مالوش نكهات أو العميل ماحددش نكهة، و q الكمية.\n' +
@@ -478,7 +695,7 @@ async function gAud(key, b64) {
     sv = localStorage.getItem('rai_m') || '';
   } catch (z) {}
   if (sv) ms.push(sv);
-  ms.push('gemini-flash-lite-latest', 'gemini-flash-latest');
+  ms.push('gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-flash-lite-latest');
   const vc = vCat();
   const pr =
     'اكتب بالظبط الكلام المنطوق في المقطع الصوتي ده (بالعامية المصرية، وموضوعه طلب أصناف وكميات من متجر جملة) بإملاء صحيح. الأرقام بالإنجليزية. ماتضيفش أي شرح أو علامات اقتباس ولا تترجم. لو مفيش كلام مفهوم ارجع نص فاضي. العميل بيقول مثلاً: «عايز كرتونة شيبسي وكرتونة دوريتوس بطعم الشطة»، وكلمة «طعم» أو «بطعم» بتيجي قبل النكهة. لو سمعت كلمة قريبة في النطق من اسم صنف أو نكهة من القوايم دي اكتبها بالاسم الصح. أسماء الأصناف: ' +
@@ -762,7 +979,7 @@ function vStopAI(graceful) {
 
 async function vPolish() {
   const ta = $('rt');
-  if (!ta || !state.CFG || !state.CFG.gk) return;
+  if (!ta || !state.CFG || !state.CFG.gk || state.CFG.aiMode === 'local') return;
   const tx = ta.value.trim();
   if (!tx) return;
   VPOL = true;
@@ -881,6 +1098,7 @@ function vCanAI() {
   return !!(
     state.CFG &&
     state.CFG.gk &&
+    state.CFG.aiMode !== 'local' &&
     navigator.mediaDevices &&
     navigator.mediaDevices.getUserMedia &&
     AC &&
@@ -943,6 +1161,9 @@ function chReset() {
   CH.msgs = [];
   CH.busy = 0;
   CH.nf = 0;
+  CH.quick = [];
+  CH.pendingFlavorIdx = -1;
+  CH.pendingAltCands = null;
   RL = [];
   RU = [];
   RT = '';
@@ -985,7 +1206,7 @@ function chOpen() {
     ((SR || vCanAI()) && !(state.CFG && state.CFG.rm)
       ? '<button class="vmic sm" id="rmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="rmvl">اطلب بالصوت</span></button>'
       : '') +
-    '<div class="rcin"><textarea id="rt" rows="2" placeholder="اكتب طلبك هنا... مثال: ٥ كراتين شيبسي ملح">' +
+    '<div class="rcin"><textarea id="rt" rows="2" placeholder="اسأل عن الأسعار، العروض، أو اطلب مباشرة...">' +
     esc(RT) +
     '</textarea><button class="send rgold" id="chsend" type="button">إرسال</button></div>' +
     '<div class="min" id="rerr"></div>' +
@@ -993,24 +1214,78 @@ function chOpen() {
   chRender();
 }
 
+function getDynamicSamples() {
+  const kb = buildStoreKB();
+  const s = [];
+  if (kb.avail.length >= 2) {
+    const p1 = kb.avail[0];
+    const p2 = kb.avail[1];
+    const fl1 = p1.availFlavors.length ? ' ' + p1.availFlavors[0].name : '';
+    s.push({
+      label: '«٢ ' + p1.name + fl1 + ' و١ ' + p2.name + '»',
+      val: '٢ ' + p1.name + fl1 + ' و١ ' + p2.name,
+    });
+  } else {
+    s.push({ label: '«٥ كراتين شيبسي ملح و٣ ذرة»', val: '٥ كراتين شيبسي ملح و٣ ذرة' });
+  }
+  if (kb.offers.length || kb.discounts.length) {
+    s.push({ label: '🎁 إيه العروض والخصومات؟', val: 'إيه العروض والخصومات المتاحة؟' });
+  }
+  s.push({ label: '📋 إيه الأصناف المتوفرة؟', val: 'عندكم أصناف إيه؟' });
+  return s;
+}
+
 function chRender() {
   const m = $('chm');
   if (!m) return;
   let h = '';
   if (!CH.msgs.length) {
+    const samples = getDynamicSamples();
     h =
-      '<div class="rcb a">أهلًا 👋 أنا <b>' +
+      '<div class="rcb a">أهلًا بيك 👋 أنا <b>' +
       esc(AN()) +
-      '</b>. قولّي عايز تطلب إيه وكام ' +
+      '</b> مساعد متجر ' +
+      esc((state.CFG && state.CFG.brandName) || 'أبو سعيد') +
+      '. قولّي عايز تطلب إيه وكام ' +
       esc(state.CFG.unit || 'كرتونة') +
-      '، وأنا هرتّب لك الطلب وأسألك عن الناقص (النكهة أو الحجم).' +
+      '، أو اسألني عن الأسعار والعروض والنكهات المتوفرة.' +
       '<div class="rc-samples">' +
-      '<button type="button" class="rc-sample" data-sample="٥ كراتين شيبسي ملح و٣ ذرة مقرمشة">«٥ كراتين شيبسي ملح و٣ ذرة»</button>' +
-      '<button type="button" class="rc-sample" data-sample="٢ كرتونة بسكويت شوكولاتة و٢ عصير مانجو">«٢ بسكويت شوكولاتة و٢ عصير مانجو»</button>' +
+      samples
+        .map(
+          (x) =>
+            '<button type="button" class="rc-sample" data-sample="' +
+            esc(x.val) +
+            '">' +
+            esc(x.label) +
+            '</button>'
+        )
+        .join('') +
       '</div></div>';
   }
-  CH.msgs.forEach((x) => {
-    h += '<div class="rcb ' + x.r + '">' + esc(x.t) + '</div>';
+  CH.msgs.forEach((x, idx) => {
+    const isLastAssistant =
+      idx === CH.msgs.length - 1 && x.r === 'a' && !CH.busy && CH.quick && CH.quick.length;
+    h +=
+      '<div class="rcb ' +
+      x.r +
+      '">' +
+      esc(x.t) +
+      (isLastAssistant
+        ? '<div class="rc-quick">' +
+          CH.quick
+            .slice(0, 6)
+            .map(
+              (q) =>
+                '<button type="button" class="rc-qbtn" data-quick="' +
+                esc(q.val) +
+                '">' +
+                esc(q.label) +
+                '</button>'
+            )
+            .join('') +
+          '</div>'
+        : '') +
+      '</div>';
   });
   if (CH.busy) h += '<div class="rcb a thinking">⏳ بفكّر وبحلل طلبك...</div>';
   m.innerHTML = h;
@@ -1052,29 +1327,97 @@ function chRender() {
     '</div>';
 }
 
+function buildStoreKB() {
+  const avail = [];
+  const soldOut = [];
+  const discounts = [];
+  const cats = {};
+
+  state.P.forEach((p, idx) => {
+    const fl = FL(p);
+    const availFlavors = [];
+    const outFlavors = [];
+    fl.forEach((f, j) => {
+      if (f[1]) outFlavors.push({ j, name: f[0] });
+      else availFlavors.push({ j, name: f[0] });
+    });
+    const out = !!(p[7] || (fl.length && !availFlavors.length));
+    const oldP = +p[11] > p[3] ? +p[11] : 0;
+    const discPct = oldP ? Math.round(((oldP - p[3]) / oldP) * 100) : 0;
+    const rec = {
+      idx,
+      p,
+      name: pname(idx),
+      baseName: p[0],
+      cat: p[1],
+      pack: p[2] || '',
+      price: +p[3] || 0,
+      oldPrice: oldP,
+      discPct,
+      variant: p[10] || '',
+      availFlavors,
+      outFlavors,
+      out,
+    };
+    if (out) soldOut.push(rec);
+    else {
+      avail.push(rec);
+      if (!cats[p[1]]) cats[p[1]] = [];
+      cats[p[1]].push(rec);
+      if (discPct > 0) discounts.push(rec);
+    }
+  });
+
+  discounts.sort((a, b) => b.discPct - a.discPct);
+  const offers = (state.D.offers || []).filter((o) => !o.x);
+  return { avail, soldOut, discounts, cats, offers };
+}
+
 function chPrompt() {
+  const kb = buildStoreKB();
   const dr = RL.map((l) => ({ i: l.i, f: l.f, q: l.q }));
   const tr = CH.msgs
     .slice(-14)
     .map((x) => (x.r === 'u' ? 'العميل: ' : 'المساعد: ') + x.t)
     .join('\n');
+  const offTxt = kb.offers.length
+    ? kb.offers.map((o) => o.t + (o.pr ? ' (' + o.pr + ')' : '') + (o.d ? ' - ' + o.d : '')).join(' | ')
+    : 'مفيش عروض سلايدر حالياً';
+  const outTxt = kb.soldOut.slice(0, 20).map((x) => x.name).join('، ') || 'مفيش';
+  const cartTot = totals();
+
   return (
     'أنت «' +
     AN() +
-    '» مساعد متجر جملة اسمه «أبو سعيد». بتكلم العميل بالعامية المصرية بشكل ودود ومختصر (سطرين بالكتير)، ومهمتك تاخد طلبه بالمحادثة وترتبه من كتالوج المتجر. العميل ممكن يكتب بأخطاء إملائية أو أخطاء من التعرف على الصوت، فطابق بدقة.\n' +
-    'الكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|النكهات بصيغة رقم=اسم):\n' +
+    '» مساعد ذكي لمتجر جملة اسمه «' +
+    ((state.CFG && state.CFG.brandName) || 'أبو سعيد') +
+    '». بتكلم العميل بالعامية المصرية بشكل ودود ومختصر (سطرين أو ٣ بالكتير)، ومهمتك تستقبل طلبه، تجاوب على أسئلته عن الأسعار والعروض والأصناف والنكهات والحد الأدنى للطلب، وترتب طلبه بدقة.\n' +
+    'معلومات المتجر:\n' +
+    '- الوحدة: ' +
+    ((state.CFG && state.CFG.unit) || 'كرتونة') +
+    ' | أقل طلب: ' +
+    ((+state.CFG?.min || 0) > 0 ? state.CFG.min + ' جنيه' : 'بدون حد أدنى') +
+    ' | الموجود في السلة حالياً: ' +
+    cartTot.n +
+    ' وحدة بإجمالي ' +
+    cartTot.s +
+    ' جنيه.\n' +
+    '- العروض الحالية: ' +
+    offTxt +
+    '\n- أصناف خلصانة حالياً (غير متاحة للطلب): ' +
+    outTxt +
+    '\nالكتالوج المتاح (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|القسم|النكهات بصيغة رقم=اسم):\n' +
     rCat() +
-    '\nارجع JSON فقط (من غير أي كلام برّاه) بالشكل: {"reply":"","items":[{"i":0,"f":-1,"q":1,"a":false,"alt":[]}],"unknown":[""],"clear":false,"action":"none"}\n' +
+    '\nارجع JSON فقط (من غير أي كلام برّاه) بالشكل: {"reply":"","items":[{"i":0,"f":-1,"q":1,"a":false,"alt":[]}],"unknown":[""],"clear":false,"action":"none","quick":[{"label":"","val":""}]}\n' +
     'القواعد:\n' +
     '- items هي الطلب الكامل الحالي في كل رد: ابدأ من «الطلب الحالي»، طبّق عليها آخر كلام العميل (إضافة أو تعديل كمية أو حذف)، وارجعه كله. ماتشيلش صنف غير لو العميل طلب ده صراحة، ولو شال كل الأصناف خلّي clear=true.\n' +
     '- i هو رقم الصنف من الكتالوج بالظبط، و f رقم النكهة أو -1 لو الصنف مالوش نكهات أو العميل ماحددش، و q الكمية بالأرقام الإنجليزية (فهم الأرقام بالكلام: اتنين، تلاتة، دستة=12، كرتونتين=2).\n' +
+    '- لو العميل سأل عن سعر صنف أو نكهاته أو العروض أو أقل طلب: جاوب بدقة من البيانات فوق، وارجع الطلب الحالي زي ما هو.\n' +
     '- لو الكتالوج فيه أكتر من صنف بنفس الاسم (أحجام أو أسعار مختلفة) اختار بالحجم أو السعر اللي ذكره العميل (زي 5 جنيه أو 10 جنيه أو كبير أو صغير). لو ماذكرش حاجة تفرّق اعتبره غير مؤكد: a=true وحط في alt الأصناف البديلة (لحد 4) واسأله هو قصده أنهي واحد.\n' +
-    '- لو الصنف ليه نكهات والعميل ماحددش نكهة اسأله عن النكهة (اذكر له كام نكهة منها بالكتير). لو قال أي نكهة أو مش فارق سيب f=-1 وقوله هيختارها وهو بيراجع الطلب. لو ذكر أكتر من نكهة لنفس الصنف اعمل عنصر لكل نكهة بكميتها، ولو ذكر نكهة بدون كمية خلّي كميتها 1.\n' +
-    '- اسأل سؤال واحد بس في المرة، وماتسألش عن حاجة العميل قالها.\n' +
-    '- ماتخترعش أصناف ولا نكهات ولا أسعار مش في الكتالوج. أي كلام مش لاقي له صنف حطه في unknown بنصه وقوله في reply إنه مش موجود. ماتذكرش أسعار في reply لأن التطبيق بيعرضها.\n' +
-    '- لما الطلب كله يبقى واضح (كل صنف له نكهته لو له نكهات) لخّصه في reply في جملة واسأله «أراجع الطلب ونضيفه؟».\n' +
+    '- لو الصنف ليه نكهات والعميل ماحددش نكهة اسأله عن النكهة (واذكر كام نكهة في reply وحطهم في quick كأزرار سريعة لو حابب). لو قال أي نكهة أو مش فارق سيب f=-1 وقوله هيختارها وهو بيراجع الطلب.\n' +
+    '- اسأل سؤال واحد بس في المرة، وماتخترعش أصناف أو نكهات أو أسعار مش في الكتالوج.\n' +
     '- action تبقى "review" بس لو العميل وافق صراحة (قال أيوه أو تمام أو خلاص أو كده بس أو راجع أو يلا) والمسودة مش فاضية، غير كده تبقى "none".\n' +
-    '- لو العميل سأل في حاجة بعيدة عن الطلب رد بجملة قصيرة وارجّعه للموضوع، وارجع الطلب الحالي زي ما هو.\n' +
+    '- quick (اختياري، بحد أقصى ٤ أزرار قصيرة) لاقتراح خطوة تالية مفيدة للعميل.\n' +
     'الطلب الحالي: ' +
     JSON.stringify(dr) +
     '\nالمحادثة:\n' +
@@ -1082,10 +1425,463 @@ function chPrompt() {
   );
 }
 
+function fmtUnit(q) {
+  return numAr(q) + ' ' + ((state.CFG && state.CFG.unit) || 'كرتونة');
+}
+
+function handlePendingFollowup(t, kb) {
+  const n = rn(t);
+  const toks = ntk(t).filter((x) => !RSTOP[x]);
+
+  // 1) Resolving ambiguous candidate selection (e.g. "ابو 10" / "الاول" / "التاني")
+  if (CH.pendingAltCands && CH.pendingAltCands.length) {
+    const cands = CH.pendingAltCands;
+    const { hints } = extractHints(t);
+    let chosenIdx = -1;
+
+    if (hints.length) {
+      chosenIdx = cands.find((idx) => +state.P[idx]?.[3] === hints[0]) ?? -1;
+      if (chosenIdx < 0) {
+        chosenIdx =
+          cands.find((idx) =>
+            new RegExp('(?:^|\\D)' + hints[0] + '(?:\\D|$)').test(
+              rnd(String(state.P[idx]?.[10] || '') + ' ' + String(state.P[idx]?.[2] || ''))
+            )
+          ) ?? -1;
+      }
+    }
+    if (chosenIdx < 0 && /^(?:الاول|الاولاني|١|1)$/.test(n)) chosenIdx = cands[0];
+    if (chosenIdx < 0 && /^(?:التاني|الثاني|٢|2)$/.test(n) && cands[1] != null) chosenIdx = cands[1];
+    if (chosenIdx < 0 && /^(?:التالت|الثالث|٣|3)$/.test(n) && cands[2] != null) chosenIdx = cands[2];
+
+    if (chosenIdx < 0 && toks.length) {
+      let bestScore = 0;
+      cands.forEach((idx) => {
+        const p = state.P[idx];
+        if (!p) return;
+        const vt = ntk((p[10] || '') + ' ' + (p[2] || ''));
+        let sc = 0;
+        toks.forEach((qt) => {
+          sc += tokSim(qt, vt);
+        });
+        if (sc > bestScore) {
+          bestScore = sc;
+          chosenIdx = idx;
+        }
+      });
+    }
+
+    if (chosenIdx >= 0) {
+      const oldIdx = cands[0];
+      RL.forEach((l) => {
+        if (l.i === oldIdx && l.amb) {
+          l.i = chosenIdx;
+          l.f = -1;
+          l.amb = false;
+        }
+      });
+      CH.pendingAltCands = null;
+      const p = state.P[chosenIdx];
+      const fl = FL(p).filter((f) => !f[1]);
+      if (fl.length) {
+        CH.pendingFlavorIdx = chosenIdx;
+        return {
+          m:
+            'تمام اخترتلك ' +
+            pname(chosenIdx) +
+            ' (' +
+            money(p[3]) +
+            ') 👍\nتحب أنهي نكهة؟ (أو اكتب أي نكهة من الموجودين)',
+          go: false,
+          quick: fl.slice(0, 4).map((f) => ({ label: f[0], val: f[0] })),
+        };
+      }
+      return {
+        m: 'تمام ظبّطتلك ' + pname(chosenIdx) + ' (' + money(p[3]) + ') 👌\nتحب تزوّد حاجة تانية؟',
+        go: false,
+        quick: [
+          { label: '✅ راجع وضيف للسلة', val: 'راجع' },
+          { label: '🎁 العروض', val: 'إيه العروض؟' },
+        ],
+      };
+    }
+  }
+
+  // 2) Resolving pending flavor on a product previously added with f === -1
+  if (CH.pendingFlavorIdx >= 0) {
+    const targetIdx = CH.pendingFlavorIdx;
+    const line = RL.find((l) => l.i === targetIdx && l.f < 0);
+    const p = state.P[targetIdx];
+    if (line && p) {
+      if (/^(?:اي نكهه|اي طعم|مش فارق|عادي|كلهم|مشكل)/.test(n)) {
+        CH.pendingFlavorIdx = -1;
+        return {
+          m: 'تمام 👍 سيبتلك ' + pname(targetIdx) + ' تختار نكهاته براحتك عند المراجعة. تحب تزوّد حاجة تانية؟',
+          go: false,
+          quick: [
+            { label: '✅ راجع وضيف للسلة', val: 'راجع' },
+            { label: '📋 باقي الأصناف', val: 'عندكم أصناف إيه؟' },
+          ],
+        };
+      }
+
+      // Check if user only typed flavor(s) without another product name
+      const segs = rseg(t);
+      const picked = [];
+      const fl = FL(p);
+      let looksLikeFlavorOnly = true;
+
+      segs.forEach((sg) => {
+        const sgRes = rq(ntk(sg));
+        const fMatches = splitMultiFlavors(fl, sgRes[1]);
+        if (fMatches.length && !fMatches[0].out) {
+          picked.push({ j: fMatches[0].j, q: sgRes[0], name: fMatches[0].name });
+        } else {
+          // If this segment matches a totally different product, cancel flavor-only intercept
+          const otherM = rmatch(sgRes[1], [], false);
+          if (otherM && otherM.cs[0].i !== targetIdx && otherM.cs[0].s >= 11) {
+            looksLikeFlavorOnly = false;
+          }
+        }
+      });
+
+      if (looksLikeFlavorOnly && picked.length) {
+        const origQ = line.q;
+        RL = RL.filter((l) => !(l.i === targetIdx && l.f < 0));
+        const addedNames = [];
+        picked.forEach((pkItem, kIdx) => {
+          const useQ = picked.length === 1 && pkItem.q === 1 ? origQ : pkItem.q;
+          const ex = RL.find((o) => o.i === targetIdx && o.f === pkItem.j);
+          if (ex) ex.q = Math.min(ex.q + useQ, 99);
+          else RL.push({ i: targetIdx, f: pkItem.j, q: useQ, c: [targetIdx], amb: false });
+          addedNames.push(numAr(useQ) + ' × ' + pname(targetIdx) + ' · ' + pkItem.name);
+        });
+        CH.pendingFlavorIdx = -1;
+        return {
+          m: 'اتظبطت النكهة ✅:\n' + addedNames.join('\n') + '\nتحب تضيف صنف تاني ولا نراجع الطلب؟',
+          go: false,
+          quick: [
+            { label: '✅ راجع وضيف للسلة', val: 'راجع' },
+            { label: '🎁 شوف العروض', val: 'إيه العروض؟' },
+          ],
+        };
+      }
+    }
+    CH.pendingFlavorIdx = -1;
+  }
+
+  return null;
+}
+
 function chLocal(t) {
+  const n = rn(t)
+    .replace(/[؟?!.،,;:«»"']+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const kb = buildStoreKB();
+
+  // Check pending conversational follow-up (flavor / variant disambiguation)
+  const follow = handlePendingFollowup(t, kb);
+  if (follow) return follow;
+
+  // 1) Confirm / Review intent
+  if (
+    RL.length &&
+    /^(?:ايوه|تمام|خلاص|يلا|كده بس|كده|راجع|ضيف|اضف|ماشي|اه|موافق|اكد|ابعت|انقل للسله)(?:\s|$)/.test(n)
+  ) {
+    return { m: 'تمام، هراجع معاك الطلب ونضيفه للسلة 👌', go: true, quick: [] };
+  }
+
+  // 2) Clear entire draft
+  if (/(?:امسح|فضي|الغي|شيل)\s*(?:كله|الكل|الطلب|المسوده|كل حاجه)|ابدا من جديد/.test(n)) {
+    RL = [];
+    RU = [];
+    CH.pendingFlavorIdx = -1;
+    CH.pendingAltCands = null;
+    return {
+      m: 'مسحت المسودة كلها 🗑 قولي تحب تبدأ بطلب إيه؟',
+      go: false,
+      quick: [
+        { label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' },
+        { label: '🎁 العروض', val: 'إيه العروض؟' },
+      ],
+    };
+  }
+
+  // 3) Remove specific product from draft ("شيل الشيبسي" / "احذف الدوريتوس" / "مش عايز بسكويت")
+  if (/^(?:شيل|احذف|الغي|امسح|مش عايز|بلاش)\s+/.test(n)) {
+    if (!RL.length) {
+      return {
+        m: 'المسودة فاضية أصلاً 😊 ابعتلي الأصناف اللي تحب تطلبها.',
+        go: false,
+        quick: [{ label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' }],
+      };
+    }
+    const restText = t.replace(/^(?:شيل|احذف|الغي|امسح|مش عايز|بلاش)\s+/i, '');
+    const m = rmatch(ntk(restText), [], true);
+    if (m) {
+      const targetIdx = m.cs[0].i;
+      const before = RL.length;
+      RL = RL.filter((l) => l.i !== targetIdx);
+      if (RL.length < before) {
+        return {
+          m: 'شيلت ' + pname(targetIdx) + ' من الطلب ✅',
+          go: false,
+          quick: RL.length
+            ? [{ label: '✅ راجع الطلب', val: 'راجع' }]
+            : [{ label: '📋 الأصناف', val: 'عندكم إيه؟' }],
+        };
+      }
+    }
+    return {
+      m: 'الصنف ده مش موجود في مسودة الطلب دلوقتي.',
+      go: false,
+      quick: [{ label: '✅ راجع الطلب الحالي', val: 'راجع' }],
+    };
+  }
+
+  // 4) Adjust quantity on existing draft item ("زود" / "قلل" / "خليهم 5")
+  if (RL.length && /^(?:زود|زودلي|نقص|قلل|خليهم|خلي|عدل)(?:\s|$)/.test(n)) {
+    const nums = n.match(/\d+/);
+    let qty = nums ? +nums[0] : 0;
+    if (!qty) {
+      for (const k in RNUM) {
+        if (n.indexOf(k) > -1) {
+          qty = RNUM[k];
+          break;
+        }
+      }
+    }
+    const adjClean = n.replace(/^(?:زود|زودلي|نقص|قلل|خليهم|خلي|عدل)\s*/, '');
+    const adjParsed = rq(ntk(adjClean));
+    const m = rmatch(adjParsed[1], [], false);
+    const line =
+      (m &&
+        m.cs
+          .map((c) => RL.find((l) => l.i === c.i))
+          .find(Boolean)) ||
+      RL[RL.length - 1];
+    if (line) {
+      if (/^(?:زود|زودلي)/.test(n)) {
+        line.q = Math.min(99, line.q + (qty || 1));
+      } else if (/^(?:نقص|قلل)/.test(n)) {
+        line.q = Math.max(1, line.q - (qty || 1));
+      } else if (qty > 0) {
+        line.q = Math.min(99, qty);
+      }
+      return {
+        m:
+          'عدّلت الكمية لـ ' +
+          pname(line.i) +
+          ' بقت ' +
+          fmtUnit(line.q) +
+          ' ✅',
+        go: false,
+        quick: [
+          { label: '✅ راجع وضيف للسلة', val: 'راجع' },
+          { label: '➕ أضيف صنف تاني', val: 'عندكم أصناف إيه؟' },
+        ],
+      };
+    }
+  }
+
+  // 5) Offers & Discounts Q&A
+  if (/(?:^|\s)(?:ال)?(?:عروض|عرض|خصم|خصومات|تخفيض|تخفيضات|اوفرز)(?:\s|$)/.test(n)) {
+    const parts = [];
+    if (kb.offers.length) {
+      parts.push(
+        '🎁 عروض اليوم:\n' +
+          kb.offers
+            .slice(0, 5)
+            .map((o) => '• ' + o.t + (o.pr ? ' — ' + o.pr : '') + (o.d ? ' (' + o.d + ')' : ''))
+            .join('\n')
+      );
+    }
+    if (kb.discounts.length) {
+      parts.push(
+        '🔥 أصناف عليها خصم مباشر:\n' +
+          kb.discounts
+            .slice(0, 5)
+            .map(
+              (d) =>
+                '• ' +
+                d.name +
+                ': ' +
+                money(d.price) +
+                ' بدل ' +
+                money(d.oldPrice) +
+                ' (خصم ' +
+                numAr(d.discPct) +
+                '%)'
+            )
+            .join('\n')
+      );
+    }
+    if (!parts.length) {
+      parts.push('كل الأصناف عندنا بأسعار الجملة المباشرة! تقدر تسأل عن أي صنف وهقولك سعره فوراً.');
+    }
+    const quick = kb.discounts.slice(0, 2).map((d) => ({
+      label: 'اطلب ٢ ' + d.baseName,
+      val: '٢ ' + d.name,
+    }));
+    quick.push({ label: '📋 كل الأقسام', val: 'عندكم أصناف إيه؟' });
+    return { m: parts.join('\n\n'), go: false, quick };
+  }
+
+  // 6) Min order / Cart total / Store info Q&A
+  if (/(?:اقل طلب|الحد الادني|حد ادني|حسابي|سله|سلة|توصيل|واتساب|رقم|شحن|وحدة|وحده)/.test(n)) {
+    const minVal = +state.CFG?.min || 0;
+    const cartTot = totals();
+    const draftTot = RL.reduce((s, l) => s + l.q * (state.P[l.i]?.[3] || 0), 0);
+    let m =
+      '📦 نظام الطلب في ' +
+      ((state.CFG && state.CFG.brandName) || 'أبو سعيد') +
+      ':\n• الطلب بالـ ' +
+      ((state.CFG && state.CFG.unit) || 'كرتونة') +
+      '\n• ' +
+      (minVal > 0 ? 'أقل قيمة للطلب: ' + money(minVal) : 'مفيش حد أدنى للطلب') +
+      '\n• الإرسال فوري عبر واتساب مباشرة.';
+    if (cartTot.n > 0) {
+      m += '\n🛒 في سلتك دلوقتي: ' + fmtUnit(cartTot.n) + ' بإجمالي ' + money(cartTot.s);
+    }
+    if (draftTot > 0) {
+      m += '\n📝 في المسودة: بإجمالي ' + money(draftTot);
+    }
+    return {
+      m,
+      go: false,
+      quick: [
+        { label: '🎁 العروض الحالية', val: 'إيه العروض؟' },
+        { label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' },
+      ],
+    };
+  }
+
+  // 7) Price / Flavors / Stock question ("بكام الشيبسي" / "نكهات الدوريتوس" / "متوفر بيج شيبس؟")
+  if (/(?:^|\s)(?:بكام|بكأم|سعر|اسعار|نكهات|اطعمه|طعوم|متوفر|في من|عندكم من|تفاصيل|خلصان)(?:\s|$)/.test(n) && !/عندكم\s+(?:ايه|اصناف)/.test(n)) {
+    const queryClean = n.replace(
+      /(?:^|\s)(?:بكام|بكأم|سعر|اسعار|نكهات|اطعمه|طعوم|متوفر|في من|عندكم من|تفاصيل|خلصان|هو|هي|ايه|اللي|في)(?=\s|$)/g,
+      ' '
+    );
+    const { hints } = extractHints(queryClean);
+    const m = rmatch(ntk(queryClean), hints, true);
+    if (m) {
+      const topRecs = m.cs.slice(0, 3).map((c) => {
+        const p = state.P[c.i];
+        return { i: c.i, p, out: c.out };
+      });
+      const linesTxt = topRecs.map(({ i, p, out }) => {
+        const fl = FL(p);
+        const avFl = fl.filter((f) => !f[1]).map((f) => f[0]);
+        let s =
+          '• ' +
+          pname(i) +
+          (p[2] ? ' (' + p[2] + ')' : '') +
+          ' — ' +
+          (out ? '❌ خلصان حالياً' : money(p[3]) + (+p[11] > p[3] ? ' (بدل ' + money(p[11]) + ')' : ''));
+        if (!out && avFl.length) {
+          s += '\n  النكهات: ' + avFl.slice(0, 7).join('، ') + (avFl.length > 7 ? ' و' + numAr(avFl.length - 7) + ' تانيين' : '');
+        }
+        return s;
+      });
+      const firstAvail = topRecs.find((x) => !x.out);
+      const quick = firstAvail
+        ? [
+            {
+              label: '➕ اطلب ٢ ' + pname(firstAvail.i),
+              val:
+                '٢ ' +
+                pname(firstAvail.i) +
+                (FL(firstAvail.p).find((f) => !f[1]) ? ' ' + FL(firstAvail.p).find((f) => !f[1])[0] : ''),
+            },
+            { label: '🎁 العروض', val: 'إيه العروض؟' },
+          ]
+        : [{ label: '📋 أصناف متوفرة تانية', val: 'عندكم أصناف إيه؟' }];
+      return { m: linesTxt.join('\n'), go: false, quick };
+    }
+  }
+
+  // 8) General catalog / category browsing ("عندكم إيه؟" / "اقسام إيه؟" / "أصناف الشيبسي")
+  if (/(?:عندكم\s+ايه|عندكو\s+ايه|عندكم\s+اصناف|ايه\s+(?:اللي\s+)?متوفر|ايه\s+(?:اللي\s+)?موجود|(?:^|\s)(?:ال)?(?:اصناف|اقسام|منتجات|بضاعه|منيو|قوايم|كتالوج)(?:\s|$)|تبيعوا\s+ايه|متوفر\s+ايه)/.test(n)) {
+    const catNames = Object.keys(kb.cats);
+    const matchedCat = catNames.find((c) => n.indexOf(rn(c)) > -1);
+    if (matchedCat) {
+      const list = kb.cats[matchedCat];
+      const msg =
+        '📦 قسم ' +
+        matchedCat +
+        ' (' +
+        numAr(list.length) +
+        ' صنف متاح):\n' +
+        list
+          .slice(0, 8)
+          .map((x) => '• ' + x.name + ' — ' + money(x.price))
+          .join('\n') +
+        (list.length > 8 ? '\n... و' + numAr(list.length - 8) + ' صنف تاني في الكتالوج' : '');
+      return {
+        m: msg,
+        go: false,
+        quick: list.slice(0, 3).map((x) => ({
+          label: 'اطلب ٢ ' + x.baseName,
+          val: '٢ ' + x.name,
+        })),
+      };
+    }
+    const msg =
+      '🏪 متوفر عندنا ' +
+      numAr(kb.avail.length) +
+      ' صنف متوزعين على:\n' +
+      catNames
+        .map((c) => '• ' + c + ' (' + numAr(kb.cats[c].length) + ' صنف)')
+        .join('\n') +
+      '\nقولّي حابب تشوف قسم إيه أو اكتبلي طلبك على طول!';
+    return {
+      m: msg,
+      go: false,
+      quick: catNames.slice(0, 4).map((c) => ({ label: 'قسم ' + c, val: 'عندكم إيه في ' + c })),
+    };
+  }
+
+  // Also check if user typed ONLY a category name like "شيبسي" or "مشروبات" with no quantity
+  const pureCat = Object.keys(kb.cats).find((c) => rn(c) === n || n === 'قسم ' + rn(c));
+  if (pureCat) {
+    const list = kb.cats[pureCat];
+    return {
+      m:
+        '📦 أشهر أصناف ' +
+        pureCat +
+        ':\n' +
+        list
+          .slice(0, 7)
+          .map((x) => '• ' + x.name + ' — ' + money(x.price))
+          .join('\n'),
+      go: false,
+      quick: list.slice(0, 3).map((x) => ({ label: 'اطلب ٢ ' + x.baseName, val: '٢ ' + x.name })),
+    };
+  }
+
+  // 9) Greeting / Capabilities help
+  if (/^(?:اهلا|أهلا|السلام عليكم|وعليكم|مرحبا|هاي|ازيك|صباح|مساء|مساعده|مساعدة|بتعمل ايه|انت مين)(?:\s|$)/.test(n)) {
+    return {
+      m:
+        'أهلاً بيك في ' +
+        ((state.CFG && state.CFG.brandName) || 'أبو سعيد') +
+        ' 👋\nأنا مساعدك الذكي للطلبات! تقدر تكتبلي طلبك بالعامية (زي: «٣ شيبسي ملح و٢ دوريتوس»)، أو تسألني عن أي سعر أو عرض أو نكهة.',
+      go: false,
+      quick: [
+        { label: '🎁 إيه العروض؟', val: 'إيه العروض والخصومات؟' },
+        { label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' },
+        { label: '💰 أقل طلب كام؟', val: 'أقل طلب كام؟' },
+      ],
+    };
+  }
+
+  // 10) Default: Full multi-item order extraction
   const r = rlocal(t);
   const names = [];
-  let go = false;
+  let missingFlavorItem = null;
+  let ambItem = null;
+
   r.items.forEach((x) => {
     let e = null;
     RL.forEach((o) => {
@@ -1096,25 +1892,54 @@ function chLocal(t) {
     const p = state.P[x.i];
     const fl = FL(p);
     names.push(
-      numAr(x.q) + ' × ' + pname(x.i) + (x.f >= 0 && fl[x.f] ? ' · ' + fl[x.f][0] : '')
+      fmtUnit(x.q) + ' ' + pname(x.i) + (x.f >= 0 && fl[x.f] ? ' · ' + fl[x.f][0] : '')
     );
+    if (x.amb && !ambItem) ambItem = x;
+    else if (x.f < 0 && fl.some((f) => !f[1]) && !missingFlavorItem) missingFlavorItem = x;
   });
+
   RL = chFix(RL);
   RU = r.unk;
-  if (
-    !r.items.length &&
-    RL.length &&
-    /^(?:ايوه|تمام|خلاص|يلا|كده|راجع|ضيف|اضف|ماشي|اه)(?:\s|$)/.test(rn(t))
-  ) {
-    go = true;
-  }
+
   let m = '';
-  if (names.length) m = 'ضفتلك:\n' + names.join('\n');
-  if (r.unk.length) m += (m ? '\n' : '') + 'ما لقيتش في الأصناف: «' + r.unk.join('»، «') + '»';
-  if (go) m = 'تمام، هراجع معاك الطلب 👌';
-  else if (!names.length && !r.unk.length) m = 'ما فهمتش طلبك، جرّب تكتب اسم الصنف والكمية.';
-  else if (names.length) m += '\nتزوّد حاجة؟ ولو خلصت دوس «راجع وضيف للسلة».';
-  return { m, go };
+  let quick = [];
+
+  if (names.length) m = 'ضفتلك للطلب ✅:\n' + names.join('\n');
+  if (r.soldOutHits.length) {
+    m += (m ? '\n\n' : '') + '⚠️ غير متوفر حالياً (خلصان): ' + r.soldOutHits.join('، ');
+  }
+  if (r.unk.length) {
+    m += (m ? '\n' : '') + 'ما لقيتش في الأصناف: «' + r.unk.join('»، «') + '»';
+  }
+
+  if (ambItem && ambItem.c && ambItem.c.length > 1) {
+    CH.pendingAltCands = ambItem.c.slice(0, 4);
+    m += '\n\n🤔 قصدك أنهي حجم أو نوع من ' + state.P[ambItem.i][0] + '؟';
+    quick = CH.pendingAltCands.map((idx) => ({
+      label: pname(idx) + ' · ' + money(state.P[idx][3]),
+      val: pname(idx) + ' ب ' + state.P[idx][3] + ' جنيه',
+    }));
+  } else if (missingFlavorItem) {
+    const flAvail = FL(state.P[missingFlavorItem.i]).filter((f) => !f[1]);
+    CH.pendingFlavorIdx = missingFlavorItem.i;
+    m += '\n\n🌶 تحب أنهي نكهة في ' + pname(missingFlavorItem.i) + '؟';
+    quick = flAvail.slice(0, 4).map((f) => ({ label: f[0], val: f[0] }));
+    quick.push({ label: 'أي نكهة (اختار بعدين)', val: 'أي نكهة' });
+  } else if (names.length) {
+    m += '\nتحب تزوّد حاجة؟ ولو خلصت دوس «راجع وضيف للسلة».';
+    quick = [
+      { label: '✅ راجع وضيف للسلة', val: 'راجع' },
+      { label: '🎁 شوف العروض', val: 'إيه العروض؟' },
+    ];
+  } else if (!r.soldOutHits.length && !r.unk.length) {
+    m = 'ما قدرتش أحدد صنف من رسالتك 😊 جرّب تكتب اسم الصنف والكمية، أو اسألني «عندكم أصناف إيه؟».';
+    quick = [
+      { label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' },
+      { label: '🎁 العروض الحالية', val: 'إيه العروض؟' },
+    ];
+  }
+
+  return { m, go: false, quick };
 }
 
 async function rGo() {
@@ -1136,7 +1961,7 @@ async function rGo() {
     b.textContent = '⏳ بحلل طلبك...';
   }
   let res = null;
-  if (state.CFG && state.CFG.gk) {
+  if (state.CFG && state.CFG.gk && state.CFG.aiMode !== 'local') {
     try {
       res = await rAI(state.CFG.gk, t);
     } catch (e) {
@@ -1150,7 +1975,11 @@ async function rGo() {
     b2.textContent = 'حلّل طلبي 🤖';
   }
   if (!res.items.length) {
-    rErr('ما فهمتش طلبك، جرّب تكتب اسم الصنف والكمية');
+    rErr(
+      res.soldOutHits && res.soldOutHits.length
+        ? 'الأصناف دي خلصانة حالياً: ' + res.soldOutHits.join('، ')
+        : 'ما فهمتش طلبك، جرّب تكتب اسم الصنف والكمية'
+    );
     return;
   }
   RL = res.items;
@@ -1169,13 +1998,15 @@ async function chSend() {
   if (!t) return;
   rErr('');
   CH.msgs.push({ r: 'u', t });
+  CH.quick = [];
   ta.value = '';
   RT = '';
   CH.busy = 1;
   chRender();
 
+  const useGemini = !!(state.CFG && state.CFG.gk && state.CFG.aiMode !== 'local');
   let ok = false;
-  if (state.CFG && state.CFG.gk) {
+  if (useGemini) {
     try {
       const raw = await rGem(state.CFG.gk, chPrompt());
       let j = JSON.parse(raw.replace(/```json|```/g, '').trim());
@@ -1183,6 +2014,12 @@ async function chSend() {
       const L = rNorm(j);
       if (L.length || j.clear === true || !RL.length) RL = L;
       RU = (Array.isArray(j.unknown) ? j.unknown : []).map(String);
+      CH.quick = Array.isArray(j.quick)
+        ? j.quick
+            .filter((q) => q && q.label && q.val)
+            .slice(0, 4)
+            .map((q) => ({ label: String(q.label), val: String(q.val) }))
+        : [];
       CH.msgs.push({ r: 'a', t: String(j.reply || 'تمام') });
       CH.busy = 0;
       ok = true;
@@ -1195,12 +2032,8 @@ async function chSend() {
 
   if (!ok) {
     const lr = chLocal(t);
-    let pre = '';
-    if (state.CFG && state.CFG.gk && !CH.nf) {
-      CH.nf = 1;
-      pre = 'الذكاء الاصطناعي مش متاح دلوقتي فرتّبت طلبك بالطريقة العادية.\n';
-    }
-    CH.msgs.push({ r: 'a', t: pre + lr.m });
+    CH.quick = Array.isArray(lr.quick) ? lr.quick : [];
+    CH.msgs.push({ r: 'a', t: lr.m });
     CH.busy = 0;
     chRender();
     if (lr.go) chReview();
@@ -1464,11 +2297,12 @@ export function bindAIEvents() {
       closeAI();
       return;
     }
-    if (t.dataset && t.dataset.sample) {
+    if (t.dataset && (t.dataset.sample || t.dataset.quick)) {
+      const txt = t.dataset.sample || t.dataset.quick;
       const ta = $('rt');
       if (ta) {
-        ta.value = t.dataset.sample;
-        RT = t.dataset.sample;
+        ta.value = txt;
+        RT = txt;
         chSend();
       }
       return;
