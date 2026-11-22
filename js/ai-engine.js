@@ -763,6 +763,19 @@ export function dedupeAndNormalizeDraft(RL, products) {
 const HOLLOW_REPLY_RE =
   /^(?:تمام|حاضر|ماشي|اوكي|اوك|ok|yes|نعم|ايوه|طيب|حسنا|تحت امرك|حالا|علي راسي|اهلا|مرحبا)(?:\s+(?:يا\s+)?(?:فندم|باشا|استاذ|ريس|كبير))?$/i;
 
+const FALSE_CART_CLAIM_RE =
+  /(?:اضفت|ضفت(?:لك)?|اتضاف(?:وا)?|تمت?\s+الاضاف[هة]|موجود(?:ه|ين)?)\s+(?:لك\s+)?(?:في\s+|لـ?\s*|الى\s+)?(?:ال)?سله/;
+
+export function hasFalseCartClaim(text) {
+  return FALSE_CART_CLAIM_RE.test(rn(text));
+}
+
+function sanitizeCartClaimText(text) {
+  return String(text || '')
+    .replace(/(?:في\s+|لـ?\s*|إلى\s+)?السلة(?:\s+الفعلية)?/g, 'في مسودة الطلب')
+    .replace(/للسله|في السله/g, 'في مسودة الطلب');
+}
+
 export function isHollowAiReply(text) {
   const cleaned = rn(text)
     .replace(/[^\u0621-\u064Aa-zA-Z0-9\s]+/g, ' ')
@@ -793,7 +806,7 @@ function formatOrderSummaryReply(prefix, draft, kb) {
       sumTxt += `\n⚠️ ملحوظة: الحد الأدنى للطلب ${fmtMoneyAr(minVal)} (باقي ${fmtMoneyAr(minVal - calc.totalPrice)})`;
     }
     parts.push(sumTxt);
-    parts.push('تحب نأكد الطلب ونضيفه للسلة، ولا حابب تعدّل أو تزود حاجة تانية؟');
+    parts.push('تحب تعدّل الكمية أو تضيف صنف تاني، ولا نراجع ونضيف للسلة؟');
   }
   return parts.join('\n\n');
 }
@@ -992,8 +1005,16 @@ export function validateCustomerGeminiResponse({
     const isInquiry = intent === 'inquiry' || intent === 'greeting' || intent === 'clarify';
     if (isInquiry) {
       nextDraft = currentDraft.slice();
-    } else if (intent === 'remove' || intent === 'edit') {
+    } else if (intent === 'remove') {
       nextDraft = dedupeAndNormalizeDraft(verifiedItems, products);
+    } else if (intent === 'edit') {
+      const editMap = new Map();
+      verifiedItems.forEach((v) => {
+        editMap.set(`${v.i}:${v.f}`, v);
+      });
+      const editedIds = new Set(verifiedItems.map((d) => d.i));
+      const preserved = currentDraft.filter((d) => !editedIds.has(d.i));
+      nextDraft = dedupeAndNormalizeDraft([...preserved, ...verifiedItems], products);
     } else {
       const newIds = new Set(verifiedItems.map((d) => d.i));
       const omitted = currentDraft.filter((d) => !newIds.has(d.i));
@@ -1014,20 +1035,26 @@ export function validateCustomerGeminiResponse({
     lastReferencedProductIdx: Number.isInteger(stateCtx?.lastReferencedProductIdx)
       ? stateCtx.lastReferencedProductIdx
       : -1,
+    lastReferencedFlavorIdx: Number.isInteger(stateCtx?.lastReferencedFlavorIdx)
+      ? stateCtx.lastReferencedFlavorIdx
+      : -1,
   };
 
   if (clearAsked) {
-    nextState = { pendingClarification: null, lastReferencedProductIdx: -1 };
+    nextState = { pendingClarification: null, lastReferencedProductIdx: -1, lastReferencedFlavorIdx: -1 };
   } else if (disambiguations.length) {
+    const reqQty = msgQp && msgQp.explicitQty ? msgQp.qty : msgQp && msgQp.hasSingularUnit ? 1 : null;
     nextState.pendingClarification = {
       type: 'disambiguate_product',
       candidates: disambiguations[0].alt,
-      explicitQty: msgQp && msgQp.explicitQty ? msgQp.qty : null,
+      explicitQty: reqQty,
     };
   } else if (missingFlavors.length) {
     const keepQty =
       msgQp && msgQp.explicitQty
         ? msgQp.qty
+        : msgQp && msgQp.hasSingularUnit
+        ? 1
         : stateCtx?.pendingClarification?.type === 'disambiguate_product' && prevPcQty
         ? prevPcQty
         : null;
@@ -1037,6 +1064,7 @@ export function validateCustomerGeminiResponse({
       explicitQty: keepQty,
     };
     nextState.lastReferencedProductIdx = missingFlavors[0].i;
+    nextState.lastReferencedFlavorIdx = -1;
   } else if (missingQty.length) {
     nextState.pendingClarification = {
       type: 'qty',
@@ -1044,9 +1072,11 @@ export function validateCustomerGeminiResponse({
       flavorIdx: missingQty[0].f,
     };
     nextState.lastReferencedProductIdx = missingQty[0].i;
+    nextState.lastReferencedFlavorIdx = missingQty[0].f;
   } else if (verifiedItems.length && !clearAsked) {
     nextState.pendingClarification = null;
     nextState.lastReferencedProductIdx = verifiedItems[verifiedItems.length - 1].i;
+    nextState.lastReferencedFlavorIdx = verifiedItems[verifiedItems.length - 1].f;
   }
 
   let reply = String(parsed.reply || '').trim();
@@ -1069,10 +1099,14 @@ export function validateCustomerGeminiResponse({
 
   const draftChanged = JSON.stringify(nextDraft) !== JSON.stringify(currentDraft);
   const hollow = isHollowAiReply(reply);
+  const falseCartClaim = hasFalseCartClaim(reply);
+  if (falseCartClaim && draftChanged) {
+    reply = sanitizeCartClaimText(reply);
+  }
 
   if (disambiguations.length) {
     const cands = disambiguations[0].alt;
-    if (hollow || !/[؟?]/.test(reply)) {
+    if (hollow || falseCartClaim || !/[؟?]/.test(reply)) {
       reply =
         `لقيت أكتر من نوع مطابق، تقصد أنهي واحد؟\n` +
         cands
@@ -1080,7 +1114,7 @@ export function validateCustomerGeminiResponse({
           .join('\n');
     }
     if (!quick.length) {
-      quick = cands.slice(0, 4).map((idx) => ({
+      quick = cands.slice(0, 6).map((idx) => ({
         label: getProductDisplayName(products[idx]),
         val: getProductDisplayName(products[idx]),
       }));
@@ -1089,18 +1123,18 @@ export function validateCustomerGeminiResponse({
     const pIdx = missingFlavors[0].i;
     const p = products[pIdx];
     const availFl = getProductFlavors(p).filter((ff) => !ff[1]);
-    if (hollow || !/[؟?]/.test(reply)) {
+    if (hollow || falseCartClaim || !/[؟?]/.test(reply)) {
       reply = `تحب أنهي نكهة في ${getProductDisplayName(p)}؟\nالنكهات المتاحة: ${availFl.map((ff) => ff[0]).join('، ')}`;
     }
     if (!quick.length) {
-      quick = availFl.slice(0, 4).map((ff) => ({ label: ff[0], val: ff[0] }));
+      quick = availFl.slice(0, 6).map((ff) => ({ label: ff[0], val: ff[0] }));
     }
   } else if (missingQty.length) {
     const mq = missingQty[0];
     const p = products[mq.i];
     const fl = getProductFlavors(p);
     const fLabel = mq.f >= 0 && fl[mq.f] ? ` · ${fl[mq.f][0]}` : '';
-    if (hollow || !/[؟?]/.test(reply)) {
+    if (hollow || falseCartClaim || !/[؟?]/.test(reply)) {
       reply = `تمام (${getProductDisplayName(p)}${fLabel}) 👍 عايز كام ${unit}؟`;
     }
     if (!quick.length) {
@@ -1111,7 +1145,7 @@ export function validateCustomerGeminiResponse({
       ];
     }
   } else if (rejectedReasons.length) {
-    if (hollow) {
+    if (hollow || falseCartClaim) {
       reply = `${rejectedReasons.join('\n')}\nتحب تطلب إيه من الأصناف المتاحة؟`;
     } else {
       reply = `${reply}\n${rejectedReasons.join('\n')}`;
@@ -1120,10 +1154,11 @@ export function validateCustomerGeminiResponse({
     !draftChanged &&
     !clearAsked &&
     (hollow ||
+      falseCartClaim ||
       unknown.length ||
       (!verifiedItems.length && intent !== 'inquiry' && intent !== 'greeting'))
   ) {
-    // Gemini returned a hollow confirmation or failed to produce actionable items/clarification: consult deterministic engine
+    // Gemini returned a hollow confirmation / false cart-add claim / failed to produce actionable items/clarification: consult deterministic engine
     const localTurn = processCustomerTurn({
       text: userMessage,
       catalogData,
@@ -1134,33 +1169,37 @@ export function validateCustomerGeminiResponse({
       const localDraftChanged =
         JSON.stringify(localTurn.draft) !== JSON.stringify(currentDraft);
       const localHasClarify = Boolean(localTurn.nextState?.pendingClarification);
-      if (hollow || localDraftChanged || localHasClarify || localTurn.go) {
+      if (hollow || falseCartClaim || localDraftChanged || localHasClarify || localTurn.go) {
         nextDraft = localTurn.draft;
         nextState = localTurn.nextState;
-        if (hollow || !quick.length || localDraftChanged || localHasClarify) {
+        if (hollow || falseCartClaim || !quick.length || localDraftChanged || localHasClarify) {
           reply = localTurn.reply;
         }
         if (localTurn.quick && localTurn.quick.length) quick = localTurn.quick;
         if (localTurn.go && nextDraft.length) action = 'review';
-      } else if (unknown.length && (!reply || hollow)) {
+      } else if (unknown.length && (!reply || hollow || falseCartClaim)) {
         reply = `ما لقيتش «${unknown.join('، ')}» في الكتالوج. تحب تشوف الأقسام المتاحة ولا تقصد صنف تاني؟`;
         if (!quick.length) {
           quick = Object.keys(kb.cats)
-            .slice(0, 4)
+            .slice(0, 6)
             .map((c) => ({ label: `قسم ${c}`, val: `عندكم إيه في ${c}` }));
         }
-      } else if (hollow) {
+      } else if (hollow || falseCartClaim) {
         reply = 'معلش ما فهمتش طلبك بالكامل 😊 قولي اسم الصنف والكمية اللي عايزها أو اسألني «عندكم أصناف إيه؟».';
       }
     }
-  } else if (draftChanged && hollow) {
-    reply = formatOrderSummaryReply('تم تحديث الطلب ✅', nextDraft, kb);
+  } else if (draftChanged && (hollow || hasFalseCartClaim(reply))) {
+    reply = formatOrderSummaryReply('تم تحديث مسودة الطلب ✅', nextDraft, kb);
     if (!quick.length) {
       quick = [
         { label: '✅ راجع وضيف للسلة', val: 'راجع الطلب' },
         { label: '➕ إضافة صنف تاني', val: 'عندكم أصناف إيه؟' },
       ];
     }
+  }
+
+  if (hasFalseCartClaim(reply)) {
+    reply = sanitizeCartClaimText(reply);
   }
 
   if (isHollowAiReply(reply)) {
@@ -1171,14 +1210,14 @@ export function validateCustomerGeminiResponse({
       !missingFlavors.length &&
       !missingQty.length
     ) {
-      reply = 'تمام، هفتحلك مراجعة الطلب لإضافته للسلة 👌';
+      reply = 'تمام، هفتحلك مراجعة مسودة الطلب عشان تضيفه للسلة 👌';
       action = 'review';
     } else {
       reply =
         'معلش ممكن توضح طلبك أكتر؟ قولّي اسم الصنف والكمية اللي محتاجها أو اختار من الأقسام المتاحة.';
       if (!quick.length) {
         quick = Object.keys(kb.cats)
-          .slice(0, 4)
+          .slice(0, 6)
           .map((c) => ({ label: `قسم ${c}`, val: `عندكم إيه في ${c}` }));
       }
     }
@@ -1189,7 +1228,7 @@ export function validateCustomerGeminiResponse({
     unknown,
     reply,
     action,
-    quick: quick.slice(0, 4),
+    quick: quick.slice(0, 6),
     disambiguations,
     missingFlavors: missingFlavors.map((m) => m.i),
     missingQty: missingQty.map((m) => m.i),
@@ -1215,6 +1254,8 @@ export function processCustomerTurn({
       : null,
     lastReferencedProductIdx:
       Number.isInteger(convState.lastReferencedProductIdx) ? convState.lastReferencedProductIdx : -1,
+    lastReferencedFlavorIdx:
+      Number.isInteger(convState.lastReferencedFlavorIdx) ? convState.lastReferencedFlavorIdx : -1,
   };
 
   const n = rn(text)
@@ -1231,6 +1272,8 @@ export function processCustomerTurn({
       quick: [],
     };
   }
+
+  let carriedDisambigQty = null;
 
   // 1) Resolve pending clarification (disambiguation, flavor slot, quantity slot, missing flavor+qty)
   if (nextState.pendingClarification) {
@@ -1283,10 +1326,15 @@ export function processCustomerTurn({
       }
 
       if (chosenIdx >= 0 && products[chosenIdx] && !isProductOutOfStock(products[chosenIdx])) {
-        const useQty = qParsed.explicitQty ? qParsed.qty : pc.explicitQty;
+        const useQty = qParsed.explicitQty
+          ? qParsed.qty
+          : qParsed.hasSingularUnit
+          ? 1
+          : pc.explicitQty;
         const p = products[chosenIdx];
         const fl = getProductFlavors(p).filter((f) => !f[1]);
         nextState.lastReferencedProductIdx = chosenIdx;
+        nextState.lastReferencedFlavorIdx = -1;
 
         // Check if flavor was also provided or needed
         const fm = fl.length ? matchProductFlavors(p, qParsed.rest, clean || text) : { avail: [], soldOut: [] };
@@ -1303,7 +1351,7 @@ export function processCustomerTurn({
             draft,
             nextState,
             go: false,
-            quick: fl.slice(0, 4).map((f) => ({ label: f[0], val: f[0] })),
+            quick: fl.slice(0, 6).map((f) => ({ label: f[0], val: f[0] })),
           };
         }
 
@@ -1332,9 +1380,10 @@ export function processCustomerTurn({
           products
         );
         nextState.pendingClarification = null;
+        nextState.lastReferencedFlavorIdx = chosenFlavorIdx;
         return {
           reply: formatOrderSummaryReply(
-            `تمت الإضافة ✅: ${useQty} ${unit} من ${getProductDisplayName(p)}${chosenFlavorIdx >= 0 ? ' · ' + getProductFlavors(p)[chosenFlavorIdx][0] : ''} (${fmtMoneyAr(p[3] * useQty)})`,
+            `ضفتلك في مسودة الطلب ✅: ${useQty} ${unit} من ${getProductDisplayName(p)}${chosenFlavorIdx >= 0 ? ' · ' + getProductFlavors(p)[chosenFlavorIdx][0] : ''} (${fmtMoneyAr(p[3] * useQty)})`,
             nextDraft,
             kb
           ),
@@ -1364,6 +1413,16 @@ export function processCustomerTurn({
           !pc.candidates.includes(directOther.cs[0].i));
 
       if (isNewCommand) {
+        if (
+          pc.explicitQty &&
+          !qParsed.explicitQty &&
+          !qParsed.hasSingularUnit &&
+          directOther &&
+          directOther.cs[0] &&
+          !directOther.cs[0].isFuzzyOnly
+        ) {
+          carriedDisambigQty = pc.explicitQty;
+        }
         nextState.pendingClarification = null;
       } else {
         return {
@@ -1375,7 +1434,7 @@ export function processCustomerTurn({
           draft,
           nextState,
           go: false,
-          quick: pc.candidates.slice(0, 4).map((idx) => ({
+          quick: pc.candidates.slice(0, 6).map((idx) => ({
             label: getProductDisplayName(products[idx]),
             val: getProductDisplayName(products[idx]),
           })),
@@ -1453,7 +1512,7 @@ export function processCustomerTurn({
           draft,
           nextState,
           go: false,
-          quick: availFl.slice(0, 4).map((f) => ({ label: f[0], val: f[0] })),
+          quick: availFl.slice(0, 6).map((f) => ({ label: f[0], val: f[0] })),
         };
       }
 
@@ -1465,6 +1524,7 @@ export function processCustomerTurn({
             flavorIdx: picked[0].j,
           };
           nextState.lastReferencedProductIdx = pc.prodIdx;
+          nextState.lastReferencedFlavorIdx = picked[0].j;
           return {
             reply: `تمام (${getProductDisplayName(p)} · ${picked[0].name}) 👍 عايز كام ${unit}؟`,
             draft,
@@ -1489,8 +1549,9 @@ export function processCustomerTurn({
         workingDraft = dedupeAndNormalizeDraft(workingDraft, products);
         nextState.pendingClarification = null;
         nextState.lastReferencedProductIdx = pc.prodIdx;
+        nextState.lastReferencedFlavorIdx = picked[picked.length - 1].j;
         return {
-          reply: formatOrderSummaryReply(`تمت الإضافة للطلب ✅:\n${addedLines.join('\n')}`, workingDraft, kb),
+          reply: formatOrderSummaryReply(`ضفتلك في مسودة الطلب ✅:\n${addedLines.join('\n')}`, workingDraft, kb),
           draft: workingDraft,
           nextState,
           go: false,
@@ -1540,9 +1601,10 @@ export function processCustomerTurn({
         );
         nextState.pendingClarification = null;
         nextState.lastReferencedProductIdx = pc.prodIdx;
+        nextState.lastReferencedFlavorIdx = fIdx;
         return {
           reply: formatOrderSummaryReply(
-            `تمت الإضافة ✅: ${resolvedQty} ${unit} من ${getProductDisplayName(p)}${fIdx >= 0 ? ' · ' + fl[fIdx][0] : ''} (${fmtMoneyAr(p[3] * resolvedQty)})`,
+            `ضفتلك في مسودة الطلب ✅: ${resolvedQty} ${unit} من ${getProductDisplayName(p)}${fIdx >= 0 ? ' · ' + fl[fIdx][0] : ''} (${fmtMoneyAr(p[3] * resolvedQty)})`,
             nextDraft,
             kb
           ),
@@ -1678,12 +1740,20 @@ export function processCustomerTurn({
           [...draft, { i: pIdx, f: fm.avail[0].j, q: useQ, c: [pIdx], amb: false }],
           products
         );
+        nextState.lastReferencedFlavorIdx = fm.avail[0].j;
         return {
-          reply: `ضفتلك ${useQ} ${unit} من ${getProductDisplayName(p)} · ${fm.avail[0].name} ✅`,
+          reply: formatOrderSummaryReply(
+            `ضفتلك في مسودة الطلب ${useQ} ${unit} من ${getProductDisplayName(p)} · ${fm.avail[0].name} ✅`,
+            nextDraft,
+            kb
+          ),
           draft: nextDraft,
           nextState,
           go: false,
-          quick: [{ label: '✅ راجع وضيف للسلة', val: 'راجع الطلب' }],
+          quick: [
+            { label: '✅ راجع وضيف للسلة', val: 'راجع الطلب' },
+            { label: '➕ إضافة صنف تاني', val: 'عندكم أصناف إيه؟' },
+          ],
         };
       }
       const usedFlavors = new Set(draft.filter((l) => l.i === pIdx && l.f >= 0).map((l) => l.f));
@@ -1693,14 +1763,14 @@ export function processCustomerTurn({
       nextState.pendingClarification = {
         type: 'flavor',
         prodIdx: pIdx,
-        explicitQty: qp.explicitQty ? qp.qty : null,
+        explicitQty: qp.explicitQty ? qp.qty : qp.hasSingularUnit ? 1 : null,
       };
       return {
         reply: `أكيد 👍 النكهات المتاحة في ${getProductDisplayName(p)} هي: ${suggest.map((f) => f[0]).join('، ')}. تحب أنهي نكهة؟`,
         draft,
         nextState,
         go: false,
-        quick: suggest.slice(0, 4).map((f) => ({ label: f[0], val: f[0] })),
+        quick: suggest.slice(0, 6).map((f) => ({ label: f[0], val: f[0] })),
       };
     }
   }
@@ -1809,6 +1879,8 @@ export function processCustomerTurn({
             fm.avail.find((f) => f.j !== targetLine.f) || fm.avail[0];
           targetLine.f = pickedF.j;
           const nextDraft = dedupeAndNormalizeDraft(draft, products);
+          nextState.lastReferencedProductIdx = targetLine.i;
+          nextState.lastReferencedFlavorIdx = pickedF.j;
           return {
             reply: formatOrderSummaryReply(
               `غيّرت النكهة لـ ${getProductDisplayName(p)} · ${pickedF.name} ✅`,
@@ -1827,7 +1899,7 @@ export function processCustomerTurn({
             draft,
             nextState,
             go: false,
-            quick: availFl.slice(0, 4).map((f) => ({ label: f[0], val: `غير النكهة لـ ${f[0]}` })),
+            quick: availFl.slice(0, 6).map((f) => ({ label: f[0], val: `غير النكهة لـ ${f[0]}` })),
           };
         }
         if (availFl.length && /(?:نكهه|نكهة|طعم|غير|بدل)/.test(n)) {
@@ -1836,7 +1908,7 @@ export function processCustomerTurn({
             draft,
             nextState,
             go: false,
-            quick: availFl.slice(0, 4).map((f) => ({ label: f[0], val: `غير النكهة لـ ${f[0]}` })),
+            quick: availFl.slice(0, 6).map((f) => ({ label: f[0], val: `غير النكهة لـ ${f[0]}` })),
           };
         }
       }
@@ -1897,10 +1969,11 @@ export function processCustomerTurn({
         };
       }
       line.q = Math.max(1, line.q - delta);
-    } else if (adjParsed.explicitQty) {
+    } else if (adjParsed.explicitQty || adjParsed.hasSingularUnit) {
       line.q = Math.min(99, Math.max(1, delta));
     }
     nextState.lastReferencedProductIdx = line.i;
+    nextState.lastReferencedFlavorIdx = line.f;
     const nextDraft = dedupeAndNormalizeDraft(draft, products);
     return {
       reply: formatOrderSummaryReply(
@@ -2133,14 +2206,18 @@ export function processCustomerTurn({
     const nonStopTokens = qp.rest.filter((t) => !RSTOP_SET.has(t));
 
     // Handle quantity-only message when user refers to the last discussed/added product (e.g. "عايز كرتونتين")
-    if (!nonStopTokens.length && qp.explicitQty && prevProdIdx >= 0 && products[prevProdIdx]) {
-      const existingLine = draft.find((l) => l.i === prevProdIdx);
+    if (!nonStopTokens.length && (qp.explicitQty || qp.hasSingularUnit) && prevProdIdx >= 0 && products[prevProdIdx]) {
+      const targetQ = qp.explicitQty ? qp.qty : 1;
+      const existingLine =
+        (nextState.lastReferencedFlavorIdx >= 0
+          ? draft.find((l) => l.i === prevProdIdx && l.f === nextState.lastReferencedFlavorIdx)
+          : null) || draft.find((l) => l.i === prevProdIdx);
       if (existingLine) {
-        existingLine.q = Math.min(99, Math.max(1, qp.qty));
+        existingLine.q = Math.min(99, Math.max(1, targetQ));
         const nextDraft = dedupeAndNormalizeDraft(draft, products);
         return {
           reply: formatOrderSummaryReply(
-            `عدّلت الكمية لـ ${getProductDisplayName(products[prevProdIdx])} بقت ${existingLine.q} ${unit} ✅`,
+            `عدّلت الكمية لـ ${getProductDisplayName(products[prevProdIdx])} في مسودة الطلب بقت ${existingLine.q} ${unit} ✅`,
             nextDraft,
             kb
           ),
@@ -2156,14 +2233,14 @@ export function processCustomerTurn({
         nextState.pendingClarification = {
           type: 'flavor',
           prodIdx: prevProdIdx,
-          explicitQty: qp.qty,
+          explicitQty: targetQ,
         };
         return {
-          reply: `تمام (${qp.qty} ${unit} من ${getProductDisplayName(p)}) 👍 تحب أنهي نكهة؟ المتاح: ${fl.map((f) => f[0]).join('، ')}`,
+          reply: `تمام (${targetQ} ${unit} من ${getProductDisplayName(p)}) 👍 تحب أنهي نكهة؟ المتاح: ${fl.map((f) => f[0]).join('، ')}`,
           draft: dedupeAndNormalizeDraft(draft, products),
           nextState,
           go: false,
-          quick: fl.slice(0, 4).map((f) => ({ label: f[0], val: f[0] })),
+          quick: fl.slice(0, 6).map((f) => ({ label: f[0], val: f[0] })),
         };
       }
     }
@@ -2201,6 +2278,7 @@ export function processCustomerTurn({
         draft.push({ i: prevProdIdx, f: fmPrev.avail[0].j, q: useQ, c: [prevProdIdx], amb: false });
         addedMsgs.push(`${useQ} ${unit} ${getProductDisplayName(prevP)} · ${fmPrev.avail[0].name}`);
         nextState.lastReferencedProductIdx = prevProdIdx;
+        nextState.lastReferencedFlavorIdx = fmPrev.avail[0].j;
         continue;
       }
       if (fmPrev.soldOut.length) {
@@ -2223,18 +2301,19 @@ export function processCustomerTurn({
           const rec = catItems[0];
           const fl = getProductFlavors(rec.p).filter((f) => !f[1]);
           nextState.lastReferencedProductIdx = rec.idx;
+          nextState.lastReferencedFlavorIdx = -1;
           if (fl.length) {
             nextState.pendingClarification = {
               type: 'flavor',
               prodIdx: rec.idx,
-              explicitQty: qp.explicitQty ? qp.qty : null,
+              explicitQty: qp.explicitQty ? qp.qty : qp.hasSingularUnit ? 1 : null,
             };
             return {
               reply: `المتوفر في قسم ${matchedCatName} هو ${rec.name}. تحب أنهي نكهة؟ المتاح: ${fl.map((f) => f[0]).join('، ')}`,
               draft: dedupeAndNormalizeDraft(draft, products),
               nextState,
               go: false,
-              quick: fl.slice(0, 4).map((f) => ({ label: f[0], val: f[0] })),
+              quick: fl.slice(0, 6).map((f) => ({ label: f[0], val: f[0] })),
             };
           }
         } else {
@@ -2242,7 +2321,7 @@ export function processCustomerTurn({
           nextState.pendingClarification = {
             type: 'disambiguate_product',
             candidates: candIds,
-            explicitQty: qp.explicitQty ? qp.qty : null,
+            explicitQty: qp.explicitQty ? qp.qty : qp.hasSingularUnit ? 1 : null,
           };
           return {
             reply:
@@ -2251,7 +2330,7 @@ export function processCustomerTurn({
             draft: dedupeAndNormalizeDraft(draft, products),
             nextState,
             go: false,
-            quick: candIds.slice(0, 4).map((idx) => ({
+            quick: candIds.slice(0, 6).map((idx) => ({
               label: getProductDisplayName(products[idx]),
               val: getProductDisplayName(products[idx]),
             })),
@@ -2296,7 +2375,7 @@ export function processCustomerTurn({
       nextState.pendingClarification = {
         type: 'disambiguate_product',
         candidates: sugList,
-        explicitQty: qp.explicitQty ? qp.qty : null,
+        explicitQty: qp.explicitQty ? qp.qty : qp.hasSingularUnit ? 1 : null,
       };
       continue;
     }
@@ -2316,6 +2395,7 @@ export function processCustomerTurn({
       });
       prevProdIdx = top.i;
       nextState.lastReferencedProductIdx = top.i;
+      nextState.lastReferencedFlavorIdx = -1;
       continue;
     }
 
@@ -2340,7 +2420,7 @@ export function processCustomerTurn({
       nextState.pendingClarification = {
         type: 'disambiguate_product',
         candidates: candIds,
-        explicitQty: qp.explicitQty ? qp.qty : null,
+        explicitQty: qp.explicitQty ? qp.qty : qp.hasSingularUnit ? 1 : null,
       };
       return {
         reply:
@@ -2349,7 +2429,7 @@ export function processCustomerTurn({
         draft: dedupeAndNormalizeDraft(draft, products),
         nextState,
         go: false,
-        quick: candIds.slice(0, 4).map((idx) => ({
+        quick: candIds.slice(0, 6).map((idx) => ({
           label: getProductDisplayName(products[idx]),
           val: getProductDisplayName(products[idx]),
         })),
@@ -2362,15 +2442,23 @@ export function processCustomerTurn({
     const avFl = fl.filter((f) => !f[1]);
     prevProdIdx = top.i;
     nextState.lastReferencedProductIdx = top.i;
+    nextState.lastReferencedFlavorIdx = -1;
+    const effQty = qp.explicitQty
+      ? qp.qty
+      : qp.hasSingularUnit
+      ? 1
+      : segs.length === 1 && carriedDisambigQty
+      ? carriedDisambigQty
+      : null;
 
     // Handle "من كل نكهة" for this product
     if (qp.distributive === 'flavors') {
       if (!avFl.length) {
-        const useQ = qp.explicitQty ? qp.qty : 1;
+        const useQ = effQty || 1;
         draft.push({ i: top.i, f: -1, q: useQ, c: [top.i], amb: false });
         addedMsgs.push(`${useQ} ${unit} ${getProductDisplayName(p)}`);
       } else {
-        const useQ = qp.explicitQty ? qp.qty : 1;
+        const useQ = effQty || 1;
         avFl.forEach((f) => {
           const fIdx = fl.indexOf(f);
           draft.push({ i: top.i, f: fIdx, q: useQ, c: [top.i], amb: false });
@@ -2386,16 +2474,16 @@ export function processCustomerTurn({
         nextState.pendingClarification = {
           type: 'flavor',
           prodIdx: top.i,
-          explicitQty: qp.explicitQty ? qp.qty : null,
+          explicitQty: effQty,
         };
         return {
           reply:
-            (addedMsgs.length ? `ضفتلك ✅:\n${addedMsgs.join('\n')}\n\n` : '') +
-            `لازم تختار نكهة محددة لـ ${getProductDisplayName(p)} قبل الإضافة للطلب.\nالنكهات المتاحة: ${avFl.map((f) => f[0]).join('، ')}`,
+            (addedMsgs.length ? `ضفتلك في مسودة الطلب ✅:\n${addedMsgs.join('\n')}\n\n` : '') +
+            `لازم تختار نكهة محددة لـ ${getProductDisplayName(p)} قبل الإضافة لمسودة الطلب.\nالنكهات المتاحة: ${avFl.map((f) => f[0]).join('، ')}`,
           draft: dedupeAndNormalizeDraft(draft, products),
           nextState,
           go: false,
-          quick: avFl.slice(0, 4).map((f) => ({ label: f[0], val: f[0] })),
+          quick: avFl.slice(0, 6).map((f) => ({ label: f[0], val: f[0] })),
         };
       }
 
@@ -2409,7 +2497,7 @@ export function processCustomerTurn({
         nextState.pendingClarification = {
           type: 'flavor',
           prodIdx: top.i,
-          explicitQty: qp.explicitQty ? qp.qty : null,
+          explicitQty: effQty,
         };
         continue;
       }
@@ -2421,7 +2509,7 @@ export function processCustomerTurn({
         nextState.pendingClarification = {
           type: 'flavor',
           prodIdx: top.i,
-          explicitQty: qp.explicitQty ? qp.qty : null,
+          explicitQty: effQty,
         };
         continue;
       }
@@ -2430,30 +2518,31 @@ export function processCustomerTurn({
         nextState.pendingClarification = {
           type: 'flavor',
           prodIdx: top.i,
-          explicitQty: qp.explicitQty ? qp.qty : qp.hasSingularUnit ? 1 : null,
+          explicitQty: effQty,
         };
         const askFlavor = `تحب أنهي نكهة في ${getProductDisplayName(p)}؟\nالنكهات المتاحة: ${avFl.map((f) => f[0]).join('، ')}`;
         const normalizedSoFar = dedupeAndNormalizeDraft(draft, products);
         return {
-          reply: (addedMsgs.length ? `ضفتلك ✅:\n${addedMsgs.join('\n')}\n\n` : '') + askFlavor,
+          reply: (addedMsgs.length ? `ضفتلك في مسودة الطلب ✅:\n${addedMsgs.join('\n')}\n\n` : '') + askFlavor,
           draft: normalizedSoFar,
           nextState,
           go: false,
-          quick: avFl.slice(0, 4).map((f) => ({ label: f[0], val: f[0] })),
+          quick: avFl.slice(0, 6).map((f) => ({ label: f[0], val: f[0] })),
         };
       }
 
       const bestF = fm.avail[0];
-      if (!qp.explicitQty && !qp.hasSingularUnit) {
+      if (!effQty) {
         nextState.pendingClarification = {
           type: 'qty',
           prodIdx: top.i,
           flavorIdx: bestF.j,
         };
+        nextState.lastReferencedFlavorIdx = bestF.j;
         const normalizedSoFar = dedupeAndNormalizeDraft(draft, products);
         return {
           reply:
-            (addedMsgs.length ? `ضفتلك ✅:\n${addedMsgs.join('\n')}\n\n` : '') +
+            (addedMsgs.length ? `ضفتلك في مسودة الطلب ✅:\n${addedMsgs.join('\n')}\n\n` : '') +
             `تمام (${getProductDisplayName(p)} · ${bestF.name}) 👍 عايز كام ${unit}؟`,
           draft: normalizedSoFar,
           nextState,
@@ -2466,16 +2555,17 @@ export function processCustomerTurn({
         };
       }
 
-      const useQ = qp.explicitQty ? qp.qty : 1;
+      const useQ = effQty;
       draft.push({ i: top.i, f: bestF.j, q: useQ, c: [top.i], amb: false });
       addedMsgs.push(`${useQ} ${unit} ${getProductDisplayName(p)} · ${bestF.name}`);
+      nextState.lastReferencedFlavorIdx = bestF.j;
     } else {
-      if (!qp.explicitQty && !qp.hasSingularUnit) {
+      if (!effQty) {
         nextState.pendingClarification = { type: 'qty', prodIdx: top.i, flavorIdx: -1 };
         const normalizedSoFar = dedupeAndNormalizeDraft(draft, products);
         return {
           reply:
-            (addedMsgs.length ? `ضفتلك ✅:\n${addedMsgs.join('\n')}\n\n` : '') +
+            (addedMsgs.length ? `ضفتلك في مسودة الطلب ✅:\n${addedMsgs.join('\n')}\n\n` : '') +
             `عايز كام ${unit} من ${getProductDisplayName(p)} (${fmtMoneyAr(p[3])})؟`,
           draft: normalizedSoFar,
           nextState,
@@ -2487,7 +2577,7 @@ export function processCustomerTurn({
           ],
         };
       }
-      const useQ = qp.explicitQty ? qp.qty : 1;
+      const useQ = effQty;
       draft.push({ i: top.i, f: -1, q: useQ, c: [top.i], amb: false });
       addedMsgs.push(`${useQ} ${unit} ${getProductDisplayName(p)}`);
     }
@@ -2498,7 +2588,7 @@ export function processCustomerTurn({
   let quick = [];
 
   if (addedMsgs.length) {
-    parts.push(formatOrderSummaryReply(`ضفتلك للطلب ✅:\n${addedMsgs.join('\n')}`, finalDraft, kb));
+    parts.push(formatOrderSummaryReply(`ضفتلك في مسودة الطلب ✅:\n${addedMsgs.join('\n')}`, finalDraft, kb));
     quick = [
       { label: '✅ راجع وضيف للسلة', val: 'راجع الطلب' },
       { label: '➕ إضافة صنف تاني', val: 'عندكم أصناف إيه؟' },
@@ -2509,7 +2599,7 @@ export function processCustomerTurn({
     if (!addedMsgs.length && !suggestions.length && !nextState.pendingClarification) {
       parts.push('تحب تشوف الأقسام المتاحة أو تكتب اسم الصنف المطلوب؟');
       quick = Object.keys(kb.cats)
-        .slice(0, 4)
+        .slice(0, 6)
         .map((c) => ({ label: `قسم ${c}`, val: `عندكم إيه في ${c}` }));
     }
   }

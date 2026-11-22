@@ -2299,8 +2299,8 @@ img {
 .rcl {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 110px;
+  gap: 6px;
+  max-height: 185px;
   overflow-y: auto;
   margin-bottom: 8px;
 }
@@ -2311,6 +2311,111 @@ img {
   justify-content: space-between;
   font-size: 12.5px;
   font-weight: 700;
+}
+
+.rcr-card {
+  background: var(--paper);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rcr-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rcd-sel {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  border-radius: 9px;
+  border: 1.5px solid var(--border);
+  background: var(--paper-2);
+  padding: 0 8px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--ink);
+  outline: none;
+}
+
+.rcd-del {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  border: 1.5px solid var(--border);
+  background: var(--paper-2);
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.rcd-del:hover {
+  background: color-mix(in srgb, var(--red) 12%, var(--paper));
+}
+
+.rcr-bot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.rcd-flv {
+  flex: 1 1 115px;
+  min-width: 0;
+  height: 32px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: var(--paper-2);
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+  outline: none;
+}
+
+.rcd-flv.need-fl {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, var(--paper));
+}
+
+.rcd-price {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rcd-price small {
+  color: var(--mu);
+  font-weight: 700;
+}
+
+.rcd-price b {
+  font-family: var(--font-head);
+  font-size: 15px;
+  color: var(--red);
+}
+
+.rcd-step {
+  margin: 0;
+  width: 96px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.rcd-step button {
+  height: 28px;
+  font-size: 15px;
 }
 
 .rw {
@@ -3115,6 +3220,10 @@ img {
   .rcm {
     min-height: 60px;
     padding: 6px 2px;
+  }
+
+  .rcl {
+    max-height: 115px;
   }
 
   .rc-dock {

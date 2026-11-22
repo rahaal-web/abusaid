@@ -451,21 +451,26 @@ async function runCustomerSuite() {
       assert.match(t2.reply, /نكهة|جبنة|شطة/);
       assert.ok(t2.quick.some((q) => q.val.includes('جبنة')));
 
-      // Turn 3: "جبنة."
+      // Turn 3: "جبنة." -> "كرتونة" (1) from Turn 1 now completes product + flavor + qty=1 directly into draft card!
       const t3 = processCustomerTurn({
         text: 'جبنة.',
         catalogData: activeCat,
         currentDraft: t2.draft,
         convState: t2.nextState,
       });
-      assert.equal(t3.draft.length, 0, 'Must NOT add جاجوار جبنة before quantity is chosen');
+      assert.equal(t3.draft.length, 1, 'Must immediately place جاجوار · جبنة (q=1 from كرتونة) into order draft');
+      assert.deepEqual(
+        { i: t3.draft[0].i, f: t3.draft[0].f, q: t3.draft[0].q },
+        { i: 3, f: 0, q: 1 }
+      );
       assert.equal(isHollowAiReply(t3.reply), false);
-      assert.equal(t3.nextState.pendingClarification?.type, 'qty');
-      assert.equal(t3.nextState.pendingClarification?.prodIdx, 3);
-      assert.equal(t3.nextState.pendingClarification?.flavorIdx, 0);
-      assert.match(t3.reply, /كام كرتونة/);
+      assert.equal(t3.nextState.pendingClarification, null);
+      assert.equal(t3.nextState.lastReferencedProductIdx, 3);
+      assert.equal(t3.nextState.lastReferencedFlavorIdx, 0);
+      assert.match(t3.reply, /ملخص الطلب/);
+      assert.match(t3.reply, /130 جنيه/);
 
-      // Turn 4: "عايز كرتونتين."
+      // Turn 4: "عايز كرتونتين." -> updates quantity of جاجوار · جبنة to 2
       const t4 = processCustomerTurn({
         text: 'عايز كرتونتين.',
         catalogData: activeCat,
@@ -482,7 +487,7 @@ async function runCustomerSuite() {
       assert.match(t4.reply, /جاجوار/);
       assert.match(t4.reply, /جبنة/);
       assert.match(t4.reply, /260 جنيه/);
-      assert.match(t4.reply, /تأكد|نأكد/);
+      assert.match(t4.reply, /نراجع|للسلة/);
       assert.equal(t4.go, false);
 
       // Turn 5: "تمام" now legitimately confirms & triggers review
@@ -566,9 +571,13 @@ async function runCustomerSuite() {
       catalogData: catCartonData,
       stateCtx,
     });
-    assert.equal(step3.draft.length, 0, 'Must wait for quantity before adding');
+    assert.equal(step3.draft.length, 1, 'With كرتونة preserved from step 1, choosing flavor adds q=1 to draft card');
+    assert.deepEqual(
+      { i: step3.draft[0].i, f: step3.draft[0].f, q: step3.draft[0].q },
+      { i: 3, f: 0, q: 1 }
+    );
     assert.equal(isHollowAiReply(step3.reply), false);
-    assert.equal(step3.nextState.pendingClarification?.type, 'qty');
+    assert.equal(step3.nextState.pendingClarification, null);
     draft = step3.draft;
     stateCtx = step3.nextState;
 
@@ -1155,13 +1164,613 @@ async function runHttpAndOrdersIntegrationSuite() {
   }
 }
 
+// =========================================================================
+// PART 4: INTERACTIVE CUSTOMER AI UI + DRAFT CARD + REAL CART INTEGRATION
+// =========================================================================
+function createMockBrowserEnv() {
+  const mkStorage = () => {
+    const store = new Map();
+    return {
+      getItem: (k) => (store.has(String(k)) ? store.get(String(k)) : null),
+      setItem: (k, v) => {
+        store.set(String(k), String(v));
+      },
+      removeItem: (k) => {
+        store.delete(String(k));
+      },
+      clear: () => {
+        store.clear();
+      },
+    };
+  };
+
+  function decodeHtml(s) {
+    return String(s || '')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+  }
+
+  function toCamel(k) {
+    return k.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+  }
+
+  class MockClassList {
+    constructor(el) {
+      this.el = el;
+    }
+    _set() {
+      return new Set(String(this.el._className || '').split(/\s+/).filter(Boolean));
+    }
+    _save(s) {
+      this.el._className = Array.from(s).join(' ');
+    }
+    add(...cls) {
+      const s = this._set();
+      cls.forEach((c) => s.add(c));
+      this._save(s);
+    }
+    remove(...cls) {
+      const s = this._set();
+      cls.forEach((c) => s.delete(c));
+      this._save(s);
+    }
+    toggle(c, force) {
+      const s = this._set();
+      const next = force !== undefined ? Boolean(force) : !s.has(c);
+      if (next) s.add(c);
+      else s.delete(c);
+      this._save(s);
+      return next;
+    }
+    contains(c) {
+      return this._set().has(c);
+    }
+  }
+
+  const byId = new Map();
+
+  class MockElement {
+    constructor(tagName = 'div', id = '') {
+      this.tagName = String(tagName || 'div').toUpperCase();
+      this.id = id || '';
+      this._className = '';
+      this.classList = new MockClassList(this);
+      this.dataset = {};
+      this.attributes = {};
+      this.style = {};
+      this.children = [];
+      this.parentElement = null;
+      this._innerHTML = '';
+      this._textContent = '';
+      this._value = '';
+      this.selected = false;
+      this.disabled = false;
+      this.offsetWidth = 100;
+      this.scrollTop = 0;
+      this.scrollHeight = 100;
+      this.listeners = new Map();
+      if (this.id) byId.set(this.id, this);
+    }
+    get className() {
+      return this._className;
+    }
+    set className(v) {
+      this._className = String(v || '');
+    }
+    get value() {
+      if (this.tagName === 'SELECT') {
+        const opts = this.querySelectorAll('option');
+        const sel = opts.find((o) => o.selected) || opts[0];
+        return sel ? sel.value : this._value;
+      }
+      return this._value;
+    }
+    set value(v) {
+      this._value = String(v == null ? '' : v);
+      if (this.tagName === 'SELECT') {
+        const opts = this.querySelectorAll('option');
+        opts.forEach((o) => {
+          o.selected = o.value === this._value;
+        });
+      }
+    }
+    get textContent() {
+      if (this.children.length) {
+        return this.children.map((c) => c.textContent).join('');
+      }
+      return this._textContent;
+    }
+    set textContent(v) {
+      this.children = [];
+      this._textContent = String(v == null ? '' : v);
+      this._innerHTML = this._textContent;
+    }
+    get innerHTML() {
+      return this._innerHTML;
+    }
+    set innerHTML(html) {
+      this._unregisterSubtree();
+      this.children = [];
+      this._textContent = '';
+      this._innerHTML = String(html == null ? '' : html);
+      parseInto(this, this._innerHTML);
+      if (this.id) byId.set(this.id, this);
+    }
+    _unregisterSubtree() {
+      this.children.forEach((ch) => {
+        if (ch.id && byId.get(ch.id) === ch) byId.delete(ch.id);
+        if (typeof ch._unregisterSubtree === 'function') ch._unregisterSubtree();
+      });
+    }
+    appendChild(child) {
+      if (child && typeof child === 'object') {
+        child.parentElement = this;
+        this.children.push(child);
+        if (child.id) byId.set(child.id, child);
+      }
+      return child;
+    }
+    addEventListener(type, fn) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(fn);
+    }
+    removeEventListener(type, fn) {
+      if (!this.listeners.has(type)) return;
+      this.listeners.set(
+        type,
+        this.listeners.get(type).filter((x) => x !== fn)
+      );
+    }
+    dispatchEvent(evt) {
+      if (!evt.target) evt.target = this;
+      evt.preventDefault = evt.preventDefault || (() => {});
+      let cur = this;
+      while (cur) {
+        const fns = cur.listeners.get(evt.type) || [];
+        fns.forEach((fn) => fn.call(cur, evt));
+        cur = cur.parentElement;
+      }
+    }
+    click() {
+      this.dispatchEvent({ type: 'click', target: this });
+    }
+    _matches(sel) {
+      return sel.split(',').some((part) => {
+        const s = part.trim();
+        if (!s) return false;
+        let rem = s;
+        if (/^[a-zA-Z0-9]+/.test(rem)) {
+          const tagM = rem.match(/^([a-zA-Z0-9]+)/);
+          if (tagM[1].toUpperCase() !== this.tagName) return false;
+          rem = rem.slice(tagM[1].length);
+        }
+        const idM = rem.match(/#([a-zA-Z0-9_-]+)/);
+        if (idM) {
+          if (this.id !== idM[1]) return false;
+          rem = rem.replace(idM[0], '');
+        }
+        const clsRe = /\.([a-zA-Z0-9_-]+)/g;
+        let cm;
+        while ((cm = clsRe.exec(rem))) {
+          if (!this.classList.contains(cm[1])) return false;
+        }
+        const attrRe = /\[([^\]=]+)(?:="([^"]*)")?\]/g;
+        let am;
+        while ((am = attrRe.exec(rem))) {
+          const attrName = am[1].trim();
+          const expected = am[2];
+          let actual = this.attributes[attrName];
+          if (actual === undefined && attrName.startsWith('data-')) {
+            actual = this.dataset[toCamel(attrName.slice(5))];
+          }
+          if (actual === undefined) return false;
+          if (expected !== undefined && String(actual) !== expected) return false;
+        }
+        return true;
+      });
+    }
+    closest(sel) {
+      let cur = this;
+      while (cur) {
+        if (cur._matches(sel)) return cur;
+        cur = cur.parentElement;
+      }
+      return null;
+    }
+    querySelectorAll(sel) {
+      const out = [];
+      const walk = (node) => {
+        for (const ch of node.children) {
+          if (ch instanceof MockElement) {
+            if (ch._matches(sel)) out.push(ch);
+            walk(ch);
+          }
+        }
+      };
+      walk(this);
+      return out;
+    }
+    querySelector(sel) {
+      return this.querySelectorAll(sel)[0] || null;
+    }
+  }
+
+  class MockTextNode {
+    constructor(txt, parent) {
+      this._textContent = txt;
+      this.parentElement = parent;
+      this.children = [];
+    }
+    get textContent() {
+      return this._textContent;
+    }
+  }
+
+  function parseAttrs(el, attrStr) {
+    const re = /([a-zA-Z0-9_-]+)(?:="([^"]*)")?/g;
+    let m;
+    while ((m = re.exec(attrStr))) {
+      const k = m[1];
+      const v = m[2] != null ? decodeHtml(m[2]) : '';
+      el.attributes[k] = v;
+      if (k === 'id') {
+        el.id = v;
+        byId.set(v, el);
+      } else if (k === 'class') {
+        el._className = v;
+      } else if (k === 'value') {
+        el._value = v;
+      } else if (k === 'selected') {
+        el.selected = true;
+      } else if (k.startsWith('data-')) {
+        el.dataset[toCamel(k.slice(5))] = v;
+      }
+    }
+  }
+
+  function parseInto(root, html) {
+    const stack = [root];
+    const tokenRe = /<(\/?)([a-zA-Z0-9]+)([^>]*)>|([^<]+)/g;
+    const voidTags = new Set(['br', 'hr', 'img', 'input', 'meta', 'link']);
+    let m;
+    while ((m = tokenRe.exec(html))) {
+      if (m[4]) {
+        const parent = stack[stack.length - 1];
+        parent.children.push(new MockTextNode(decodeHtml(m[4]), parent));
+        continue;
+      }
+      const isClose = m[1] === '/';
+      const tag = m[2].toLowerCase();
+      const attrStr = m[3] || '';
+      if (isClose) {
+        for (let i = stack.length - 1; i >= 1; i--) {
+          if (stack[i].tagName === tag.toUpperCase()) {
+            stack.length = i;
+            break;
+          }
+        }
+      } else {
+        const el = new MockElement(tag);
+        parseAttrs(el, attrStr);
+        const parent = stack[stack.length - 1];
+        el.parentElement = parent;
+        parent.children.push(el);
+        if (!voidTags.has(tag) && !attrStr.trim().endsWith('/')) {
+          stack.push(el);
+        }
+      }
+    }
+  }
+
+  const localStorage = mkStorage();
+  const sessionStorage = mkStorage();
+  const body = new MockElement('body', 'docBody');
+  const createMount = (id, tag = 'div') => {
+    const el = new MockElement(tag, id);
+    body.appendChild(el);
+    return el;
+  };
+  const rsheet = createMount('rsheet');
+  rsheet.appendChild(new MockElement('div', 'rpn'));
+  const sheet = createMount('sheet');
+  ['lines', 'tot', 'sbtn', 'wa', 'minw', 'clearCart'].forEach((id) =>
+    sheet.appendChild(new MockElement('div', id))
+  );
+  [
+    'cnt',
+    'sum',
+    'bar',
+    'hdrCartCount',
+    'hdrCartSum',
+    'hdrCart',
+    'open',
+    'fsheet',
+    'ordersSheet',
+    'accountSheet',
+    'pushMandatoryModal',
+    'toast',
+  ].forEach((id) => createMount(id));
+
+  const document = {
+    body,
+    getElementById: (id) => byId.get(id) || null,
+    createElement: (tag) => new MockElement(tag),
+    querySelectorAll: (sel) => body.querySelectorAll(sel),
+    querySelector: (sel) => body.querySelector(sel),
+  };
+
+  const historyObj = {
+    state: null,
+    length: 1,
+    pushState(s) {
+      this.state = s;
+      this.length += 1;
+    },
+    replaceState(s) {
+      this.state = s;
+    },
+    back() {},
+  };
+
+  const win = {
+    location: { href: 'http://localhost:3000/', origin: 'http://localhost:3000', pathname: '/', search: '', hash: '' },
+    matchMedia: () => ({ matches: true }),
+    innerWidth: 1024,
+    scrollY: 0,
+    scrollTo() {},
+    addEventListener() {},
+    removeEventListener() {},
+    history: historyObj,
+    document,
+  };
+
+  globalThis.window = win;
+  globalThis.document = document;
+  globalThis.localStorage = localStorage;
+  globalThis.sessionStorage = sessionStorage;
+  globalThis.history = historyObj;
+  globalThis.matchMedia = win.matchMedia;
+  globalThis.Element = MockElement;
+
+  return { document, byId, localStorage };
+}
+
+async function runCustomerUiAndCartSuite() {
+  const { document, localStorage } = createMockBrowserEnv();
+  const stateMod = await import('../js/state.js');
+  const cartMod = await import('../js/cart.js');
+  const routerMod = await import('../js/router.js');
+  const aiMod = await import('../js/ai.js');
+
+  const { state } = stateMod;
+  let catalogRenderCount = 0;
+
+  function resetEnv(catOverride = null) {
+    localStorage.clear();
+    const cat = catOverride || makeTestCatalog();
+    state.D = cat;
+    state.CFG = { ...(cat.cfg || {}), unit: 'كرتونة', brandName: 'أبو سعيد', hasAiKey: false, aiMode: 'local' };
+    state.P = cat.p;
+    state.CATS = ['الكل'].concat(cat.cats || []);
+    state.cart = {};
+    catalogRenderCount = 0;
+    state.hooks.renderCatalog = () => {
+      catalogRenderCount += 1;
+    };
+    state.hooks.renderCategories = () => {};
+    state.hooks.renderOffers = () => {};
+    state.hooks.renderSpotlight = () => {};
+    state.hooks.syncFilterInputs = () => {};
+    state.hooks.syncSearchOverlay = () => {};
+    state.hooks.syncOrdersOverlay = () => {};
+    state.hooks.syncAccountOverlay = () => {};
+    state.hooks.syncAiOverlay = aiMod.syncAiOverlay;
+    state.hooks.syncCartOverlay = cartMod.syncCartOverlay;
+    state.hooks.syncFlavorOverlay = () => {};
+    aiMod.chReset();
+    routerMod.switchOverlay(null);
+    aiMod.openAI();
+  }
+
+  routerMod.initRouter();
+  aiMod.bindAIEvents();
+
+  // U1: Mandatory 10-step UI interactive flow + real cart addition + persistence
+  await runCase('UI & Cart', 'U1: Mandatory 10-step interactive selection, chat card edit, review & rAdd() to state.cart', async () => {
+    resetEnv();
+    const rs = document.getElementById('rsheet');
+
+    // Step 1-2: "عايز كرتونة شيبسي." -> shows interactive product options (.rc-qbtn) in chat
+    await aiMod.chSend('عايز كرتونة شيبسي.');
+    let qBtns = document.getElementById('chm').querySelectorAll('.rc-qbtn');
+    assert.ok(qBtns.length >= 2, 'Chat must render clickable product buttons for شيبسي');
+    assert.equal(Object.keys(state.cart).length, 0, 'state.cart must stay empty while chatting');
+    assert.equal(aiMod.__getAiStateForTest().RL.length, 0);
+
+    // Step 3-4: Customer selects "جاجوار" -> shows available flavors (جبنة، شطة)
+    await aiMod.chSend('جاجوار.');
+    qBtns = document.getElementById('chm').querySelectorAll('.rc-qbtn');
+    assert.ok(qBtns.some((b) => b.dataset.quick === 'جبنة'), 'Chat must render جبنة quick button');
+    assert.ok(qBtns.some((b) => b.dataset.quick === 'شطة'), 'Chat must render شطة quick button');
+    assert.equal(aiMod.__getAiStateForTest().RL.length, 0);
+    assert.equal(Object.keys(state.cart).length, 0);
+
+    // Step 5-6: Click quick flavor button "جبنة" -> chat card (.rcr-card) appears immediately with qty=1, flavor=جبنة, price=130
+    const cheeseBtn = qBtns.find((b) => b.dataset.quick === 'جبنة');
+    await aiMod.chSend(cheeseBtn.dataset.quick);
+
+    const cards1 = document.getElementById('chd').querySelectorAll('.rcr-card');
+    assert.equal(cards1.length, 1, 'In-chat draft card must appear immediately inside #chd');
+    assert.match(cards1[0].textContent, /١٣٠ جنيه/);
+    assert.equal(cards1[0].querySelector('.rcd-sel').value, '3');
+    assert.equal(cards1[0].querySelector('.rcd-flv').value, '0');
+    assert.match(document.getElementById('chd').querySelector('.rcd-head').textContent, /١٣٠ جنيه/);
+    assert.equal(Object.keys(state.cart).length, 0, 'Draft card must NOT mutate state.cart yet');
+
+    // Step 7-8: Customer clicks "+" inside the in-chat card to change quantity to 2 cartons
+    const plusBtn = document.getElementById('chd').querySelector('[data-cd-rn="0"][data-cd-rd="1"]');
+    assert.ok(plusBtn, 'In-chat card must have + stepper button');
+    plusBtn.click();
+
+    const cards2 = document.getElementById('chd').querySelectorAll('.rcr-card');
+    assert.equal(cards2.length, 1);
+    assert.equal(aiMod.__getAiStateForTest().RL[0].q, 2);
+    assert.match(cards2[0].textContent, /٢٦٠ جنيه/);
+    assert.match(document.getElementById('chd').querySelector('.rcd-head').textContent, /٢٦٠ جنيه/);
+    assert.equal(Object.keys(state.cart).length, 0, 'Quantity edit in chat draft must NOT touch state.cart');
+
+    // Step 9: Customer clicks "راجع وضيف للسلة" (#chrv) -> review screen opens; state.cart still empty until #rok
+    const chrv = document.getElementById('chrv');
+    assert.ok(chrv);
+    chrv.click();
+    assert.ok(document.getElementById('rok'), 'Review screen must display #rok confirm button');
+    assert.equal(Object.keys(state.cart).length, 0);
+
+    // Step 10: Customer clicks "#rok" (rAdd) -> real state.cart updated, saved via saveCart(), UI synced, chat draft cleared
+    document.getElementById('rok').click();
+    assert.deepEqual(state.cart, { '3:0': 2 }, 'state.cart must hold exact product:flavor and quantity');
+    const saved = JSON.parse(localStorage.getItem('cart') || '{}');
+    assert.deepEqual(saved.c, { '3:0': 2 }, 'saveCart() must persist cart to localStorage');
+    assert.ok(catalogRenderCount >= 1, 'renderCatalog hook must run after rAdd()');
+    assert.equal(document.getElementById('hdrCartSum').textContent, '٢٦٠ جنيه');
+    assert.equal(document.getElementById('cnt').textContent, '٢');
+    assert.equal(aiMod.__getAiStateForTest().RL.length, 0, 'Draft must reset only after successful rAdd()');
+    assert.ok(document.getElementById('sheet').classList.contains('on'), 'Cart drawer opens after adding');
+    assert.ok(rs);
+  });
+
+  // U2: Multi-product card support, in-card flavor change, delete button & live total
+  await runCase('UI & Cart', 'U2: Multiple items in chat card, flavor switch, and item deletion update total live', async () => {
+    resetEnv();
+    await aiMod.chSend('عايز ٢ فريسكا وكرتونة جاجوار شطة');
+
+    const cards = document.getElementById('chd').querySelectorAll('.rcr-card');
+    assert.equal(cards.length, 2, 'Two interactive product cards must render in #chd');
+    // فريسكا 2*90=180 + جاجوار 1*130=130 -> ٣١٠ جنيه
+    assert.match(document.getElementById('chd').querySelector('.rcd-head').textContent, /٣١٠ جنيه/);
+
+    // Switch جاجوار flavor via <select data-cd-rn="1" data-cd-rk="f"> from شطة (1) to جبنة (0)
+    const flSel = document.getElementById('chd').querySelector('select[data-cd-rn="1"][data-cd-rk="f"]');
+    assert.ok(flSel);
+    flSel.value = '0';
+    flSel.dispatchEvent({ type: 'change', target: flSel });
+    assert.equal(aiMod.__getAiStateForTest().RL[1].f, 0);
+
+    // Delete فريسكا via inline delete button [data-cd-rn="0"][data-cd-rk="del"]
+    const delBtn = document.getElementById('chd').querySelector('[data-cd-rn="0"][data-cd-rk="del"]');
+    delBtn.click();
+    assert.equal(aiMod.__getAiStateForTest().RL.length, 1);
+    assert.equal(aiMod.__getAiStateForTest().RL[0].i, 3);
+    assert.equal(aiMod.__getAiStateForTest().RL[0].f, 0);
+    assert.match(document.getElementById('chd').querySelector('.rcd-head').textContent, /١٣٠ جنيه/);
+
+    // Commit remaining item to cart
+    assert.equal(aiMod.rAdd(), true);
+    assert.deepEqual(state.cart, { '3:0': 1 });
+  });
+
+  // U3: Strict cart separation & rAdd() / chReview() error handling
+  await runCase('UI & Cart', 'U3: rAdd() & chReview() block empty/incomplete/sold-out drafts with clear errors', () => {
+    resetEnv();
+
+    // Empty draft
+    assert.equal(aiMod.rAdd(), false);
+    assert.match(document.getElementById('rerr').textContent, /فاضية/);
+    assert.deepEqual(state.cart, {});
+
+    // Unflavored item in draft
+    aiMod.__setDraftForTest([{ i: 3, f: -1, q: 2, c: [3], amb: false }]);
+    assert.equal(aiMod.chReview(), false);
+    assert.match(document.getElementById('rerr').textContent, /النكهة/);
+    assert.equal(aiMod.rAdd(), false);
+    assert.deepEqual(state.cart, {});
+    assert.equal(aiMod.__getAiStateForTest().RL.length, 1, 'Failed rAdd must NOT wipe draft');
+
+    // Out-of-stock item in draft (index 7 = صنف مخفي with p[7]=1)
+    aiMod.__setDraftForTest([{ i: 7, f: -1, q: 1, c: [7], amb: false }]);
+    assert.equal(aiMod.rAdd(), false);
+    assert.match(document.getElementById('rerr').textContent, /فاضية|غير متوفر/);
+    assert.deepEqual(state.cart, {});
+  });
+
+  // U4: Gemini false "ضفتلك في السلة" reply blocked & Gemini network outage falls back to interactive chLocal
+  await runCase('UI & Cart', 'U4: Gemini false cart claim blocked & network error falls back cleanly to chLocal', async () => {
+    resetEnv();
+    state.CFG.hasAiKey = true;
+    state.CFG.aiMode = 'gemini';
+
+    const origFetch = globalThis.fetch;
+    try {
+      // Scenario A: Gemini lies "تمام، ضفتلك في السلة" with empty items on "عايز كرتونة شيبسي"
+      globalThis.fetch = async (url) => {
+        if (String(url).includes('/api/ai/generate')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              structured: {
+                reply: 'تمام، ضفتلك في السلة',
+                intent: 'order',
+                items: [],
+                unknown: [],
+                clear: false,
+                action: 'none',
+              },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: false }),
+        };
+      };
+
+      await aiMod.chSend('عايز كرتونة شيبسي');
+      const stA = aiMod.__getAiStateForTest();
+      assert.equal(stA.RL.length, 0);
+      assert.deepEqual(state.cart, {}, 'False cart claim must NEVER update state.cart');
+      const lastReply = stA.CH.msgs[stA.CH.msgs.length - 1].t;
+      assert.doesNotMatch(lastReply, /ضفتلك في السلة/);
+      assert.ok(document.getElementById('chm').querySelectorAll('.rc-qbtn').length >= 2);
+
+      // Scenario B: Gemini returns HTTP 502 error -> seamless chLocal fallback keeps full interactive UX
+      globalThis.fetch = async () => ({
+        ok: false,
+        status: 502,
+        json: async () => ({ error: 'Gemini unavailable' }),
+      });
+
+      await aiMod.chSend('جاجوار');
+      let qBtns = document.getElementById('chm').querySelectorAll('.rc-qbtn');
+      assert.ok(qBtns.some((b) => b.dataset.quick === 'جبنة'), 'chLocal fallback must render flavor options');
+
+      await aiMod.chSend('جبنة');
+      assert.equal(aiMod.__getAiStateForTest().RL.length, 1);
+      assert.equal(document.getElementById('chd').querySelectorAll('.rcr-card').length, 1);
+
+      await aiMod.chSend('عايز كرتونتين');
+      assert.equal(aiMod.__getAiStateForTest().RL[0].q, 2);
+      assert.match(document.getElementById('chd').querySelector('.rcd-head').textContent, /٢٦٠ جنيه/);
+      assert.deepEqual(state.cart, {});
+    } finally {
+      globalThis.fetch = origFetch;
+      routerMod.switchOverlay(null);
+    }
+  });
+}
+
 async function main() {
   await runCustomerSuite();
   await runAdminSuite();
   await runHttpAndOrdersIntegrationSuite();
+  await runCustomerUiAndCartSuite();
   const passed = results.filter((r) => r.ok).length;
   console.log(`\nALL TESTS PASSED: ${passed}/${results.length}`);
-  console.log('Note: GEMINI_API_KEY and Firebase RTDB server credentials are not configured in .env; live external Gemini HTTP & RTDB calls were not executed (Gemini client contract & retries verified via mock clientFactory; HTTP+SQLite verified live).');
+  console.log('Note: GEMINI_API_KEY and Firebase RTDB server credentials are not configured in .env; live external Gemini HTTP & RTDB calls were not executed (Gemini client contract & retries verified via mock clientFactory; HTTP+SQLite verified live; Customer AI UI+Cart verified via DOM integration suite).');
 }
 
 main().catch((err) => {

@@ -7,7 +7,7 @@ import {
   switchOverlay,
 } from './router.js';
 import { ovf } from './store.js';
-import { $, AN, pname, saveCart, state, totals } from './state.js';
+import { $, AN, pname, saveCart, showToast, state, totals } from './state.js';
 import { esc, FL, isOut, money, numAr, rnd, rn, rtk } from './utils.js';
 import {
   buildStoreKB as engineBuildStoreKB,
@@ -33,6 +33,7 @@ const CH = {
   pendingAltCands: null,
   pendingClarification: null,
   lastReferencedProductIdx: -1,
+  lastReferencedFlavorIdx: -1,
 };
 
 function getCatalogSnapshot() {
@@ -483,6 +484,9 @@ async function validateCustomerWithServer(geminiJson, userMessage) {
     lastReferencedProductIdx: Number.isInteger(CH.lastReferencedProductIdx)
       ? CH.lastReferencedProductIdx
       : -1,
+    lastReferencedFlavorIdx: Number.isInteger(CH.lastReferencedFlavorIdx)
+      ? CH.lastReferencedFlavorIdx
+      : -1,
   };
   const localValidated = validateCustomerGeminiResponse({
     geminiJson,
@@ -548,15 +552,33 @@ function rCat() {
 function rNorm(j) {
   const items = [];
   const seen = {};
-  (Array.isArray(j.items) ? j.items : []).forEach((x) => {
-    const i = +x.i;
-    let f = x.f == null ? -1 : +x.f;
-    let q = Math.round(+x.q) || 1;
+  (Array.isArray(j?.items) ? j.items : []).forEach((x) => {
+    let i = x && x.i != null ? +x.i : -1;
+    if ((!Number.isInteger(i) || !state.P[i]) && x && x.name) {
+      const targetName = rn(x.name + (x.variant ? ' ' + x.variant : ''));
+      const foundIdx = state.P.findIndex(
+        (prod) =>
+          prod &&
+          !(prod[7] || isOut(prod)) &&
+          (rn(getProductDisplayName(prod)) === targetName || rn(prod[0]) === rn(x.name))
+      );
+      if (foundIdx >= 0) i = foundIdx;
+    }
+    let f = x && x.f != null ? +x.f : -1;
+    let q = Math.round(+x?.q) || 1;
     const p = state.P[i];
     if (!p || p[7] || isOut(p)) return;
     const fl = FL(p);
     if (fl.length) {
-      if (!(f >= 0 && fl[f] && !fl[f][1])) f = -1;
+      if (!(f >= 0 && fl[f] && !fl[f][1])) {
+        if (x && x.flavorName) {
+          const fnNorm = rn(x.flavorName);
+          const fIdx = fl.findIndex((ff) => !ff[1] && rn(ff[0]) === fnNorm);
+          f = fIdx >= 0 ? fIdx : -1;
+        } else {
+          f = -1;
+        }
+      }
     } else {
       f = -1;
     }
@@ -567,11 +589,11 @@ function rNorm(j) {
       return;
     }
     const c = [i];
-    (Array.isArray(x.alt) ? x.alt : []).forEach((a) => {
+    (Array.isArray(x?.alt) ? x.alt : []).forEach((a) => {
       a = +a;
       if (state.P[a] && !state.P[a][7] && !isOut(state.P[a]) && c.indexOf(a) < 0) c.push(a);
     });
-    const it = { i, f, q, c, amb: x.a === true && c.length > 1 };
+    const it = { i, f, q, c, amb: x?.a === true && c.length > 1 };
     seen[k] = it;
     items.push(it);
   });
@@ -1213,6 +1235,7 @@ function chReset() {
   CH.pendingAltCands = null;
   CH.pendingClarification = null;
   CH.lastReferencedProductIdx = -1;
+  CH.lastReferencedFlavorIdx = -1;
   RL = [];
   RU = [];
   RT = '';
@@ -1342,32 +1365,91 @@ function chRender() {
 
   const d = $('chd');
   if (!d) return;
+  RL = dedupeAndNormalizeDraft(RL, state.P);
   if (!RL.length) {
     d.innerHTML = '';
     return;
   }
-  let tot = 0;
-  let rows = '';
-  RL.forEach((l) => {
+  const calc = computeDraftTotals(RL, state.P);
+  const unit = (state.CFG && state.CFG.unit) || 'كرتونة';
+  const rows = RL.map((l, n) => {
     const p = state.P[l.i];
-    if (!p) return;
+    if (!p) return '';
     const fl = FL(p);
-    const fn = l.f >= 0 && fl[l.f] ? fl[l.f][0] : '';
-    tot += l.q * p[3];
-    rows +=
-      '<div class="rcr"><span>' +
-      esc(pname(l.i)) +
-      (fn ? ' · ' + esc(fn) : fl.length ? ' · <b class="rw">النكهة؟</b>' : '') +
-      (l.amb ? ' <b class="rw">⚠️</b>' : '') +
-      '</span><span>' +
+    const flSelect = fl.length
+      ? '<select class="rcd-flv' +
+        (l.f < 0 ? ' need-fl' : '') +
+        '" data-cd-rn="' +
+        n +
+        '" data-cd-rk="f" aria-label="اختيار النكهة">' +
+        (l.f < 0 ? '<option value="-1" selected>— اختار النكهة —</option>' : '') +
+        fl
+          .map((f, j) =>
+            f[1]
+              ? ''
+              : '<option value="' +
+                j +
+                '"' +
+                (j === l.f ? ' selected' : '') +
+                '>' +
+                esc(f[0]) +
+                '</option>'
+          )
+          .join('') +
+        '</select>'
+      : '';
+    return (
+      '<div class="rcr-card" data-prod-idx="' +
+      l.i +
+      '" data-cd-idx="' +
+      n +
+      '">' +
+      '<div class="rcr-top">' +
+      '<select class="rcd-sel" data-cd-rn="' +
+      n +
+      '" data-cd-rk="i" aria-label="تغيير الصنف">' +
+      ropts(l) +
+      '</select>' +
+      '<button type="button" class="rcd-del" data-cd-rn="' +
+      n +
+      '" data-cd-rk="del" aria-label="حذف الصنف">🗑</button>' +
+      '</div>' +
+      '<div class="rcr-bot">' +
+      flSelect +
+      '<span class="rcd-price">' +
+      '<small>' +
+      numAr(p[3]) +
+      ' ج × ' +
       numAr(l.q) +
-      ' ×</span></div>';
-  });
+      ' =</small> <b>' +
+      money(l.q * p[3]) +
+      '</b>' +
+      (l.amb ? ' <b class="rw">⚠️</b>' : '') +
+      '</span>' +
+      '<span class="step rcd-step">' +
+      '<button type="button" data-cd-rn="' +
+      n +
+      '" data-cd-rd="1" aria-label="زيادة الكمية">+</button>' +
+      '<span>' +
+      numAr(l.q) +
+      '</span>' +
+      '<button type="button" data-cd-rn="' +
+      n +
+      '" data-cd-rd="-1" aria-label="تقليل الكمية">−</button>' +
+      '</span>' +
+      '</div>' +
+      '</div>'
+    );
+  }).join('');
 
   d.innerHTML =
     '<div class="rcd">' +
-    '<div class="rcd-head"><b>📝 طلبك لحد دلوقتي</b><span>' +
-    money(tot) +
+    '<div class="rcd-head"><b>📝 مسودة الطلب (' +
+    numAr(calc.totalQty) +
+    ' ' +
+    esc(unit) +
+    ')</b><span>' +
+    money(calc.totalPrice) +
     '</span></div>' +
     '<div class="rcl">' +
     rows +
@@ -1386,7 +1468,9 @@ function chSystemInstruction() {
   return (
     `أنت «${AN()}» مساعد طلبات ذكي لمتجر جملة «${brand}». ` +
     `تتحدث بالعامية المصرية بوضوح واختصار. وحدة البيع الرسمية هي «${unit}». ` +
-    'ممنوع تماماً اختراع أصناف أو نكهات أو عروض أو أسعار غير موجودة في الكتالوج، وممنوع حذف أصناف من الطلب الحالي إلا بأمر صريح من العميل.'
+    'دورك تجهيز «مسودة الطلب» داخل المحادثة فقط؛ السلة الفعلية تُحدَّث عبر زر «راجع وضيف للسلة» داخل التطبيق وليس من خلالك. ' +
+    'ممنوع تماماً ادّعاء أنك أضفت للسلة أو قول «ضفتلك في السلة». ' +
+    'ممنوع تماماً اختراع أصناف أو نكهات أو عروض أو أسعار غير موجودة في الكتالوج، وممنوع حذف أصناف من مسودة الطلب إلا بأمر صريح من العميل.'
   );
 }
 
@@ -1415,7 +1499,7 @@ function chPrompt() {
     ((state.CFG && state.CFG.unit) || 'كرتونة') +
     ' | أقل طلب: ' +
     ((+state.CFG?.min || 0) > 0 ? state.CFG.min + ' جنيه' : 'بدون حد أدنى') +
-    ' | الموجود في السلة حالياً: ' +
+    ' | الموجود في السلة الفعلية حالياً: ' +
     cartTot.n +
     ' وحدة بإجمالي ' +
     cartTot.s +
@@ -1430,18 +1514,21 @@ function chPrompt() {
     rCat() +
     '\nالقواعد الإلزامية (تصرف كمندوب مبيعات محترف خطوة بخطوة):\n' +
     '- أرجع JSON مطابق للـ Schema بدقة.\n' +
-    '- ممنوع تماماً الرد بكلمة تأكيد عامة فقط مثل «تمام» أو «حاضر» أو «ماشي». كل رد يجب أن يحتوي على سؤال توضيحي محدد، أو ملخص الأصناف المضافة وسؤال التأكيد، أو بدائل واضحة.\n' +
+    '- ممنوع تماماً الرد بكلمة تأكيد عامة فقط مثل «تمام» أو «حاضر» أو «ماشي»، وممنوع قول «ضفتلك في السلة» أو «أضفت للسلة» لأنك تبني «مسودة الطلب» فقط.\n' +
     '- لو طلب العميل قسماً أو اسماً عاماً يطابق أكثر من صنف (مثل: «عايز كرتونة شيبسي»)، لا تخمن صنفاً ولا تضفه لـ items؛ احتفظ بـ items كما هي في «الطلب الحالي»، اجعل intent="clarify"، اسأله عن النوع المطلوب، واعرض الأنواع المتاحة في quick.\n' +
-    '- لو الصنف له نكهات والعميل لم يحدد نكهة، أو الكمية غير محددة، لا تضف الصنف نهائياً لـ items قبل استكمال النكهة والكمية؛ اجعل intent="clarify" واسأله سؤالاً واحداً محدداً واعرض الاختيارات في quick.\n' +
-    '- لو طلب نكهة غير موجودة أو خلصانة، لا تضفه، واذكر النكهات المتاحة فعلياً لهذا الصنف.\n' +
+    '- لو الصنف له نكهات والعميل لم يحدد نكهة، لا تضف الصنف نهائياً لـ items قبل اختيار النكهة؛ اجعل intent="clarify" واسأله عن النكهة واعرض النكهات المتاحة في quick.\n' +
+    '- عند تحديد الصنف والنكهة (والكمية المحددة أو الوحدة المفردة مثل «كرتونة» = 1)، أرجع الصنف في items لتظهر بطاقته التفاعلية في مسودة الطلب داخل المحادثة، واعرض ملخص مسودة الطلب وسعره واطلب التأكيد أو التعديل.\n' +
+    '- لو طلب نكهة غير موجودة أو خلصانة، لا تضفه، واذكر النكهات المتاحة فعلياً لهذا الصنف في quick.\n' +
     '- لو طلب منتجاً غير موجود في الكتالوج، ضعه في unknown ولا تخترع منتجاً بديلاً وأخبره بوضوح.\n' +
-    '- عند اكتمال المنتج والنكهة والكمية، حدّث items (مع الحفاظ على الطلب الحالي ما لم يطلب الحذف/التعديل)، واعرض ملخص الطلب وسعره في reply واطلب التأكيد.\n' +
     '- action="review" فقط عند موافقة العميل الصريحة على المراجعة والمسودة ليست فارغة وكل الأصناف مكتملة.\n' +
     'حالة التوضيح السابقة: ' +
     JSON.stringify(CH.pendingClarification || null) +
     '\nآخر صنف تمت مناقشته: ' +
     CH.lastReferencedProductIdx +
-    '\nالطلب الحالي: ' +
+    ' (نكهة: ' +
+    CH.lastReferencedFlavorIdx +
+    ')' +
+    '\nمسودة الطلب الحالية: ' +
     JSON.stringify(dr) +
     '\nالمحادثة:\n' +
     tr
@@ -1606,6 +1693,9 @@ function chLocal(t) {
       lastReferencedProductIdx: Number.isInteger(CH.lastReferencedProductIdx)
         ? CH.lastReferencedProductIdx
         : -1,
+      lastReferencedFlavorIdx: Number.isInteger(CH.lastReferencedFlavorIdx)
+        ? CH.lastReferencedFlavorIdx
+        : -1,
     },
   });
   RL = Array.isArray(res.draft) ? res.draft : RL;
@@ -1613,6 +1703,9 @@ function chLocal(t) {
     CH.pendingClarification = res.nextState.pendingClarification || null;
     CH.lastReferencedProductIdx = Number.isInteger(res.nextState.lastReferencedProductIdx)
       ? res.nextState.lastReferencedProductIdx
+      : -1;
+    CH.lastReferencedFlavorIdx = Number.isInteger(res.nextState.lastReferencedFlavorIdx)
+      ? res.nextState.lastReferencedFlavorIdx
       : -1;
   }
   return {
@@ -1667,19 +1760,20 @@ async function rGo() {
   commitRoute({ aiStep: 'review' }, { mode: 'push' });
 }
 
-async function chSend() {
+async function chSend(overrideText = null) {
   if (CH.busy) return;
   if (VON || VR || VST || VPEND > 0 || VPOL) {
     rErr('وقّف التسجيل واستنى لحد ما الكلام يتكتب، وبعدين دوس إرسال');
     return;
   }
   const ta = $('rt');
-  const t = ta ? ta.value.trim() : '';
+  const t =
+    typeof overrideText === 'string' ? overrideText.trim() : ta ? ta.value.trim() : '';
   if (!t) return;
   rErr('');
   CH.msgs.push({ r: 'u', t });
   CH.quick = [];
-  ta.value = '';
+  if (ta) ta.value = '';
   RT = '';
   CH.busy = 1;
   chRender();
@@ -1710,6 +1804,9 @@ async function chSend() {
         CH.lastReferencedProductIdx = Number.isInteger(validated.nextState.lastReferencedProductIdx)
           ? validated.nextState.lastReferencedProductIdx
           : -1;
+        CH.lastReferencedFlavorIdx = Number.isInteger(validated.nextState.lastReferencedFlavorIdx)
+          ? validated.nextState.lastReferencedFlavorIdx
+          : -1;
       }
 
       const finalReply = String(validated.reply || '').trim();
@@ -1720,7 +1817,10 @@ async function chSend() {
         CH.busy = 0;
         ok = true;
         chRender();
-        if (validated.action === 'review' && RL.length) chReview();
+        const hasIncomplete = RL.some(
+          (l) => l.amb || (getProductFlavors(state.P[l.i]).some((f) => !f[1]) && l.f < 0)
+        );
+        if (validated.action === 'review' && RL.length && !hasIncomplete) chReview();
       }
     } catch (x) {
       ok = false;
@@ -1733,17 +1833,34 @@ async function chSend() {
     CH.msgs.push({ r: 'a', t: lr.m });
     CH.busy = 0;
     chRender();
-    if (lr.go) chReview();
+    const hasIncomplete = RL.some(
+      (l) => l.amb || (getProductFlavors(state.P[l.i]).some((f) => !f[1]) && l.f < 0)
+    );
+    if (lr.go && RL.length && !hasIncomplete) chReview();
   }
 }
 
 function chReview() {
   vStop(false);
+  RL = dedupeAndNormalizeDraft(RL, state.P);
   if (!RL.length) {
-    rErr('الطلب فاضي، اكتب اللي عايزه الأول');
-    return;
+    rErr('مسودة الطلب فاضية، اختار الأصناف المطلوبة الأول');
+    chRender();
+    return false;
   }
+  if (RL.some((l) => l.amb)) {
+    rErr('اتأكد من اختيار نوع أو حجم الصنف المطلوب الأول');
+    chRender();
+    return false;
+  }
+  if (RL.some((l) => getProductFlavors(state.P[l.i]).some((f) => !f[1]) && l.f < 0)) {
+    rErr('اختار النكهة لكل صنف في مسودة الطلب الأول');
+    chRender();
+    return false;
+  }
+  rErr('');
   commitRoute({ aiStep: 'review' }, { mode: 'push' });
+  return true;
 }
 
 function ropts(l) {
@@ -1935,7 +2052,8 @@ function openAiFlavorForProdIdx(prodIdx, meta = {}) {
       });
       RL = out;
     }
-    rRv(true);
+    if ($('chm')) chRender();
+    else rRv(true);
   });
 }
 
@@ -1948,25 +2066,59 @@ function rOpenF(n) {
 function rAdd() {
   RL = dedupeAndNormalizeDraft(RL, state.P);
   if (!RL.length) {
-    rErr('الطلب فاضي أو الأصناف غير متاحة حالياً');
-    return;
+    rErr('مسودة الطلب فاضية أو الأصناف غير متاحة حالياً');
+    return false;
+  }
+  if (RL.some((l) => l.amb)) {
+    rErr('اتأكد من اختيار نوع أو حجم الصنف المطلوب الأول');
+    return false;
   }
   if (RL.some((l) => getProductFlavors(state.P[l.i]).some((f) => !f[1]) && l.f < 0)) {
     rErr('اختار النكهة في الأصناف اللي لسه ما اتحددتش');
-    return;
+    return false;
   }
-  RL.forEach((l) => {
+  const addedKeys = [];
+  const failedItems = [];
+  for (const l of RL) {
     const p = state.P[l.i];
-    if (!p || isProductOutOfStock(p)) return;
+    if (!p || isProductOutOfStock(p)) {
+      if (p) failedItems.push(pname(l.i));
+      continue;
+    }
     const fl = getProductFlavors(p);
+    if (fl.length && !(l.f >= 0 && fl[l.f] && !fl[l.f][1])) {
+      failedItems.push(pname(l.i));
+      continue;
+    }
     const k = fl.length ? l.i + ':' + l.f : String(l.i);
-    state.cart[k] = Math.min((state.cart[k] || 0) + l.q, 99);
-  });
+    const nextQ = Math.min((state.cart[k] || 0) + l.q, 99);
+    state.cart[k] = nextQ;
+    if (state.cart[k] === nextQ && state.cart[k] > 0) {
+      addedKeys.push(k);
+    } else {
+      failedItems.push(pname(l.i));
+    }
+  }
+  if (!addedKeys.length) {
+    rErr(
+      failedItems.length
+        ? 'تعذر الإضافة للسلة: ' + failedItems.join('، ') + ' غير متوفرة حالياً'
+        : 'تعذر إضافة المنتجات للسلة، جرّب مراجعة الأصناف مرة تانية'
+    );
+    return false;
+  }
   saveCart();
-  state.hooks.renderCatalog();
+  state.hooks.renderCatalog?.();
   updCartSummary();
+  showToast(
+    failedItems.length
+      ? 'تمت إضافة الأصناف المتاحة للسلة (استُبعد غير المتوفر)'
+      : 'تمت إضافة الطلب للسلة بنجاح ✅',
+    failedItems.length ? 'warn' : 'info'
+  );
   chReset();
   switchOverlay('cart');
+  return true;
 }
 
 export function aiHide() {
@@ -2127,6 +2279,33 @@ export function bindAIEvents() {
       rAdd();
       return;
     }
+    const cdEl = e.target.closest ? e.target.closest('[data-cd-rn]') : null;
+    if (cdEl && cdEl.tagName !== 'SELECT') {
+      const cdn = +cdEl.dataset.cdRn;
+      const cl = RL[cdn];
+      if (!cl) return;
+      if (cdEl.dataset.cdRk === 'del') {
+        RL.splice(cdn, 1);
+        RL = dedupeAndNormalizeDraft(RL, state.P);
+        CH.lastReferencedProductIdx = RL.length ? RL[RL.length - 1].i : -1;
+        CH.lastReferencedFlavorIdx = RL.length ? RL[RL.length - 1].f : -1;
+        rErr('');
+        chRender();
+        return;
+      }
+      if (cdEl.dataset.cdRd) {
+        cl.q += +cdEl.dataset.cdRd;
+        if (cl.q < 1) RL.splice(cdn, 1);
+        else if (cl.q > 99) cl.q = 99;
+        RL = dedupeAndNormalizeDraft(RL, state.P);
+        CH.lastReferencedProductIdx = cl.q >= 1 ? cl.i : RL.length ? RL[RL.length - 1].i : -1;
+        CH.lastReferencedFlavorIdx = cl.q >= 1 ? cl.f : RL.length ? RL[RL.length - 1].f : -1;
+        rErr('');
+        chRender();
+        return;
+      }
+    }
+
     const n = t.dataset ? t.dataset.rn : null;
     if (n == null) return;
     const l = RL[+n];
@@ -2150,6 +2329,41 @@ export function bindAIEvents() {
 
   rs.addEventListener('change', (e) => {
     const t = e.target;
+    if (!t || !t.dataset) return;
+    if (t.dataset.cdRn != null) {
+      const cl = RL[+t.dataset.cdRn];
+      if (!cl) return;
+      if (t.dataset.cdRk === 'i') {
+        const ni = +t.value;
+        const pNew = state.P[ni];
+        if (!pNew || isProductOutOfStock(pNew)) return;
+        const flNew = FL(pNew);
+        const avNew = flNew.filter((ff) => !ff[1]);
+        cl.i = ni;
+        cl.f = flNew.length ? (avNew.length === 1 ? flNew.indexOf(avNew[0]) : -1) : -1;
+        cl.c = [ni];
+        cl.amb = false;
+        RL = dedupeAndNormalizeDraft(RL, state.P);
+        CH.lastReferencedProductIdx = ni;
+        CH.lastReferencedFlavorIdx = cl.f;
+        rErr('');
+        chRender();
+        return;
+      }
+      if (t.dataset.cdRk === 'f') {
+        const nf = +t.value;
+        const flCur = state.P[cl.i] ? FL(state.P[cl.i]) : [];
+        if (nf >= 0 && flCur[nf] && !flCur[nf][1]) {
+          cl.f = nf;
+          RL = dedupeAndNormalizeDraft(RL, state.P);
+          CH.lastReferencedProductIdx = cl.i;
+          CH.lastReferencedFlavorIdx = nf;
+          rErr('');
+          chRender();
+        }
+        return;
+      }
+    }
     const l = RL[+t.dataset.rn];
     if (!l) return;
     if (t.dataset.rk === 'i') {
@@ -2169,3 +2383,13 @@ export function bindAIEvents() {
     }
   });
 }
+
+export function __getAiStateForTest() {
+  return { RL, RU, CH, RMODE };
+}
+
+export function __setDraftForTest(nextDraft) {
+  RL = Array.isArray(nextDraft) ? nextDraft : [];
+}
+
+export { chLocal, chRender, chReset, chReview, chSend, rAdd, rNorm, rRv };
