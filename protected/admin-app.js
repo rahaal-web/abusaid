@@ -2053,6 +2053,24 @@
       '>تلقائي (Gemini القوي + الموديل المحلي الذكي)</option><option value="local"' +
       (c.aiMode == 'local' ? ' selected' : '') +
       '>الموديل المحلي الذكي فقط (بدون API)</option></select>' +
+      '<label>نوع واجهة المساعد الذكي للعملاء</label><select data-s="aiUi"><option value="chat"' +
+      ((c.aiUi || 'chat') == 'chat' ? ' selected' : '') +
+      '>💬 المحادثة التفاعلية (مع زر للتبديل لكتابة مرة واحدة)</option><option value="old"' +
+      (c.aiUi == 'old' ? ' selected' : '') +
+      '>✍️ الكتابة مرة واحدة (مع زر للتبديل للمحادثة التفاعلية)</option><option value="chat_only"' +
+      (c.aiUi == 'chat_only' ? ' selected' : '') +
+      '>💬 المحادثة التفاعلية فقط (بدون تبديل)</option><option value="old_only"' +
+      (c.aiUi == 'old_only' ? ' selected' : '') +
+      '>✍️ الكتابة مرة واحدة فقط (بدون تبديل)</option></select>' +
+      '<label>نوع واجهة المساعد الذكي للإدارة</label><select data-s="adminAiUi"><option value="chat"' +
+      ((c.adminAiUi || 'chat') == 'chat' ? ' selected' : '') +
+      '>💬 المحادثة التفاعلية (مع زر للتبديل لكتابة مرة واحدة)</option><option value="batch"' +
+      (c.adminAiUi == 'batch' ? ' selected' : '') +
+      '>✍️ الكتابة مرة واحدة (إضافة من نص/صوت دفعة واحدة)</option><option value="chat_only"' +
+      (c.adminAiUi == 'chat_only' ? ' selected' : '') +
+      '>💬 المحادثة التفاعلية فقط (بدون تبديل)</option><option value="batch_only"' +
+      (c.adminAiUi == 'batch_only' ? ' selected' : '') +
+      '>✍️ الكتابة مرة واحدة فقط (بدون تبديل)</option></select>' +
       '<label>اسم زر المساعد الذكي</label><input data-s="rn" value="' +
       esc(c.rn == null ? 'Rahal Ai' : c.rn) +
       '">' +
@@ -3647,20 +3665,43 @@
 
   // ===== 14. RAHAL AI WORKSPACE VIEW =====
   function vAiWorkspace() {
+    var c = D.cfg || {};
+    var admUi = getAdminAiUiMode();
+    var custUi = String(c.aiUi || 'chat');
+    var isBatchDefault = admUi === 'batch' || admUi === 'batch_only';
     return (
       '<div class="sec-hdr"><div class="sec-hdr-l"><h2>✨ مساحة عمل ' + esc(AN()) + '</h2></div></div>' +
       '<div class="grid-2">' +
-      '<div class="card"><h3 class="card-title">💬 المساعد الذفاعلي والتعديل الجماعي</h3><p class="hint">تحدث مع المساعد بالكتابة أو الصوت لإضافة أصناف جديدة أو تعديل أسعار وعروض المتجر دفعة واحدة مع مراجعة قبل الحفظ.</p>' +
+      '<div class="card"><h3 class="card-title">💬 المساعد التفاعلي والكتابة مرة واحدة</h3><p class="hint">تحدث مع المساعد بالكتابة أو الصوت لإضافة أصناف جديدة أو تعديل أسعار وعروض المتجر دفعة واحدة مع مراجعة قبل الحفظ.</p>' +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">' +
-      '<button class="btn btn-brand btn-lg" type="button" id="aiLaunchChat">✨ فتح محادثة ' + esc(AN()) + '</button>' +
-      '<button class="btn btn-lg" type="button" id="aiLaunchBatch">✍️ الإضافة السريعة (وصف نصي / صوتي)</button>' +
+      (admUi !== 'batch_only'
+        ? '<button class="btn ' + (!isBatchDefault ? 'btn-brand ' : '') + 'btn-lg" type="button" id="aiLaunchChat">💬 المحادثة التفاعلية' + (!isBatchDefault ? ' (الافتراضي)' : '') + '</button>'
+        : '') +
+      (admUi !== 'chat_only'
+        ? '<button class="btn ' + (isBatchDefault ? 'btn-brand ' : '') + 'btn-lg" type="button" id="aiLaunchBatch">✍️ الكتابة مرة واحدة' + (isBatchDefault ? ' (الافتراضي)' : '') + '</button>'
+        : '') +
       '</div></div>' +
-      '<div class="card"><h3 class="card-title">⚡ اختصارات ذكية جاهزة</h3><p class="hint">اضغط على أي مهمة لفتح المساعد وتجهيزها مباشرة (تحتاج موافقتك قبل تطبيق أي تعديل):</p>' +
+      '<div class="card"><h3 class="card-title">🎛️ تحديد نوع الذكاء الاصطناعي المستخدم</h3><p class="hint">اختر الوضع الذي تفضله في لوحة الإدارة ولعملاء المتجر (اضغط نشر لحفظ التغيير للعملاء).</p>' +
+      '<label>نوع المساعد للإدارة (عند الضغط على زر ' + esc(AN()) + ')</label>' +
+      '<select data-s="adminAiUi">' +
+      '<option value="chat"' + (admUi === 'chat' ? ' selected' : '') + '>💬 المحادثة التفاعلية (مع زر للتبديل لكتابة مرة واحدة)</option>' +
+      '<option value="batch"' + (admUi === 'batch' ? ' selected' : '') + '>✍️ الكتابة مرة واحدة (مع زر للتبديل للمحادثة)</option>' +
+      '<option value="chat_only"' + (admUi === 'chat_only' ? ' selected' : '') + '>💬 المحادثة التفاعلية فقط</option>' +
+      '<option value="batch_only"' + (admUi === 'batch_only' ? ' selected' : '') + '>✍️ الكتابة مرة واحدة فقط</option>' +
+      '</select>' +
+      '<label style="margin-top:10px">نوع المساعد لعملاء المتجر</label>' +
+      '<select data-s="aiUi">' +
+      '<option value="chat"' + (custUi === 'chat' ? ' selected' : '') + '>💬 المحادثة التفاعلية (مع زر للتبديل لكتابة مرة واحدة)</option>' +
+      '<option value="old"' + (custUi === 'old' ? ' selected' : '') + '>✍️ الكتابة مرة واحدة (مع زر للتبديل للمحادثة)</option>' +
+      '<option value="chat_only"' + (custUi === 'chat_only' ? ' selected' : '') + '>💬 المحادثة التفاعلية فقط (بدون تبديل)</option>' +
+      '<option value="old_only"' + (custUi === 'old_only' ? ' selected' : '') + '>✍️ الكتابة مرة واحدة فقط (بدون تبديل)</option>' +
+      '</select></div></div>' +
+      '<div class="card" style="margin-top:14px"><h3 class="card-title">⚡ اختصارات ذكية جاهزة</h3><p class="hint">اضغط على أي مهمة لفتح المساعد وتجهيزها مباشرة (تحتاج موافقتك قبل تطبيق أي تعديل):</p>' +
       '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">' +
       '<button class="btn" type="button" data-ai-preset="اقترح تحسينات على الأصناف اللي ناقصها صور أو نكهات أو أوصاف في المتجر">🔍 فحص جودة الكتالوج واقتراحات التحسين</button>' +
       '<button class="btn" type="button" data-ai-preset="اقترح نص إشعار قصير وجذاب للعملاء عن العروض المتوفرة حالياً">🔔 صياغة نص إشعار ترويجي للعملاء</button>' +
       '<button class="btn" type="button" data-ai-preset="ضيف عرض جديد مناسب لأشهر قسم في المتجر">🎁 اقتراح عرض ترويجي جديد</button>' +
-      '</div></div></div>'
+      '</div></div>'
     );
   }
 
@@ -4501,16 +4542,37 @@
     else { vUI(false); if (VGP) { VGP = false; vPolish(); } }
   }
 
+  function getAdminAiUiMode() {
+    var raw = String((D && D.cfg && D.cfg.adminAiUi) || 'chat').trim();
+    return ['chat', 'batch', 'chat_only', 'batch_only'].indexOf(raw) > -1 ? raw : 'chat';
+  }
+  function isAdminAiSwitchAllowed() {
+    var ui = getAdminAiUiMode();
+    return ui !== 'chat_only' && ui !== 'batch_only';
+  }
+  function openAdminAiByPreference(initialPrompt) {
+    var ui = getAdminAiUiMode();
+    if (ui === 'batch' || ui === 'batch_only') {
+      if (initialPrompt) SMT = initialPrompt;
+      smOpen();
+    } else {
+      chOpen(initialPrompt);
+    }
+  }
+
   function renderSmInModalDom(t) {
     vStop(); CHF = false;
+    var swHtml = isAdminAiSwitchAllowed()
+      ? '<button class="btn btn-sm" id="smtochat" type="button" style="margin-top:8px">💬 التبديل للمحادثة التفاعلية</button>'
+      : '';
     $('ov').innerHTML =
-      '<div class="pn"><h2>' + esc(AN()) + ' — إضافة ذكية<button class="x" type="button" id="smx">✕</button></h2>' +
+      '<div class="pn"><h2>✍️ ' + esc(AN()) + ' — كتابة مرة واحدة<button class="x" type="button" id="smx">✕</button></h2>' +
       '<p class="hint">اكتب أو الصق وصف الأصناف كما تتحدث، وستراجع النتيجة قبل الإضافة.</p>' +
       '<label>وصف الأصناف</label><textarea id="smt" rows="5" placeholder="مثال: شيبسي عائلي كرتونة 24 كيس بسعر 260 جنيه في قسم شيبسي عنده طعم ملح وخل">' + esc(t || '') + '</textarea>' +
       '<button class="vmic" id="smmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="smvl">اكتب بالصوت</span></button>' +
       '<label>مفتاح Gemini بديل (اختياري — يستخدم مفتاح الخادم تلقائياً)</label><input id="smk" type="password" autocomplete="off" dir="ltr">' +
       '<div class="r2" style="margin-top:12px"><button class="btn btn-brand btn-lg" id="smai" type="button">🤖 تحليل بالذكاء الاصطناعي</button><button class="btn btn-lg" id="smlp" type="button">⚡ تحليل محلي سريع</button></div>' +
-      '<div class="err" id="sme"></div></div>';
+      '<div class="err" id="sme"></div>' + swHtml + '</div>';
     $('ov').classList.add('on');
   }
   function smIn(t) {
@@ -4535,6 +4597,9 @@
 
   function renderChOpenDom(initialPrompt) {
     vStop(); CHF = true;
+    var swHtml = isAdminAiSwitchAllowed()
+      ? '<button class="btn btn-sm" id="chold" type="button" style="align-self:flex-start;margin-top:6px">✍️ الإضافة من نص مرة واحدة</button>'
+      : '';
     $('ov').innerHTML =
       '<div class="pn" id="chp" style="display:flex;flex-direction:column;height:88vh;max-height:88vh;overflow:hidden">' +
       '<h2>💬 ' + esc(AN()) + '<button class="x" type="button" id="smx">✕</button></h2>' +
@@ -4543,7 +4608,7 @@
       '<button class="vmic sm" id="smmic" type="button"><span class="vb"><i></i><i></i><i></i><i></i><i></i></span><span id="smvl">اكتب بالصوت</span></button>' +
       '<div class="r2" style="align-items:stretch"><div><textarea id="smt" rows="2" style="resize:none" placeholder="اكتب طلبك للمساعد..."></textarea></div><button class="btn btn-primary" id="chsend" type="button" style="flex:none;padding:0 18px">إرسال</button></div>' +
       '<div class="err" id="sme" style="min-height:0"></div>' +
-      '<button class="btn btn-sm" id="chold" type="button" style="align-self:flex-start;margin-top:6px">✍️ الإضافة من نص مرة واحدة</button></div>';
+      swHtml + '</div>';
     $('ov').classList.add('on');
     var promptToFill = initialPrompt || chPendingPrompt;
     chPendingPrompt = '';
@@ -4977,10 +5042,20 @@
       ok = Boolean(usersData.find(function (x) { return String(x.id) === String(snap.ovUid); }));
       if (ok) renderUserDetailModalDom(snap.ovUid);
     } else if (snap.ov === 'ai-chat') {
-      renderChOpenDom();
+      if (getAdminAiUiMode() === 'batch_only') {
+        renderSmInModalDom(SMT);
+        commitAdminRoute({ ov: 'ai-batch' }, { mode: 'replace', skipTabRender: true });
+      } else {
+        renderChOpenDom();
+      }
       ok = true;
     } else if (snap.ov === 'ai-batch') {
-      renderSmInModalDom(SMT);
+      if (getAdminAiUiMode() === 'chat_only') {
+        renderChOpenDom();
+        commitAdminRoute({ ov: 'ai-chat' }, { mode: 'replace', skipTabRender: true });
+      } else {
+        renderSmInModalDom(SMT);
+      }
       ok = true;
     } else if (snap.ov === 'ai-review') {
       if (SM.length) {
@@ -5141,7 +5216,8 @@
     if (b && b.id === 'chun') { chUndo(); return; }
     if (b && b.id === 'chrv') { chReview(); return; }
     if (b && b.id === 'chnw') { chReset(); chRender(); return; }
-    if (b && b.id === 'chold') { smOpen(); return; }
+    if (b && b.id === 'chold') { if (!isAdminAiSwitchAllowed()) return; if ($('smt') && $('smt').value.trim()) SMT = $('smt').value.trim(); smOpen(); return; }
+    if (b && b.id === 'smtochat') { if (!isAdminAiSwitchAllowed()) return; chOpen($('smt') ? $('smt').value.trim() : SMT); return; }
     if (t.dataset && t.dataset.sk === 'rmim' && SM[+t.dataset.si]) {
       SM[+t.dataset.si].im = ''; renderSmRvModalDom(1); return;
     }
@@ -5279,7 +5355,7 @@
     if (t.id === 'admSetLight') { document.documentElement.setAttribute('data-theme', 'light'); try { localStorage.setItem('abu_admin_theme', 'light'); } catch (z) {} syncThemeUI(); return; }
     if (t.id === 'admSetDark') { document.documentElement.setAttribute('data-theme', 'dark'); try { localStorage.setItem('abu_admin_theme', 'dark'); } catch (z) {} syncThemeUI(); return; }
     if (t.id === 'pub' || t.id === 'dashPubBtn') { pub(); return; }
-    if (t.id === 'smb' || t.closest('#smb')) { chOpen(); return; }
+    if (t.id === 'smb' || t.closest('#smb')) { openAdminAiByPreference(); return; }
     if (t.id === 'admRefreshBtn') {
       Promise.all([loadUsers(true), loadOrders(true), loadPushOverview(true), loadAuditLogs(true), loadHealth(true)]).then(function () {
         render(); toast('تم تحديث البيانات ✅');
@@ -5442,7 +5518,7 @@
     if (t.id === 'resetColors') { delete D.cfg.cBg; delete D.cfg.cRed; delete D.cfg.cBlue; delete D.cfg.cGreen; mark(); render(); toast('تمت استعادة الألوان الأصلية'); return; }
     if (t.id === 'aiLaunchChat') { chOpen(); return; }
     if (t.id === 'aiLaunchBatch') { smOpen(); return; }
-    if ((b = t.closest('[data-ai-preset]'))) { chOpen(b.dataset.aiPreset); return; }
+    if ((b = t.closest('[data-ai-preset]'))) { openAdminAiByPreference(b.dataset.aiPreset); return; }
 
     if (t.closest('.sw') || t.type === 'checkbox') return;
     if ((b = t.closest('[data-e]'))) { openEd(+b.dataset.e); return; }
@@ -5518,6 +5594,7 @@
       else if (k == 'fontUnified') D.cfg.fontUnified = t.checked ? 1 : 0;
       else if (k == 'rn') { D.cfg.rn = t.value.trim(); render(); }
       else if (k == 'unit') D.cfg.unit = t.value.trim() || 'كرتونة';
+      else if (k == 'aiUi' || k == 'adminAiUi') { D.cfg[k] = t.value.trim(); mark(); render(); return; }
       else D.cfg[k] = t.value.trim();
       mark();
       return;

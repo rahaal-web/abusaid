@@ -121,10 +121,12 @@ export function normalizeSnapshot(raw) {
   const hasFlavor = layers.includes('flavor');
 
   const searchModalQuery = hasSearch && typeof raw.searchModalQuery === 'string' ? raw.searchModalQuery : '';
+  const getDefaultAiStep = () =>
+    state.CFG && (state.CFG.aiUi === 'old' || state.CFG.aiUi === 'old_only') ? 'old' : 'chat';
   const aiStep = hasAi
     ? VALID_AI_STEPS.includes(raw.aiStep)
       ? raw.aiStep
-      : 'chat'
+      : getDefaultAiStep()
     : '';
   const flavorProdIdx =
     hasFlavor && Number.isInteger(Number(raw.flavorProdIdx)) && Number(raw.flavorProdIdx) >= 0
@@ -227,10 +229,12 @@ export function parseSnapshotFromLocation() {
       : -1;
 
   const aiStepParam = String(params.get('ai') || '').trim();
+  const defaultAiStep =
+    state.CFG && (state.CFG.aiUi === 'old' || state.CFG.aiUi === 'old_only') ? 'old' : 'chat';
   const aiStep = layers.includes('ai')
     ? VALID_AI_STEPS.includes(aiStepParam)
       ? aiStepParam
-      : 'chat'
+      : defaultAiStep
     : '';
 
   return normalizeSnapshot({
@@ -355,7 +359,11 @@ function applySnapshotToUI(snap, options = {}) {
   if (wantCart) state.hooks.syncCartOverlay?.(true);
   if (wantOrders) state.hooks.syncOrdersOverlay?.(true);
   if (wantAccount) state.hooks.syncAccountOverlay?.(true);
-  if (wantAi) state.hooks.syncAiOverlay?.(true, snap.aiStep || 'chat', { fromPopstate, isInitialLoad });
+  if (wantAi) {
+    const defStep =
+      state.CFG && (state.CFG.aiUi === 'old' || state.CFG.aiUi === 'old_only') ? 'old' : 'chat';
+    state.hooks.syncAiOverlay?.(true, snap.aiStep || defStep, { fromPopstate, isInitialLoad });
+  }
   if (wantFlavor) {
     const p = state.P[snap.flavorProdIdx];
     const validFlavorProd = p && FL(p).length > 0;
@@ -491,12 +499,14 @@ export function pushOverlay(layer, extra = {}) {
 
 export function switchOverlay(layer, extra = {}) {
   if (state.hooks.isMandatoryPushOpen?.()) return;
+  const defStep =
+    state.CFG && (state.CFG.aiUi === 'old' || state.CFG.aiUi === 'old_only') ? 'old' : 'chat';
   commitRoute(
     (s) => ({
       ...s,
       ...extra,
       layers: layer ? [layer] : [],
-      aiStep: layer === 'ai' ? extra.aiStep || 'chat' : '',
+      aiStep: layer === 'ai' ? extra.aiStep || defStep : '',
       flavorProdIdx: layer === 'flavor' ? (extra.flavorProdIdx ?? -1) : -1,
       flavorAiMode: false,
     }),

@@ -1063,6 +1063,35 @@ async function runAdminSuite() {
       assert.ok(adminJsSrc.includes(marker), `admin-app.js missing expected Rahal AI marker: ${marker}`);
     }
   });
+
+  // A19: Admin settings & AI workspace expose aiUi and adminAiUi mode selectors + lock/switch hooks
+  await runCase('Admin AI', 'A19: Admin settings & AI workspace control interactive chat vs one-shot mode for Admin & Customer AI', async () => {
+    const adminJsSrc = fs.readFileSync(path.join(ROOT_DIR, 'protected', 'admin-app.js'), 'utf8');
+    for (const marker of [
+      'data-s="aiUi"',
+      'data-s="adminAiUi"',
+      'function getAdminAiUiMode(',
+      'function isAdminAiSwitchAllowed(',
+      'function openAdminAiByPreference(',
+      'id="smtochat"',
+    ]) {
+      assert.ok(adminJsSrc.includes(marker), `admin-app.js missing mode selection hook: ${marker}`);
+    }
+
+    const { sanitizeCatalogForCustomer } = await import('../lib/firebaseCatalogCore.js');
+    const sanitized = sanitizeCatalogForCustomer({
+      ts: 123,
+      data: {
+        cfg: { phone: '201000000000', gk: 'SECRET_KEY', aiUi: 'old_only', adminAiUi: 'batch' },
+        cats: [],
+        p: [],
+        offers: [],
+      },
+    });
+    const parsed = JSON.parse(sanitized.json);
+    assert.equal(parsed.cfg.gk, undefined);
+    assert.equal(parsed.cfg.aiUi, 'old_only');
+  });
 }
 
 // =========================================================================
@@ -1955,6 +1984,38 @@ async function runCustomerUiAndCartSuite() {
       ]
     );
     assert.deepEqual(state.cart, {}, 'rlocal must never mutate state.cart');
+  });
+
+  // U6: Customer AI obeys admin-configured aiUi mode (chat, old, chat_only, old_only)
+  await runCase('UI & Cart', 'U6: Customer AI obeys admin-configured aiUi (chat, old, chat_only, old_only)', () => {
+    resetEnv();
+    state.CFG.aiUi = 'old';
+    routerMod.switchOverlay(null);
+    aiMod.openAI();
+    assert.equal(aiMod.__getAiStateForTest().RMODE, 'old', 'aiUi=old must open one-shot writing mode directly');
+    assert.ok(document.getElementById('chback'), 'aiUi=old must allow switching back to interactive chat');
+    document.getElementById('chback').click();
+    assert.equal(aiMod.__getAiStateForTest().RMODE, 'chat', 'Clicking #chback must switch to interactive chat');
+
+    // Locked one-shot only
+    resetEnv();
+    state.CFG.aiUi = 'old_only';
+    routerMod.switchOverlay(null);
+    aiMod.openAI();
+    assert.equal(aiMod.__getAiStateForTest().RMODE, 'old');
+    assert.equal(document.getElementById('chback'), null, 'old_only must hide interactive chat switch button');
+    routerMod.commitRoute({ layers: ['ai'], aiStep: 'chat' }, { mode: 'replace' });
+    assert.equal(aiMod.__getAiStateForTest().RMODE, 'old', 'old_only must force one-shot even if route asks for chat');
+
+    // Locked interactive chat only
+    resetEnv();
+    state.CFG.aiUi = 'chat_only';
+    routerMod.switchOverlay(null);
+    aiMod.openAI();
+    assert.equal(aiMod.__getAiStateForTest().RMODE, 'chat');
+    assert.equal(document.getElementById('chold'), null, 'chat_only must hide one-shot switch button');
+    routerMod.commitRoute({ layers: ['ai'], aiStep: 'old' }, { mode: 'replace' });
+    assert.equal(aiMod.__getAiStateForTest().RMODE, 'chat', 'chat_only must force interactive chat even if route asks for old');
   });
 }
 

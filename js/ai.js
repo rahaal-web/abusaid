@@ -1288,16 +1288,36 @@ function chReset() {
   RT = '';
 }
 
+export function getCustomerAiUiMode() {
+  const raw = String((state.CFG && state.CFG.aiUi) || 'chat').trim();
+  return ['chat', 'old', 'chat_only', 'old_only'].includes(raw) ? raw : 'chat';
+}
+
+export function getPreferredCustomerAiStep() {
+  const ui = getCustomerAiUiMode();
+  return ui === 'old' || ui === 'old_only' ? 'old' : 'chat';
+}
+
+export function isCustomerAiSwitchAllowed() {
+  const ui = getCustomerAiUiMode();
+  return ui !== 'chat_only' && ui !== 'old_only';
+}
+
 function renderAiOld() {
   vStop(false);
   RMODE = 'old';
   const pn = $('rpn');
   if (!pn) return;
+  const swBtn = isCustomerAiSwitchAllowed()
+    ? '<button type="button" class="mode-sw" id="chback">💬 المحادثة التفاعلية</button>'
+    : '';
   pn.className = 'pn';
   pn.innerHTML =
     '<div class="rhead"><h2>' +
     esc(AN()) +
-    '</h2><div class="rhead-act"><button type="button" class="mode-sw" id="chback">💬 المحادثة التفاعلية</button><button class="x" id="rx" type="button" aria-label="رجوع">✕</button></div></div>' +
+    '</h2><div class="rhead-act">' +
+    swBtn +
+    '<button class="x" id="rx" type="button" aria-label="رجوع">✕</button></div></div>' +
     '<p class="fsub">اكتب طلبك زي ما بتتكلم وأنا هرتّبه لك، وبعدها تزوّد أو تنقّص زي ما تحب. مثال: ٥ كراتين شيبسي ملح و٣ طماطم و٢ ذرة</p>' +
     '<textarea id="rt" rows="5" placeholder="اكتب طلبك هنا...">' +
     esc(RT) +
@@ -1314,11 +1334,16 @@ function renderAiChat() {
   RMODE = 'chat';
   const p = $('rpn');
   if (!p) return;
+  const swBtn = isCustomerAiSwitchAllowed()
+    ? '<button type="button" class="mode-sw" id="chold">✍️ كتابة مرة واحدة</button>'
+    : '';
   p.className = 'pn rchat';
   p.innerHTML =
     '<div class="rhead"><h2>💬 ' +
     esc(AN()) +
-    '</h2><div class="rhead-act"><button type="button" class="mode-sw" id="chold">✍️ كتابة مرة واحدة</button><button class="x" id="rx" type="button" aria-label="رجوع">✕</button></div></div>' +
+    '</h2><div class="rhead-act">' +
+    swBtn +
+    '<button class="x" id="rx" type="button" aria-label="رجوع">✕</button></div></div>' +
     '<div id="chm" class="rcm"></div>' +
     '<div id="chd"></div>' +
     '<div class="rc-dock">' +
@@ -2203,7 +2228,11 @@ export function syncAiOverlay(isOpen, aiStep = 'chat', meta = {}) {
       rRv(true);
       return;
     }
-    const fallbackStep = RMODE === 'old' ? 'old' : 'chat';
+    const fallbackStep = !isCustomerAiSwitchAllowed()
+      ? getPreferredCustomerAiStep()
+      : RMODE === 'old'
+      ? 'old'
+      : 'chat';
     if (meta?.isInitialLoad) {
       commitRoute({ aiStep: fallbackStep }, { mode: 'replace' });
       return;
@@ -2213,7 +2242,13 @@ export function syncAiOverlay(isOpen, aiStep = 'chat', meta = {}) {
     return;
   }
 
-  if (aiStep === 'old') {
+  const effectiveStep = !isCustomerAiSwitchAllowed()
+    ? getPreferredCustomerAiStep()
+    : aiStep === 'old'
+    ? 'old'
+    : 'chat';
+
+  if (effectiveStep === 'old') {
     renderAiOld();
   } else {
     renderAiChat();
@@ -2221,7 +2256,7 @@ export function syncAiOverlay(isOpen, aiStep = 'chat', meta = {}) {
 }
 
 export function openAI() {
-  pushOverlay('ai', { aiStep: 'chat' });
+  pushOverlay('ai', { aiStep: getPreferredCustomerAiStep() });
 }
 
 export function closeAI() {
@@ -2301,12 +2336,14 @@ export function bindAIEvents() {
       return;
     }
     if (t.id === 'chold') {
+      if (!isCustomerAiSwitchAllowed()) return;
       RL = [];
       RU = [];
       commitRoute({ aiStep: 'old' }, { mode: 'push' });
       return;
     }
     if (t.id === 'chback') {
+      if (!isCustomerAiSwitchAllowed()) return;
       commitRoute({ aiStep: 'chat' }, { mode: 'push' });
       return;
     }
