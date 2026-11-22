@@ -454,6 +454,16 @@ export function bindCartEvents() {
     });
   }
 
+  const clearCartState = () => {
+    state.cart = {};
+    saveCart();
+    cleanCart();
+    resetClearConfirm();
+    state.hooks.renderCatalog();
+    updCartSummary();
+    lines();
+  };
+
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
       if (!clearConfirmArmed) {
@@ -463,20 +473,24 @@ export function bindCartEvents() {
         clearConfirmTimer = setTimeout(resetClearConfirm, 3500);
         return;
       }
-      state.cart = {};
-      saveCart();
-      cleanCart();
-      resetClearConfirm();
-      state.hooks.renderCatalog();
-      updCartSummary();
-      lines();
+      clearCartState();
       showToast('تم تفريغ السلة');
     });
   }
 
   if (sendBtn) {
     sendBtn.addEventListener('click', (e) => {
-      if (totals().s < (+state.CFG.min || 0)) {
+      if (sendBtn.dataset.completing === '1') {
+        e.preventDefault();
+        return;
+      }
+      const t = totals();
+      if (!t.n) {
+        e.preventDefault();
+        closeCartSheet();
+        return;
+      }
+      if (t.s < (+state.CFG.min || 0)) {
         e.preventDefault();
         const minEl = $('min');
         if (minEl) {
@@ -488,8 +502,15 @@ export function bindCartEvents() {
         }
         return;
       }
+      sendBtn.dataset.completing = '1';
       wa();
       recordWhatsAppOrder({ orderType: 'cart' });
+      setTimeout(() => {
+        delete sendBtn.dataset.completing;
+        clearCartState();
+        closeCartSheet();
+        showToast('تم إتمام الطلب وإرساله عبر واتساب ✅');
+      }, 100);
     });
   }
 
