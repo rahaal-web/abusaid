@@ -24,10 +24,24 @@ export function ogo(i, behavior) {
   });
 }
 
+function isOfferActiveNow(o) {
+  if (!o || o.x || !o.t) return false;
+  const now = new Date();
+  const todayStr =
+    now.getFullYear() +
+    '-' +
+    String(now.getMonth() + 1).padStart(2, '0') +
+    '-' +
+    String(now.getDate()).padStart(2, '0');
+  if (o.startDate && String(o.startDate).trim() > todayStr) return false;
+  if (o.endDate && String(o.endDate).trim() < todayStr) return false;
+  return true;
+}
+
 export function renderOffers() {
   const L = (state.D.offers || [])
     .map((o, idx) => ({ o, idx }))
-    .filter(({ o }) => !o.x && o.t);
+    .filter(({ o }) => isOfferActiveNow(o));
   const s = $('offers');
   const navOffer = $('navOffers');
   clearInterval(state.OT);

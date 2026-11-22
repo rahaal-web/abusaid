@@ -451,6 +451,16 @@ function loadImgs() {
     }
   });
 
+  if (state.D.catMeta && typeof state.D.catMeta === 'object') {
+    Object.values(state.D.catMeta).forEach((m) => {
+      const k = m && m.imageId;
+      if (k && !state.IMGS[k] && !state.IMGQ[k] && !seen[k]) {
+        seen[k] = 1;
+        need.push(k);
+      }
+    });
+  }
+
   if (!need.length) return;
   let n = 0;
   let tm;
@@ -471,6 +481,7 @@ function loadImgs() {
         n++;
         clearTimeout(tm);
         tm = setTimeout(() => {
+          renderCategoriesShowcase();
           renderGrid();
           renderHeroSpotlight();
           renderOffers();
@@ -537,7 +548,10 @@ function sync() {
       state.D = o;
       state.CFG = o.cfg || state.CFG;
       state.P = o.p || state.P;
-      state.CATS = ['الكل'].concat(o.cats || []);
+      const enabledCats = (o.cats || []).filter(
+        (c) => !(o.catMeta && o.catMeta[c] && o.catMeta[c].disabled)
+      );
+      state.CATS = ['الكل'].concat(enabledCats);
       if (state.CATS.indexOf(state.cat) < 0) state.cat = 'الكل';
       cleanCart();
       saveCart();

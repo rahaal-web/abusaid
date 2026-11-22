@@ -1,127 +1,34 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><title>لوحة التحكم – أبو سعيد</title>
-<link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Cairo:wght@600;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700;800&family=IBM+Plex+Sans+Arabic:wght@500;600;700&family=JetBrains+Mono:wght@500;700&family=Lalezar&display=swap" rel="stylesheet">
+<script>
+(function(){try{var t=localStorage.getItem('abu_admin_theme');if(!t)t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();
+</script>
 <style>
-:root{--bg:#ffd93d;--paper:#fff8e1;--ink:#1b1b1b;--red:#ff4b3e;--blue:#2b6cff;--green:#17b26a;--mu:#5c5238;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1d1a12;--paper:#2a2518;--ink:#fff3cf;--mu:#c9bb8f}}
+:root{--bg:#f4f6fa;--surface:#ffffff;--surface-2:#f8fafc;--ink:#0f172a;--mu:#64748b;--border:#e2e8f0;--brand:#d97706;--brand-grad:linear-gradient(135deg,#f59e0b,#d97706);--red:#dc2626;--blue:#2563eb}
+:root[data-theme="dark"]{--bg:#0b0e14;--surface:#131722;--surface-2:#191f2d;--ink:#f1f5f9;--mu:#94a3b8;--border:#232c3f;--red:#f87171;--blue:#3b82f6}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none!important}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:Cairo,Tahoma,sans-serif;font-weight:600;max-width:560px;margin-inline:auto;padding-bottom:60px}
-button{font:inherit;color:inherit;cursor:pointer}
-input:not([type=checkbox]),select{width:100%;min-width:0;font:inherit;font-weight:600;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:12px;padding:9px 12px}
-label{display:block;font-size:13px;font-weight:800;margin:10px 0 4px}
-.login{max-width:380px;margin:12vh 16px 0;margin-inline:auto;background:var(--paper);border:3px solid var(--ink);border-radius:20px;padding:20px;box-shadow:5px 5px 0 var(--ink)}
-.login h3{font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:30px;margin:0}
-.err{color:var(--red);font-size:13px;font-weight:800;min-height:18px;margin-top:8px}
-.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);padding:10px 14px 8px;border-bottom:3px solid var(--ink)}
-.trow{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.trow b{font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:24px}
-.trow span{display:flex;gap:8px;align-items:center}
-.stt{font-size:12px;color:var(--mu);min-height:16px}
-.pubb{background:var(--green);color:#fff;border:3px solid var(--ink);border-radius:12px;padding:6px 14px;font-weight:800;font-size:15px;box-shadow:3px 3px 0 var(--ink)}
-.pubb.hot{background:var(--red);animation:pl 1.4s infinite}
-@keyframes pl{50%{transform:scale(1.05)}}
-.pubb:disabled{opacity:.5}
-.x{background:var(--ink);color:var(--bg);border:3px solid var(--ink);border-radius:50%;width:36px;height:36px;font-weight:800}
-.tb{display:flex;gap:6px;margin-top:6px}
-.tb button{flex:1;background:var(--paper);border:3px solid var(--ink);border-radius:12px;padding:6px 2px;font-weight:800;font-size:13px;white-space:nowrap}
-.tb button.on{background:var(--ink);color:var(--bg)}
-#qw{margin-top:8px}
-#qw input{padding:7px 12px}
-#v{padding:6px 14px}
-.sec{margin:16px 0}
-.sh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.sh b{font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:22px}
-.sh small{color:var(--mu);flex:1}
-.mini{background:var(--blue);color:#fff;border:3px solid var(--ink);border-radius:10px;padding:3px 12px;font-weight:800;font-size:13px;box-shadow:2px 2px 0 var(--ink)}
-.it{display:flex;align-items:center;gap:10px;background:var(--paper);border:3px solid var(--ink);border-radius:14px;padding:8px;margin-bottom:8px;box-shadow:3px 3px 0 var(--ink);cursor:pointer}
-.it.off{opacity:.55}
-.mb{width:42px;height:42px;border:3px solid var(--ink);border-radius:12px;display:grid;place-items:center;font-size:22px;flex:none}
-.tx{flex:1;min-width:0}.tx b{display:block;font-weight:800;font-size:15px}.tx small{color:var(--mu);font-size:12px}
-.pr{font-family:Lalezar,Cairo,sans-serif;font-size:20px;color:var(--red);text-align:center;line-height:1}.pr small{display:block;font:600 10px Cairo;color:var(--mu)}
-.sw{position:relative;margin:0;flex:none}.sw input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;z-index:2}
-.sw i{display:block;width:46px;height:26px;border:3px solid var(--ink);border-radius:99px;background:#bbb;position:relative;transition:.2s}
-.sw i::after{content:"";position:absolute;top:1px;inset-inline-start:2px;width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--ink);transition:.2s}
-.sw input:checked+i{background:var(--green)}.sw input:checked+i::after{inset-inline-start:22px}
-.emp{color:var(--mu);font-size:13px;text-align:center;margin:6px 0}
-.card2{background:var(--paper);border:3px solid var(--ink);border-radius:16px;padding:12px;margin:12px 0;box-shadow:4px 4px 0 var(--ink)}
-.hint{font-size:12px;color:var(--mu);margin:4px 0 0}.hint a{color:var(--blue);font-weight:800}
-.cr{display:flex;align-items:center;gap:6px;background:var(--paper);border:3px solid var(--ink);border-radius:14px;padding:8px;margin-bottom:8px}
-.cr small{color:var(--mu);white-space:nowrap;font-size:12px}
-.ar{display:flex;flex-direction:column;gap:2px}.ar button{background:transparent;border:2px solid var(--ink);border-radius:6px;font-size:10px;padding:0 6px;line-height:1.4}
-.del{background:var(--red);color:#fff;border:3px solid var(--ink);border-radius:12px;padding:6px 12px;font-weight:800}
-.ov{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55);display:none;align-items:flex-end}.ov.on{display:flex}
-.pn{width:100%;max-width:560px;margin-inline:auto;max-height:94%;overflow:auto;background:var(--paper);border:3px solid var(--ink);border-bottom:0;border-radius:24px 24px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px))}
-.pn h2{font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:26px;margin:0;display:flex;justify-content:space-between;align-items:center}
-.r2{display:flex;gap:8px;align-items:flex-end}.r2>div{flex:1}
-.sws{display:flex;gap:10px;flex-wrap:wrap}.swc{width:38px;height:38px;border-radius:50%;border:3px solid var(--ink);cursor:pointer}.swc.on{outline:4px solid var(--blue);outline-offset:2px}
-.ck{display:flex;align-items:center;gap:8px;margin-top:14px}.ck input{width:22px;height:22px}
-.big{flex:1;margin-top:16px;padding:11px;font-size:17px;border-radius:14px}
-.toast{position:fixed;inset-inline:16px;bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:60;background:var(--ink);color:var(--bg);border-radius:14px;padding:12px;text-align:center;font-weight:800;opacity:0;pointer-events:none;transition:opacity .3s}.toast.on{opacity:1}
-.cred{text-align:center;font-size:12.5px;color:var(--mu);margin:22px 0 6px}.cred b{color:var(--ink);font-weight:800}
-.mb{overflow:hidden}.mb img{width:100%;height:100%;object-fit:cover;display:block}
-.ip{display:flex;gap:12px;align-items:center}.ipv{width:80px;height:80px;border:3px solid var(--ink);border-radius:14px;background:#fff;display:grid;place-items:center;font-size:32px;flex:none;overflow:hidden}.ipv img{width:100%;height:100%;object-fit:cover}
-.ip .btns{display:flex;flex-direction:column;gap:8px;align-items:flex-start}.ip .pubb{margin:0;font-size:14px}
-textarea{width:100%;min-width:0;font:inherit;font-weight:600;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:12px;padding:9px 12px;resize:vertical}
-.vmic{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;height:50px;margin:14px 0 6px;padding:0 16px;background:#fff;color:#1b1b1b;border:3px solid var(--ink);border-radius:14px;box-shadow:3px 3px 0 var(--ink);font-weight:800;font-size:16px;transition:height .3s cubic-bezier(.34,1.56,.64,1),background .25s,color .25s,transform .3s cubic-bezier(.34,1.56,.64,1)}
-.vmic .vb{display:flex;align-items:center;gap:3px;height:28px;flex:none}
-.vmic .vb i{display:block;width:4px;border-radius:4px;background:var(--blue);transition:background .25s}
-.vmic .vb i:nth-child(1),.vmic .vb i:nth-child(5){height:9px}.vmic .vb i:nth-child(2),.vmic .vb i:nth-child(4){height:22px}.vmic .vb i:nth-child(3){height:15px}
-.vmic.rec{height:62px;transform:scale(1.03);background:var(--red);color:#fff;animation:vring 1.4s infinite}
-.vmic.rec .vb i{background:#fff;animation:vbar .8s ease-in-out infinite}
-.vmic.rec .vb i:nth-child(2){animation-delay:.1s}.vmic.rec .vb i:nth-child(3){animation-delay:.2s}.vmic.rec .vb i:nth-child(4){animation-delay:.3s}.vmic.rec .vb i:nth-child(5){animation-delay:.4s}
-@keyframes vbar{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1.5)}}
-@keyframes vring{0%{box-shadow:3px 3px 0 var(--ink),0 0 0 0 rgba(255,75,62,.55)}100%{box-shadow:3px 3px 0 var(--ink),0 0 0 14px rgba(255,75,62,0)}}
-.chm{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:8px 2px}
-.cm{max-width:88%;padding:8px 12px;border:3px solid var(--ink);border-radius:16px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
-.cm.u{align-self:flex-start;background:var(--blue);color:#fff}
-.cm.a{align-self:flex-end;background:#fff;color:#1b1b1b}
-.vmic.sm{height:44px;margin:8px 0 6px}.vmic.sm.rec{height:52px}
-input[type=range]{padding:0;border:0;height:30px;background:transparent;accent-color:var(--blue)}
-.tb{flex-wrap:wrap}
-.tb button{min-width:calc(33% - 6px);display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:6px 6px}
-.ubadge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border-radius:99px;background:var(--red);color:#fff;font-size:11px;font-weight:800;border:2px solid var(--ink)}
-.tb button.on .ubadge{border-color:var(--bg)}
-.ufil{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px}
-.fbtn{background:var(--paper);border:2px solid var(--ink);border-radius:10px;padding:5px 10px;font-size:12px;font-weight:800}
-.fbtn.on{background:var(--ink);color:var(--bg)}
-.ucard{background:var(--paper);border:3px solid var(--ink);border-radius:16px;padding:12px;margin-bottom:10px;box-shadow:3px 3px 0 var(--ink)}
-.uhead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
-.uname{display:block;font-size:16px;font-weight:800;margin-bottom:4px}
-.umeta{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--mu)}
-.stpill{flex:none;padding:4px 10px;border-radius:10px;border:2px solid var(--ink);font-size:11.5px;font-weight:800;white-space:nowrap}
-.st-Pending{background:#ffe58f;color:#5c3d00}
-.st-Approved{background:#c6f6d5;color:#0b5d34}
-.st-Rejected{background:#ffd1ce;color:#8a130b}
-.st-Suspended{background:#e2e8f0;color:#1e293b}
-.uacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:2px dashed rgba(0,0,0,.15)}
-.uact{border:2px solid var(--ink);border-radius:10px;padding:6px 10px;font-size:12.5px;font-weight:800;box-shadow:2px 2px 0 var(--ink)}
-.uact:disabled{opacity:.5;cursor:not-allowed}
-.uact-ok{background:var(--green);color:#fff}
-.uact-warn{background:#ff9f1c;color:#1b1b1b}
-.uact-del{background:var(--red);color:#fff}
-.nstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0}
-.nstat{background:var(--paper);border:3px solid var(--ink);border-radius:14px;padding:10px 8px;text-align:center;box-shadow:3px 3px 0 var(--ink)}
-.nstat b{display:block;font-family:Lalezar,Cairo,sans-serif;font-size:24px;line-height:1.1;color:var(--blue)}
-.nstat small{display:block;font-size:11.5px;color:var(--mu);margin-top:2px}
-.npv{display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap}
-.npv-box{width:76px;height:76px;border:3px solid var(--ink);border-radius:12px;background:#fff;display:grid;place-items:center;overflow:hidden;font-size:24px;flex:none}
-.npv-box img{width:100%;height:100%;object-fit:cover;display:block}
-.st-sent{background:#c6f6d5;color:#0b5d34}
-.st-partial{background:#ffe58f;color:#5c3d00}
-.st-failed{background:#ffd1ce;color:#8a130b}
-.st-no_subscribers{background:#e2e8f0;color:#1e293b}
-.nlog-img{width:100%;max-height:150px;object-fit:cover;border:2px solid var(--ink);border-radius:10px;margin-top:8px;display:block}
-.st-sent_whatsapp{background:#e0f2fe;color:#075985}
-.st-confirmed{background:#c6f6d5;color:#0b5d34}
-.st-completed{background:#bbf7d0;color:#14532d}
-.st-cancelled{background:#ffd1ce;color:#8a130b}
-.ord-items-box{margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.55);border:2px solid var(--ink);border-radius:12px;display:flex;flex-direction:column;gap:6px}
-.ord-line{display:flex;flex-direction:column;gap:3px;font-size:13px;padding-bottom:5px;border-bottom:1.5px dashed rgba(0,0,0,.15)}
-.ord-line:last-child{padding-bottom:0;border-bottom:0}
-.ord-line-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.ord-fl{display:flex;flex-wrap:wrap;gap:4px}
-.ord-fl span{background:var(--paper);border:1.5px solid var(--ink);border-radius:8px;padding:1px 7px;font-size:11.5px;font-weight:800}
+html,body{margin:0;padding:0;min-height:100%;background:var(--bg);color:var(--ink);font-family:'Cairo','IBM Plex Sans Arabic',Tahoma,sans-serif}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.login{width:100%;max-width:410px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px 24px;box-shadow:0 20px 45px -12px rgba(15,23,42,.14)}
+.login-brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.login-ico{width:44px;height:44px;border-radius:12px;background:var(--brand-grad);color:#fff;display:grid;place-items:center;font-size:20px;font-weight:800;flex:none}
+.login h3{font-size:20px;font-weight:800;margin:0;color:var(--ink)}
+.login-sub{font-size:12.5px;color:var(--mu);margin-top:2px}
+.login label{display:block;font-size:12.5px;font-weight:700;color:var(--ink);margin:12px 0 5px}
+.login input:not([type=checkbox]){width:100%;min-height:42px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);color:var(--ink);font:inherit;font-size:14px;outline:none}
+.login input:not([type=checkbox]):focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
+.login .ck{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;font-weight:600;color:var(--mu);cursor:pointer}
+.login .ck input{width:17px;height:17px;accent-color:var(--blue)}
+.login-btn{width:100%;min-height:44px;margin-top:16px;border:0;border-radius:11px;background:var(--brand-grad);color:#fff;font:inherit;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(217,119,6,.28);transition:filter .16s ease}
+.login-btn:hover:not(:disabled){filter:brightness(1.06)}
+.login-btn:disabled{opacity:.6;cursor:not-allowed}
+.err{color:var(--red);font-size:13px;font-weight:700;min-height:18px;margin-top:10px}
+.cred{text-align:center;font-size:12px;color:var(--mu);margin:18px 0 0;padding-top:14px;border-top:1px solid var(--border)}
+.cred b{color:var(--ink)}
 </style><!-- PWA: install support -->
 <script>
 (function(){
@@ -175,18 +82,114 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
 })();
 </script>
 </head><body>
-<form class="login" id="lf" method="post" action="/admin"><h3>🔧 لوحة التحكم</h3><div style="font-weight:800;color:var(--mu)">أبو سعيد</div><label>الإيميل</label><input id="lu" name="username" type="email" dir="ltr" autocomplete="username" required><label>كلمة السر</label><input id="lp" name="password" type="password" dir="ltr" autocomplete="current-password" required><label class="ck" style="margin-top:10px;font-size:13px;cursor:pointer"><input id="lrem" type="checkbox" checked><span>حفظ الجلسة وتذكر تسجيل الدخول</span></label><button class="pubb" id="lbtn" style="width:100%;margin-top:12px;padding:10px" type="submit">دخول</button><div class="err" id="le"></div><div class="cred">تصميم وتطوير <b>احمد رحال</b></div></form>
-<div id="app" hidden>
- <div class="top"><div class="trow"><b>🔧 أبو سعيد</b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
- <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="orders">📦 الطلبات <span class="ubadge" id="ordBadge" hidden>0</span></button><button data-t="u">👥 طلبات الحسابات <span class="ubadge" id="uBadge" hidden>0</span></button><button data-t="n">🔔 الإشعارات</button><button data-t="s">⚙️ الإعدادات</button></nav>
- <div id="qw" style="display:flex;gap:8px;align-items:center"><input id="q" placeholder="🔍 دوّر على صنف"><button class="pubb" id="smb" type="button" style="flex:none;padding:5px 12px;font-size:14px;font-family:inherit;letter-spacing:.3px;background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b">Rahal Ai</button></div></div>
- <div id="v"></div>
- <div class="cred">تصميم وتطوير <b>احمد رحال</b></div>
+<div class="login-wrap" id="lfWrap">
+  <form class="login" id="lf" method="post" action="/admin">
+    <div class="login-brand">
+      <div class="login-ico">أ</div>
+      <div>
+        <h3>لوحة إدارة أبو سعيد</h3>
+        <div class="login-sub">نظام إدارة المتجر والطلبات والإشعارات</div>
+      </div>
+    </div>
+    <label>البريد الإلكتروني</label>
+    <input id="lu" name="username" type="email" dir="ltr" autocomplete="username" placeholder="admin@example.com" required>
+    <label>كلمة المرور</label>
+    <input id="lp" name="password" type="password" dir="ltr" autocomplete="current-password" required>
+    <label class="ck">
+      <input id="lrem" type="checkbox" checked>
+      <span>حفظ الجلسة وتذكر تسجيل الدخول</span>
+    </label>
+    <button class="login-btn" id="lbtn" type="submit">دخول إلى لوحة الإدارة</button>
+    <div class="err" id="le"></div>
+    <div class="cred">تصميم وتطوير <b>احمد رحال</b></div>
+  </form>
 </div>
-<div class="ov" id="ov"></div><div class="ov" id="cov" style="z-index:55"></div><div class="toast" id="ts"></div>
+
+<div id="app" class="adm-shell" hidden>
+  <div class="adm-backdrop" id="sbBackdrop"></div>
+  <aside class="adm-sidebar" id="admSidebar" aria-label="القائمة الجانبية">
+    <div class="sb-brand">
+      <div class="sb-brand-id">
+        <div class="sb-logo" id="sbLogo">أ</div>
+        <div class="sb-brand-txt">
+          <strong id="sbStoreName">أبو سعيد</strong>
+          <small>نظام الإدارة المتكامل</small>
+        </div>
+      </div>
+      <button class="sb-collapse-btn" id="sbCollapseBtn" type="button" title="طي / توسيع القائمة" aria-label="طي أو توسيع القائمة">❮</button>
+    </div>
+
+    <nav class="sb-nav">
+      <div class="sb-group-lbl">الرئيسية</div>
+      <button type="button" class="sb-link on" data-t="dashboard"><span class="sb-ico">📊</span><span class="sb-link-txt">لوحة المعلومات</span></button>
+
+      <div class="sb-group-lbl">إدارة المتجر</div>
+      <button type="button" class="sb-link" data-t="p"><span class="sb-ico">📦</span><span class="sb-link-txt">الأصناف والأسعار</span></button>
+      <button type="button" class="sb-link" data-t="c"><span class="sb-ico">🗂</span><span class="sb-link-txt">الأقسام</span></button>
+      <button type="button" class="sb-link" data-t="o"><span class="sb-ico">🎁</span><span class="sb-link-txt">العروض الخاصة</span></button>
+      <button type="button" class="sb-link" data-t="content"><span class="sb-ico">📝</span><span class="sb-link-txt">محتوى الواجهة</span></button>
+      <button type="button" class="sb-link" data-t="media"><span class="sb-ico">🖼</span><span class="sb-link-txt">الصور والملفات</span></button>
+
+      <div class="sb-group-lbl">العملاء والتواصل</div>
+      <button type="button" class="sb-link" data-t="orders"><span class="sb-ico">🧾</span><span class="sb-link-txt">الطلبات</span><span class="sb-badge" id="ordBadge" hidden>0</span></button>
+      <button type="button" class="sb-link" data-t="u"><span class="sb-ico">👥</span><span class="sb-link-txt">المستخدمون والحسابات</span><span class="sb-badge" id="uBadge" hidden>0</span></button>
+      <button type="button" class="sb-link" data-t="n"><span class="sb-ico">🔔</span><span class="sb-link-txt">مركز الإشعارات</span></button>
+
+      <div class="sb-group-lbl">الذكاء والتقارير</div>
+      <button type="button" class="sb-link" data-t="ai"><span class="sb-ico">✨</span><span class="sb-link-txt" id="sbAiLbl">Rahal Ai</span></button>
+      <button type="button" class="sb-link" data-t="analytics"><span class="sb-ico">📈</span><span class="sb-link-txt">التقارير والإحصائيات</span></button>
+      <button type="button" class="sb-link" data-t="audit"><span class="sb-ico">📜</span><span class="sb-link-txt">سجل النشاطات</span></button>
+
+      <div class="sb-group-lbl">النظام</div>
+      <button type="button" class="sb-link" data-t="backups"><span class="sb-ico">💾</span><span class="sb-link-txt">النسخ الاحتياطي</span></button>
+      <button type="button" class="sb-link" data-t="s"><span class="sb-ico">⚙️</span><span class="sb-link-txt">إعدادات النظام</span></button>
+    </nav>
+
+    <div class="sb-foot">
+      <div class="sb-foot-meta">
+        <b id="sbAdminEmail">المدير</b>
+        <span>إدارة آمنة ومتزامنة</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="adm-main">
+    <header class="adm-topbar">
+      <div class="top-right">
+        <button class="mob-menu-btn" id="mobMenuBtn" type="button" aria-label="فتح القائمة">☰</button>
+        <div class="top-title-wrap">
+          <h1 class="top-title" id="pageTitle">لوحة المعلومات</h1>
+          <div class="top-sub" id="st">متزامن مع المتجر</div>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <button class="btn btn-brand" id="smb" type="button">✨ <span id="smbTxt">Rahal Ai</span></button>
+        <button class="btn btn-icon" id="admRefreshBtn" type="button" title="تحديث البيانات" aria-label="تحديث البيانات">🔄</button>
+        <button class="btn btn-icon" id="admThemeBtn" type="button" title="تبديل المظهر الفاتح / الداكن" aria-label="تبديل المظهر">🌙</button>
+        <button class="pubb" id="pub" type="button">🚀 نشر التعديلات</button>
+        <span class="adm-user-pill" id="admEmailPill" hidden><span class="adm-user-dot"></span><span id="admEmailText"></span></span>
+        <button class="btn btn-danger btn-sm" id="lo" type="button" title="تسجيل الخروج">خروج</button>
+      </div>
+    </header>
+
+    <main class="adm-content">
+      <div id="qw" hidden><input id="q" type="search" placeholder="🔍 ابحث سريعاً"></div>
+      <div id="v"></div>
+    </main>
+
+    <footer class="adm-footer">تصميم وتطوير <b>احمد رحال</b> · لوحة إدارة متجر أبو سعيد</footer>
+  </div>
+</div>
+
+<div class="ov" id="ov"></div>
+<div class="ov" id="cov" style="z-index:75"></div>
+<div class="toast" id="ts"></div>
+
 <script>
 (function () {
   var lf = document.getElementById('lf');
+  var lfWrap = document.getElementById('lfWrap');
   var lu = document.getElementById('lu');
   var lp = document.getElementById('lp');
   var lrem = document.getElementById('lrem');
@@ -199,32 +202,62 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
     localStorage.removeItem('abu_gk');
   } catch (z) {}
 
+  function ensureAdminCss() {
+    return new Promise(function (resolve, reject) {
+      var existing = document.getElementById('admStylesheet');
+      if (existing) {
+        resolve();
+        return;
+      }
+      var lk = document.createElement('link');
+      lk.id = 'admStylesheet';
+      lk.rel = 'stylesheet';
+      lk.href = '/admin.css?v=' + Date.now();
+      lk.onload = function () { resolve(); };
+      lk.onerror = function () {
+        if (lk.parentNode) lk.parentNode.removeChild(lk);
+        reject(new Error('CSS_LOAD_ERR'));
+      };
+      document.head.appendChild(lk);
+    });
+  }
+
   function loadAdminScript() {
     if (loaded) return;
     loaded = true;
-    var srcUrl = '/admin-app.js?v=' + Date.now();
-    var s = document.createElement('script');
-    s.src = srcUrl;
-    s.onerror = async function () {
-      loaded = false;
-      var msg = 'تعذر تحميل ملفات لوحة التحكم، حاول مرة أخرى.';
-      try {
-        var diagRes = await fetch('/admin-app.js?v=' + Date.now(), {
-          credentials: 'same-origin',
-        });
-        if (!diagRes.ok) {
-          var diagData = await diagRes.json().catch(function () { return {}; });
-          if (diagData && diagData.error) {
-            msg = diagData.error + ' (' + diagRes.status + ')';
-          } else {
-            msg = 'تعذر تحميل ملفات لوحة التحكم (' + diagRes.status + ')، حاول مرة أخرى.';
-          }
-        }
-      } catch (z) {}
-      le.textContent = msg;
-      lf.hidden = false;
-    };
-    document.body.appendChild(s);
+    ensureAdminCss()
+      .then(function () {
+        var srcUrl = '/admin-app.js?v=' + Date.now();
+        var s = document.createElement('script');
+        s.src = srcUrl;
+        s.onerror = async function () {
+          loaded = false;
+          var msg = 'تعذر تحميل ملفات لوحة التحكم، حاول مرة أخرى.';
+          try {
+            var diagRes = await fetch('/admin-app.js?v=' + Date.now(), {
+              credentials: 'same-origin',
+            });
+            if (!diagRes.ok) {
+              var diagData = await diagRes.json().catch(function () { return {}; });
+              if (diagData && diagData.error) {
+                msg = diagData.error + ' (' + diagRes.status + ')';
+              } else {
+                msg = 'تعذر تحميل ملفات لوحة التحكم (' + diagRes.status + ')، حاول مرة أخرى.';
+              }
+            }
+          } catch (z) {}
+          le.textContent = msg;
+          if (lfWrap) lfWrap.hidden = false;
+          lf.hidden = false;
+        };
+        document.body.appendChild(s);
+      })
+      .catch(function () {
+        loaded = false;
+        le.textContent = 'تعذر تحميل تنسيقات لوحة التحكم، حاول مرة أخرى.';
+        if (lfWrap) lfWrap.hidden = false;
+        lf.hidden = false;
+      });
   }
 
   lf.onsubmit = async function (e) {
@@ -278,7 +311,7 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
       le.textContent = 'تعذر الاتصال بالخادم، حاول مرة أخرى.';
     } finally {
       lbtn.disabled = false;
-      lbtn.textContent = 'دخول';
+      lbtn.textContent = 'دخول إلى لوحة الإدارة';
     }
   };
 

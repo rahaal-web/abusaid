@@ -79,7 +79,9 @@ function buildGroupedItems(qq, applyCatAndFilter) {
   const seen = {};
   const list = [];
 
+  const catMeta = (state.D && state.D.catMeta) || {};
   state.P.forEach((p0) => {
+    if (catMeta[p0[1]] && catMeta[p0[1]].disabled) return;
     if (qq) {
       const hay = rn(
         p0[0] +
@@ -268,6 +270,8 @@ export function renderCategoriesShowcase() {
 
   wrap.innerHTML = state.CATS.map((c) => {
     const meta = getCatMeta(c);
+    const customCatMeta = (state.D && state.D.catMeta && state.D.catMeta[c]) || null;
+    const catImg = customCatMeta && customCatMeta.imageId && state.IMGS[customCatMeta.imageId];
     const count = c === 'الكل' ? totalUnique : counts[c] || 0;
     const isActive = c === state.cat && !state.searchQuery;
     return (
@@ -279,7 +283,9 @@ export function renderCategoriesShowcase() {
       '<span class="cat-ico" style="background:' +
       meta.bg +
       '" aria-hidden="true">' +
-      meta.icon +
+      (catImg
+        ? '<img src="' + catImg + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">'
+        : meta.icon) +
       '</span>' +
       '<span class="cat-txt">' +
       '<b>' +

@@ -9,12 +9,16 @@ import {
 } from './lib/cryptoWeb.js';
 import {
   callGemini,
+  collectReferencedAssetIds,
+  deleteImageAsset as coreDeleteImageAsset,
   fetchImageAsset,
   fetchRawCatalog,
   firebaseSignIn,
   getServiceAccountFromEnv,
   getStoreGeminiKey,
+  listImageKeys as coreListImageKeys,
   lookupFirebaseIdToken,
+  pingCatalogRtdb as corePingCatalogRtdb,
   publishCatalogToFirebase,
   refreshFirebaseToken,
   resolveFirebaseWebConfig,
@@ -25,6 +29,7 @@ import {
   computePushOverview,
   detectDeviceLabel,
   executeAdminPushBroadcast,
+  listPushDevices,
   resolveVapidEnv,
   validatePushSubscriptionInput,
 } from './lib/pushService.js';
@@ -379,6 +384,82 @@ function handleRtdbConfigError(err) {
     );
   }
   return null;
+}
+
+function maskCatalogCfgForAdmin(dataObj, env = {}) {
+  const clone = JSON.parse(JSON.stringify(dataObj || {}));
+  clone.offers = Array.isArray(clone.offers) ? clone.offers : [];
+  clone.cats = Array.isArray(clone.cats) ? clone.cats : [];
+  clone.p = Array.isArray(clone.p) ? clone.p : [];
+  if (!clone.cfg || typeof clone.cfg !== 'object') clone.cfg = {};
+  const rawKey = clone.cfg.gk ? String(clone.cfg.gk).trim() : '';
+  const envKey = String(env.GEMINI_API_KEY || '').trim();
+  delete clone.cfg.gk;
+  clone.cfg.hasGk = Boolean(rawKey || envKey);
+  clone.cfg.gkFromEnv = Boolean(!rawKey && envKey);
+  clone.cfg.gkLast4 = rawKey ? rawKey.slice(-4) : '';
+  return clone;
+}
+
+function sanitizeBackupStats(dataObj = {}) {
+  const used = collectReferencedAssetIds(dataObj);
+  return {
+    products: Array.isArray(dataObj.p) ? dataObj.p.length : 0,
+    categories: Array.isArray(dataObj.cats) ? dataObj.cats.length : 0,
+    offers: Array.isArray(dataObj.offers) ? dataObj.offers.length : 0,
+    images: used.size,
+  };
+}
+
+function buildAssetUsageMap(data = {}) {
+  const usage = {};
+  const addRef = (id, ref) => {
+    if (!id) return;
+    if (!usage[id]) usage[id] = [];
+    usage[id].push(ref);
+  };
+  (data.p || []).forEach((p, idx) => {
+    if (p && p[8]) addRef(p[8], { type: 'product', label: p[0] || `صنف #${idx + 1}`, index: idx });
+  });
+  (data.offers || []).forEach((o, idx) => {
+    if (o && o.i) addRef(o.i, { type: 'offer', label: o.t || `عرض #${idx + 1}`, index: idx });
+  });
+  if (data.catMeta && typeof data.catMeta === 'object') {
+    Object.entries(data.catMeta).forEach(([catName, meta]) => {
+      if (meta && meta.imageId) addRef(meta.imageId, { type: 'category', label: catName });
+    });
+  }
+  if (data.cfg?.logo) addRef(data.cfg.logo, { type: 'logo', label: 'شعار المتجر' });
+  if (data.cfg?.fontBodyId) addRef(data.cfg.fontBodyId, { type: 'font', label: 'خط المتجر الأساسي' });
+  if (data.cfg?.fontHeadId) addRef(data.cfg.fontHeadId, { type: 'font', label: 'خط العناوين' });
+  return usage;
+}
+
+function inspectAssetPayload(id, dataUrl) {
+  const raw = String(dataUrl || '');
+  const mimeMatch = raw.match(/^data:([^;,]+)[;,]/i);
+  const mime = mimeMatch
+    ? mimeMatch[1].toLowerCase()
+    : raw.startsWith('http')
+    ? 'external/url'
+    : 'application/octet-stream';
+  const commaIdx = raw.indexOf(',');
+  const b64Len = commaIdx >= 0 ? raw.length - commaIdx - 1 : raw.length;
+  const sizeBytes =
+    commaIdx >= 0 && raw.slice(0, commaIdx).includes('base64')
+      ? Math.floor((b64Len * 3) / 4)
+      : raw.length;
+  const isFont = mime.includes('font') || String(id).startsWith('fnt_');
+  return { mime, sizeBytes, isFont };
+}
+
+function safeAuditLog(store, entry, idToken = '') {
+  try {
+    const p = store.addAuditLog(entry, { adminIdToken: idToken || '' });
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch {
+    // non-fatal audit log
+  }
 }
 
 export default {
@@ -991,6 +1072,18 @@ export default {
         });
         const rememberMe = body.rememberMe !== false;
         const cookieVal = encodeAdminCookieToken(fb.idToken, fb.refreshToken);
+        safeAuditLog(
+          store,
+          {
+            action: 'admin_login',
+            actorEmail: fb.email,
+            entityType: 'system',
+            entityId: fb.uid || fb.email,
+            entityLabel: fb.email,
+            details: 'تسجيل دخول ناجح إلى لوحة التحكم',
+          },
+          fb.idToken
+        );
         return jsonResponse(
           { ok: true, email: fb.email },
           200,
@@ -1020,13 +1113,27 @@ export default {
       if (!admin) {
         return jsonResponse({ authenticated: false }, 200, setCookies);
       }
-      return jsonResponse({ authenticated: true, email: admin.email }, 200, setCookies);
+      return jsonResponse({ authenticated: true, email: admin.email, uid: admin.uid || '' }, 200, setCookies);
     }
 
     if (
       pathname === '/admin-app.js' ||
+      pathname === '/admin.css' ||
       pathname.startsWith('/api/admin/')
     ) {
+      if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+        const originHdr = req.headers.get('origin');
+        if (originHdr) {
+          try {
+            if (new URL(originHdr).host !== url.host) {
+              return jsonResponse({ error: 'طلب غير مصرح به من مصدر خارجي.' }, 403);
+            }
+          } catch {
+            return jsonResponse({ error: 'مصدر الطلب غير صالح.' }, 403);
+          }
+        }
+      }
+
       const { admin, setCookies } = await resolveAdminSession(req, url, env, fbCfg);
       if (!admin) {
         return jsonResponse(
@@ -1046,6 +1153,13 @@ export default {
         });
       }
 
+      if (method === 'GET' && pathname === '/admin.css') {
+        return serveAsset(env, req, '/protected/admin.css', {
+          noStore: true,
+          setCookies,
+        });
+      }
+
       if (method === 'GET' && pathname === '/api/admin/bootstrap') {
         try {
           const raw = await fetchRawCatalog({
@@ -1054,18 +1168,8 @@ export default {
             dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
             serviceAccountJson: getServiceAccountFromEnv(env),
           });
-          const data = JSON.parse(JSON.stringify(raw.data || {}));
-          data.offers = data.offers || [];
-          const keys = new Set();
-          (data.p || []).forEach((p) => {
-            if (p[8]) keys.add(p[8]);
-          });
-          (data.offers || []).forEach((o) => {
-            if (o.i) keys.add(o.i);
-          });
-          if (data.cfg?.logo) keys.add(data.cfg.logo);
-          if (data.cfg?.fontBodyId) keys.add(data.cfg.fontBodyId);
-          if (data.cfg?.fontHeadId) keys.add(data.cfg.fontHeadId);
+          const data = maskCatalogCfgForAdmin(raw.data || {}, env);
+          const keys = collectReferencedAssetIds(data);
 
           const images = {};
           await Promise.all(
@@ -1092,19 +1196,60 @@ export default {
 
       if (method === 'POST' && pathname === '/api/admin/publish') {
         const body = (await readJsonBody(req)) || {};
-        const data = body.data;
+        const incomingData = body.data;
         const pendingImages = body.pendingImages || {};
-        if (!data || typeof data !== 'object' || !Array.isArray(data.p)) {
+        const auditSummary = String(body.auditSummary || '').trim().slice(0, 400);
+        if (!incomingData || typeof incomingData !== 'object' || !Array.isArray(incomingData.p)) {
           return jsonResponse({ error: 'بيانات المتجر غير صالحة.' }, 400, setCookies);
         }
         try {
+          const data = JSON.parse(JSON.stringify(incomingData));
+          if (!data.cfg || typeof data.cfg !== 'object') data.cfg = {};
+
+          const existingRaw = await fetchRawCatalog({
+            dbHost,
+            force: true,
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
+          }).catch(() => null);
+          const existingGk = existingRaw?.data?.cfg?.gk ? String(existingRaw.data.cfg.gk).trim() : '';
+
+          if (data.cfg.clearGk === true) {
+            delete data.cfg.gk;
+          } else if (typeof data.cfg.newGk === 'string' && data.cfg.newGk.trim()) {
+            data.cfg.gk = data.cfg.newGk.trim();
+          } else if (!data.cfg.gk && existingGk) {
+            data.cfg.gk = existingGk;
+          }
+
+          delete data.cfg.hasGk;
+          delete data.cfg.gkFromEnv;
+          delete data.cfg.gkLast4;
+          delete data.cfg.newGk;
+          delete data.cfg.clearGk;
+
+          data.cfg.lastPublishedAt = new Date().toISOString();
+          data.cfg.lastPublishedBy = admin.email;
+
           const ts = await publishCatalogToFirebase({
             dbHost,
             idToken: admin.idToken,
             dataObj: data,
             pendingImages,
           });
-          return jsonResponse({ ok: true, ts }, 200, setCookies);
+          safeAuditLog(
+            store,
+            {
+              action: 'catalog_publish',
+              actorEmail: admin.email,
+              entityType: 'catalog',
+              entityId: String(ts),
+              entityLabel: `نشر الكتالوج (${data.p.length} صنف / ${(data.offers || []).length} عرض)`,
+              details: auditSummary || 'نشر تعديلات المتجر والأقسام والعروض',
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true, ts, data: maskCatalogCfgForAdmin(data, env) }, 200, setCookies);
         } catch (err) {
           if (err?.status === 401) {
             return jsonResponse(
@@ -1205,6 +1350,18 @@ export default {
           if (!updated) {
             return jsonResponse({ error: 'المستخدم غير موجود.' }, 404, setCookies);
           }
+          safeAuditLog(
+            store,
+            {
+              action: `user_${action}`,
+              actorEmail: admin.email,
+              entityType: 'user',
+              entityId: String(updated.id),
+              entityLabel: updated.fullName || updated.phone,
+              details: reason ? `${action}: ${reason}` : `تحديث حالة المستخدم (${action})`,
+            },
+            admin.idToken
+          );
           return jsonResponse(
             { ok: true, user: store.sanitizeUser(updated) },
             200,
@@ -1227,6 +1384,18 @@ export default {
           if (!ok) {
             return jsonResponse({ error: 'المستخدم غير موجود.' }, 404, setCookies);
           }
+          safeAuditLog(
+            store,
+            {
+              action: 'user_delete',
+              actorEmail: admin.email,
+              entityType: 'user',
+              entityId: uid,
+              entityLabel: `مستخدم #${uid}`,
+              details: 'حذف حساب عميل من النظام',
+            },
+            admin.idToken
+          );
           return jsonResponse({ ok: true }, 200, setCookies);
         } catch (err) {
           const cfgErr = handleRtdbConfigError(err);
@@ -1273,6 +1442,18 @@ export default {
           if (!updated) {
             return jsonResponse({ error: 'الطلب غير موجود.' }, 404, setCookies);
           }
+          safeAuditLog(
+            store,
+            {
+              action: 'order_status_change',
+              actorEmail: admin.email,
+              entityType: 'order',
+              entityId: String(updated.id),
+              entityLabel: updated.userName || updated.shopName || updated.id,
+              details: `تغيير حالة الطلب إلى ${status}`,
+            },
+            admin.idToken
+          );
           return jsonResponse({ ok: true, order: updated }, 200, setCookies);
         } catch (err) {
           const cfgErr = handleRtdbConfigError(err);
@@ -1297,6 +1478,50 @@ export default {
         }
       }
 
+      if (method === 'GET' && pathname === '/api/admin/push/devices') {
+        try {
+          const devices = await listPushDevices({
+            store,
+            adminIdToken: admin.idToken,
+          });
+          return jsonResponse({ devices }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر تحميل قائمة الأجهزة المشتركة.' }, 502, setCookies);
+        }
+      }
+
+      const pushDeviceDelMatch = pathname.match(/^\/api\/admin\/push\/devices\/([^/]+)$/);
+      if (method === 'DELETE' && pushDeviceDelMatch) {
+        const devId = decodeURIComponent(pushDeviceDelMatch[1]);
+        try {
+          const ok = await store.deletePushSubscriptionById(devId, {
+            adminIdToken: admin.idToken,
+          });
+          if (!ok) {
+            return jsonResponse({ error: 'الجهاز غير موجود.' }, 404, setCookies);
+          }
+          safeAuditLog(
+            store,
+            {
+              action: 'push_device_remove',
+              actorEmail: admin.email,
+              entityType: 'push',
+              entityId: devId,
+              entityLabel: `جهاز #${devId}`,
+              details: 'إزالة اشتراك جهاز من مركز الإشعارات',
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر إزالة الجهاز.' }, 502, setCookies);
+        }
+      }
+
       if (method === 'POST' && pathname === '/api/admin/push/send') {
         const body = (await readJsonBody(req)) || {};
         const vapid = resolveVapidEnv(env);
@@ -1309,6 +1534,18 @@ export default {
             adminIdToken: admin.idToken,
             body,
           });
+          safeAuditLog(
+            store,
+            {
+              action: 'push_broadcast',
+              actorEmail: admin.email,
+              entityType: 'push',
+              entityId: String(result?.log?.id || ''),
+              entityLabel: String(body?.title || '').slice(0, 80),
+              details: `إرسال إشعار (${result.sentCount} نجح / ${result.failedCount} فشل / ${result.removedCount} أزيل)`,
+            },
+            admin.idToken
+          );
           return jsonResponse(result, 200, setCookies);
         } catch (err) {
           const cfgErr = handleRtdbConfigError(err);
@@ -1321,6 +1558,382 @@ export default {
             err?.status || 502,
             setCookies
           );
+        }
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/health') {
+        const vapid = resolveVapidEnv(env);
+        const catalogCheck = await corePingCatalogRtdb({
+          dbHost,
+          dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+          serviceAccountJson: getServiceAccountFromEnv(env),
+        }).catch((e) => ({ ok: false, error: e?.message || 'error' }));
+        let authDbCheck = { ok: false, mode: 'rtdb' };
+        try {
+          const r = await store.pingRtdb({ adminIdToken: admin.idToken });
+          authDbCheck = { ok: Boolean(r?.ok), mode: 'rtdb', latencyMs: r?.latencyMs || 0 };
+        } catch (e) {
+          authDbCheck = { ok: false, mode: 'rtdb', error: e?.code || e?.message || 'error' };
+        }
+        const aiKey = await getStoreGeminiKey({
+          dbHost,
+          envGeminiKey: env.GEMINI_API_KEY || '',
+          dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+          serviceAccountJson: getServiceAccountFromEnv(env),
+        }).catch(() => '');
+        return jsonResponse(
+          {
+            ok: Boolean(catalogCheck?.ok && authDbCheck?.ok),
+            checkedAt: new Date().toISOString(),
+            catalogRtdb: catalogCheck,
+            authDatabase: authDbCheck,
+            vapid: { configured: Boolean(vapid.configured), reason: vapid.reason || '' },
+            ai: { configured: Boolean(aiKey), source: aiKey ? 'ready' : 'missing' },
+          },
+          200,
+          setCookies
+        );
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/audit-logs') {
+        const limit = Number(url.searchParams.get('limit')) || 150;
+        const entityType = String(url.searchParams.get('entityType') || '').trim();
+        const entityId = String(url.searchParams.get('entityId') || '').trim();
+        try {
+          const logs = await store.listAuditLogs(
+            { limit, entityType, entityId },
+            { adminIdToken: admin.idToken }
+          );
+          return jsonResponse({ logs }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر تحميل سجل النشاطات.' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/audit-logs') {
+        const body = (await readJsonBody(req)) || {};
+        const action = String(body.action || '').trim();
+        if (!action) return jsonResponse({ error: 'نوع الحدث مطلوب.' }, 400, setCookies);
+        try {
+          const log = await store.addAuditLog(
+            {
+              action,
+              actorEmail: admin.email,
+              entityType: String(body.entityType || 'system'),
+              entityId: String(body.entityId || ''),
+              entityLabel: String(body.entityLabel || ''),
+              details: String(body.details || ''),
+            },
+            { adminIdToken: admin.idToken }
+          );
+          return jsonResponse({ ok: true, log }, 201, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر حفظ سجل النشاط.' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/media') {
+        try {
+          const raw = await fetchRawCatalog({
+            dbHost,
+            force: true,
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
+          });
+          const data = raw.data || {};
+          const usageMap = buildAssetUsageMap(data);
+          const rtdbKeys = await coreListImageKeys({
+            dbHost,
+            idToken: admin.idToken,
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
+          }).catch(() => []);
+          const allKeys = [...new Set([...Object.keys(usageMap), ...rtdbKeys])];
+          const items = [];
+          const BATCH = 12;
+          for (let i = 0; i < allKeys.length; i += BATCH) {
+            const chunk = allKeys.slice(i, i + BATCH);
+            const loaded = await Promise.all(
+              chunk.map(async (id) => {
+                const dataUrl = await fetchImageAsset({
+                  dbHost,
+                  id,
+                  dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+                  serviceAccountJson: getServiceAccountFromEnv(env),
+                }).catch(() => null);
+                if (!dataUrl) return null;
+                const info = inspectAssetPayload(id, dataUrl);
+                const usedBy = usageMap[id] || [];
+                return {
+                  id,
+                  dataUrl,
+                  mime: info.mime,
+                  sizeBytes: info.sizeBytes,
+                  isFont: info.isFont,
+                  usedBy,
+                  unused: usedBy.length === 0,
+                };
+              })
+            );
+            loaded.forEach((x) => {
+              if (x) items.push(x);
+            });
+          }
+          return jsonResponse({ items, total: items.length }, 200, setCookies);
+        } catch {
+          return jsonResponse({ error: 'تعذر جلب مركز الملفات والصور.' }, 502, setCookies);
+        }
+      }
+
+      const mediaDelMatch = pathname.match(/^\/api\/admin\/media\/([^/]+)$/);
+      if (method === 'DELETE' && mediaDelMatch) {
+        const assetId = decodeURIComponent(mediaDelMatch[1]);
+        if (!assetId || !/^[a-zA-Z0-9_-]+$/.test(assetId)) {
+          return jsonResponse({ error: 'معرف الملف غير صالح.' }, 400, setCookies);
+        }
+        try {
+          const raw = await fetchRawCatalog({
+            dbHost,
+            force: true,
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
+          });
+          const used = collectReferencedAssetIds(raw?.data || {});
+          if (used.has(assetId)) {
+            return jsonResponse(
+              { error: 'لا يمكن حذف هذا الملف لأنه مرتبط حالياً بصنف أو قسم أو عرض أو شعار.' },
+              409,
+              setCookies
+            );
+          }
+          await coreDeleteImageAsset({ dbHost, idToken: admin.idToken, id: assetId });
+          safeAuditLog(
+            store,
+            {
+              action: 'media_delete',
+              actorEmail: admin.email,
+              entityType: 'media',
+              entityId: assetId,
+              entityLabel: assetId,
+              details: 'حذف ملف غير مستخدم من مركز الصور والملفات',
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true }, 200, setCookies);
+        } catch (err) {
+          return jsonResponse(
+            { error: err?.message || 'تعذر حذف الملف.' },
+            err?.status || 502,
+            setCookies
+          );
+        }
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/backups') {
+        try {
+          const backups = await store.listBackups(40, { adminIdToken: admin.idToken });
+          return jsonResponse({ backups }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر تحميل النسخ الاحتياطية.' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/backups') {
+        const body = (await readJsonBody(req)) || {};
+        const label = String(body.label || '').trim() || `نسخة يدوية ${new Date().toLocaleDateString('ar-EG')}`;
+        try {
+          const raw = await fetchRawCatalog({
+            dbHost,
+            force: true,
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
+          });
+          const cleanData = maskCatalogCfgForAdmin(raw?.data || {}, env);
+          const stats = sanitizeBackupStats(cleanData);
+          const backup = await store.createBackup(
+            {
+              label,
+              actorEmail: admin.email,
+              triggerType: 'manual',
+              stats,
+              payload: { ts: raw?.ts || Date.now(), data: cleanData },
+            },
+            { adminIdToken: admin.idToken }
+          );
+          safeAuditLog(
+            store,
+            {
+              action: 'backup_create',
+              actorEmail: admin.email,
+              entityType: 'backup',
+              entityId: backup.id,
+              entityLabel: backup.label,
+              details: `إنشاء نسخة احتياطية (${stats.products} صنف / ${stats.offers} عرض)`,
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true, backup }, 201, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر إنشاء النسخة الاحتياطية.' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/backups/import') {
+        const body = (await readJsonBody(req)) || {};
+        const incoming = body?.payload?.data || body?.data;
+        const label = String(body?.label || 'استيراد ملف نسخة احتياطية').trim().slice(0, 140);
+        if (
+          !incoming ||
+          typeof incoming !== 'object' ||
+          !Array.isArray(incoming.p) ||
+          !Array.isArray(incoming.cats) ||
+          typeof incoming.cfg !== 'object'
+        ) {
+          return jsonResponse(
+            { error: 'ملف النسخة الاحتياطية غير صالح أو ينقصه البيانات الأساسية.' },
+            400,
+            setCookies
+          );
+        }
+        try {
+          const currentRaw = await fetchRawCatalog({
+            dbHost,
+            force: true,
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
+          }).catch(() => null);
+          if (currentRaw?.data && Array.isArray(currentRaw.data.p)) {
+            const safeCurrent = maskCatalogCfgForAdmin(currentRaw.data, env);
+            await store
+              .createBackup(
+                {
+                  label: 'حماية تلقائية قبل استيراد ملف خارجي',
+                  actorEmail: admin.email,
+                  triggerType: 'pre_restore',
+                  stats: sanitizeBackupStats(safeCurrent),
+                  payload: { ts: currentRaw.ts || Date.now(), data: safeCurrent },
+                },
+                { adminIdToken: admin.idToken }
+              )
+              .catch(() => {});
+          }
+          const restoredData = JSON.parse(JSON.stringify(incoming));
+          const existingGk = currentRaw?.data?.cfg?.gk ? String(currentRaw.data.cfg.gk).trim() : '';
+          if (!restoredData.cfg.gk && existingGk) restoredData.cfg.gk = existingGk;
+          delete restoredData.cfg.hasGk;
+          delete restoredData.cfg.gkFromEnv;
+          delete restoredData.cfg.gkLast4;
+          delete restoredData.cfg.newGk;
+          delete restoredData.cfg.clearGk;
+          restoredData.cfg.lastPublishedAt = new Date().toISOString();
+          restoredData.cfg.lastPublishedBy = admin.email;
+          const ts = await publishCatalogToFirebase({
+            dbHost,
+            idToken: admin.idToken,
+            dataObj: restoredData,
+            pendingImages: {},
+          });
+          safeAuditLog(
+            store,
+            {
+              action: 'backup_import_restore',
+              actorEmail: admin.email,
+              entityType: 'backup',
+              entityId: String(ts),
+              entityLabel: label,
+              details: 'استيراد واسترجاع نسخة احتياطية من ملف JSON',
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true, ts, data: maskCatalogCfgForAdmin(restoredData, env) }, 200, setCookies);
+        } catch (err) {
+          return jsonResponse({ error: err?.message || 'تعذر استيراد النسخة الاحتياطية.' }, 502, setCookies);
+        }
+      }
+
+      const backupRestoreMatch = pathname.match(/^\/api\/admin\/backups\/([^/]+)\/restore$/);
+      if (method === 'POST' && backupRestoreMatch) {
+        const bakId = decodeURIComponent(backupRestoreMatch[1]);
+        try {
+          const backup = await store.getBackupById(bakId, { adminIdToken: admin.idToken });
+          if (!backup || !backup.payload?.data || !Array.isArray(backup.payload.data.p)) {
+            return jsonResponse({ error: 'النسخة الاحتياطية غير صالحة أو غير موجودة.' }, 404, setCookies);
+          }
+          const currentRaw = await fetchRawCatalog({
+            dbHost,
+            force: true,
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
+          }).catch(() => null);
+          if (currentRaw?.data && Array.isArray(currentRaw.data.p)) {
+            const safeCurrent = maskCatalogCfgForAdmin(currentRaw.data, env);
+            await store
+              .createBackup(
+                {
+                  label: `حماية تلقائية قبل استرجاع (${backup.label})`,
+                  actorEmail: admin.email,
+                  triggerType: 'pre_restore',
+                  stats: sanitizeBackupStats(safeCurrent),
+                  payload: { ts: currentRaw.ts || Date.now(), data: safeCurrent },
+                },
+                { adminIdToken: admin.idToken }
+              )
+              .catch(() => {});
+          }
+          const restoredData = JSON.parse(JSON.stringify(backup.payload.data));
+          if (!restoredData.cfg || typeof restoredData.cfg !== 'object') restoredData.cfg = {};
+          const existingGk = currentRaw?.data?.cfg?.gk ? String(currentRaw.data.cfg.gk).trim() : '';
+          if (!restoredData.cfg.gk && existingGk) restoredData.cfg.gk = existingGk;
+          delete restoredData.cfg.hasGk;
+          delete restoredData.cfg.gkFromEnv;
+          delete restoredData.cfg.gkLast4;
+          delete restoredData.cfg.newGk;
+          delete restoredData.cfg.clearGk;
+          restoredData.cfg.lastPublishedAt = new Date().toISOString();
+          restoredData.cfg.lastPublishedBy = admin.email;
+          const ts = await publishCatalogToFirebase({
+            dbHost,
+            idToken: admin.idToken,
+            dataObj: restoredData,
+            pendingImages: {},
+          });
+          safeAuditLog(
+            store,
+            {
+              action: 'backup_restore',
+              actorEmail: admin.email,
+              entityType: 'backup',
+              entityId: backup.id,
+              entityLabel: backup.label,
+              details: 'استعادة الكتالوج من نسخة احتياطية محفوظة',
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true, ts, data: maskCatalogCfgForAdmin(restoredData, env) }, 200, setCookies);
+        } catch (err) {
+          return jsonResponse({ error: err?.message || 'تعذر استرجاع النسخة الاحتياطية.' }, 502, setCookies);
+        }
+      }
+
+      const backupGetMatch = pathname.match(/^\/api\/admin\/backups\/([^/]+)$/);
+      if (method === 'GET' && backupGetMatch) {
+        const bakId = decodeURIComponent(backupGetMatch[1]);
+        try {
+          const backup = await store.getBackupById(bakId, { adminIdToken: admin.idToken });
+          if (!backup) return jsonResponse({ error: 'النسخة الاحتياطية غير موجودة.' }, 404, setCookies);
+          return jsonResponse({ backup }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر جلب النسخة الاحتياطية.' }, 502, setCookies);
         }
       }
 

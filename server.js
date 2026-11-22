@@ -4,10 +4,14 @@ import { fileURLToPath } from 'node:url';
 import * as sqliteStore from './lib/db.js';
 import {
   callGemini,
+  collectReferencedAssetIds,
+  deleteImageAsset,
   fetchImageAsset,
   fetchRawCatalog,
   firebaseSignIn,
   getStoreGeminiKey,
+  listImageKeys,
+  pingCatalogRtdb,
   publishCatalogToFirebase,
   resolveFirebaseWebConfig,
   sanitizeCatalogForCustomer,
@@ -17,6 +21,7 @@ import {
   computePushOverview,
   detectDeviceLabel,
   executeAdminPushBroadcast,
+  listPushDevices,
   resolveVapidEnv,
   validatePushSubscriptionInput,
 } from './lib/pushService.js';
@@ -269,10 +274,110 @@ function requireAdmin(req, res, next) {
   return next();
 }
 
+function verifyAdminSameOrigin(req, res, next) {
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+  const origin = req.get('origin');
+  if (origin) {
+    try {
+      const originHost = new URL(origin).host;
+      const reqHost = req.get('x-forwarded-host') || req.get('host') || '';
+      if (reqHost && originHost !== reqHost) {
+        return res.status(403).json({ error: 'طلب غير مصرح به من مصدر خارجي.' });
+      }
+    } catch {
+      return res.status(403).json({ error: 'مصدر الطلب غير صالح.' });
+    }
+  }
+  return next();
+}
+
 function sendProtectedFile(relPath) {
   return (_req, res) => {
     setNoStore(res);
     res.sendFile(path.join(__dirname, relPath));
+  };
+}
+
+function safeAuditLog(entry, adminSess = null) {
+  try {
+    const res = userStore.addAuditLog(entry, {
+      adminIdToken: adminSess?.fb_id_token || '',
+    });
+    if (res && typeof res.catch === 'function') {
+      res.catch(() => {});
+    }
+  } catch {
+    // non-fatal audit logging
+  }
+}
+
+function buildAssetUsageMap(data = {}) {
+  const usage = {};
+  const addRef = (id, ref) => {
+    if (!id) return;
+    if (!usage[id]) usage[id] = [];
+    usage[id].push(ref);
+  };
+  (data.p || []).forEach((p, idx) => {
+    if (p && p[8]) addRef(p[8], { type: 'product', label: p[0] || `صنف #${idx + 1}`, index: idx });
+  });
+  (data.offers || []).forEach((o, idx) => {
+    if (o && o.i) addRef(o.i, { type: 'offer', label: o.t || `عرض #${idx + 1}`, index: idx });
+  });
+  if (data.catMeta && typeof data.catMeta === 'object') {
+    Object.entries(data.catMeta).forEach(([catName, meta]) => {
+      if (meta && meta.imageId) addRef(meta.imageId, { type: 'category', label: catName });
+    });
+  }
+  if (data.cfg?.logo) addRef(data.cfg.logo, { type: 'logo', label: 'شعار المتجر' });
+  if (data.cfg?.fontBodyId) addRef(data.cfg.fontBodyId, { type: 'font', label: 'خط المتجر الأساسي' });
+  if (data.cfg?.fontHeadId) addRef(data.cfg.fontHeadId, { type: 'font', label: 'خط العناوين' });
+  return usage;
+}
+
+function inspectAssetPayload(id, dataUrl) {
+  const raw = String(dataUrl || '');
+  const mimeMatch = raw.match(/^data:([^;,]+)[;,]/i);
+  const mime = mimeMatch
+    ? mimeMatch[1].toLowerCase()
+    : raw.startsWith('http')
+    ? 'external/url'
+    : 'application/octet-stream';
+  const commaIdx = raw.indexOf(',');
+  const b64Len = commaIdx >= 0 ? raw.length - commaIdx - 1 : raw.length;
+  const sizeBytes =
+    commaIdx >= 0 && raw.slice(0, commaIdx).includes('base64')
+      ? Math.floor((b64Len * 3) / 4)
+      : raw.length;
+  const isFont = mime.includes('font') || String(id).startsWith('fnt_');
+  return { mime, sizeBytes, isFont };
+}
+
+function maskCatalogCfgForAdmin(dataObj) {
+  const clone = JSON.parse(JSON.stringify(dataObj || {}));
+  clone.offers = Array.isArray(clone.offers) ? clone.offers : [];
+  clone.cats = Array.isArray(clone.cats) ? clone.cats : [];
+  clone.p = Array.isArray(clone.p) ? clone.p : [];
+  if (!clone.cfg || typeof clone.cfg !== 'object') clone.cfg = {};
+  const rawKey = clone.cfg.gk ? String(clone.cfg.gk).trim() : '';
+  const envKey = String(process.env.GEMINI_API_KEY || '').trim();
+  delete clone.cfg.gk;
+  clone.cfg.hasGk = Boolean(rawKey || envKey);
+  clone.cfg.gkFromEnv = Boolean(!rawKey && envKey);
+  clone.cfg.gkLast4 = rawKey ? rawKey.slice(-4) : '';
+  return clone;
+}
+
+function sanitizeBackupStats(dataObj = {}) {
+  const used = collectReferencedAssetIds(dataObj);
+  return {
+    products: Array.isArray(dataObj.p) ? dataObj.p.length : 0,
+    categories: Array.isArray(dataObj.cats) ? dataObj.cats.length : 0,
+    offers: Array.isArray(dataObj.offers) ? dataObj.offers.length : 0,
+    images: used.size,
   };
 }
 
@@ -755,6 +860,9 @@ app.get(['/admin', '/admin.html'], (_req, res) => {
 });
 
 app.get('/admin-app.js', requireAdmin, sendProtectedFile('protected/admin-app.js'));
+app.get('/admin.css', requireAdmin, sendProtectedFile('protected/admin.css'));
+
+app.use('/api/admin', verifyAdminSameOrigin);
 
 app.post('/api/admin/login', checkRateLimit, async (req, res) => {
   setNoStore(res);
@@ -778,6 +886,17 @@ app.post('/api/admin/login', checkRateLimit, async (req, res) => {
       ttlMs: rememberMe ? ttlSec * 1000 : 24 * 60 * 60 * 1000,
     });
     setSessionCookie(res, req, ADMIN_COOKIE, sess.rawToken, rememberMe ? ttlSec : null);
+    safeAuditLog(
+      {
+        action: 'admin_login',
+        actorEmail: fb.email,
+        entityType: 'system',
+        entityId: fb.uid || fb.email,
+        entityLabel: fb.email,
+        details: 'تسجيل دخول ناجح إلى لوحة التحكم',
+      },
+      { fb_id_token: fb.idToken }
+    );
     return res.json({ ok: true, email: fb.email });
   } catch {
     return res.status(401).json({ error: 'الإيميل أو كلمة السر غلط' });
@@ -802,24 +921,20 @@ app.get('/api/admin/me', (req, res) => {
     if (cookies[ADMIN_COOKIE]) clearSessionCookie(res, req, ADMIN_COOKIE);
     return res.json({ authenticated: false });
   }
-  return res.json({ authenticated: true, email: sess.email });
+  return res.json({
+    authenticated: true,
+    email: sess.email,
+    uid: sess.uid || '',
+    sessionCreatedAt: sess.created_at || '',
+    sessionExpiresAt: sess.expires_at ? new Date(Number(sess.expires_at)).toISOString() : '',
+  });
 });
 
 app.get('/api/admin/bootstrap', requireAdmin, async (_req, res) => {
   try {
     const raw = await fetchRawCatalog(true);
-    const data = JSON.parse(JSON.stringify(raw.data || {}));
-    data.offers = data.offers || [];
-    const keys = new Set();
-    (data.p || []).forEach((p) => {
-      if (p[8]) keys.add(p[8]);
-    });
-    (data.offers || []).forEach((o) => {
-      if (o.i) keys.add(o.i);
-    });
-    if (data.cfg?.logo) keys.add(data.cfg.logo);
-    if (data.cfg?.fontBodyId) keys.add(data.cfg.fontBodyId);
-    if (data.cfg?.fontHeadId) keys.add(data.cfg.fontHeadId);
+    const data = maskCatalogCfgForAdmin(raw.data || {});
+    const keys = collectReferencedAssetIds(data);
 
     const images = {};
     await Promise.all(
@@ -836,14 +951,49 @@ app.get('/api/admin/bootstrap', requireAdmin, async (_req, res) => {
 });
 
 app.post('/api/admin/publish', requireAdmin, async (req, res) => {
-  const data = req.body?.data;
+  const incomingData = req.body?.data;
   const pendingImages = req.body?.pendingImages || {};
-  if (!data || typeof data !== 'object' || !Array.isArray(data.p)) {
+  const auditSummary = String(req.body?.auditSummary || '').trim().slice(0, 400);
+  if (!incomingData || typeof incomingData !== 'object' || !Array.isArray(incomingData.p)) {
     return res.status(400).json({ error: 'بيانات المتجر غير صالحة.' });
   }
   try {
+    const data = JSON.parse(JSON.stringify(incomingData));
+    if (!data.cfg || typeof data.cfg !== 'object') data.cfg = {};
+
+    const existingRaw = await fetchRawCatalog(true).catch(() => null);
+    const existingGk = existingRaw?.data?.cfg?.gk ? String(existingRaw.data.cfg.gk).trim() : '';
+
+    if (data.cfg.clearGk === true) {
+      delete data.cfg.gk;
+    } else if (typeof data.cfg.newGk === 'string' && data.cfg.newGk.trim()) {
+      data.cfg.gk = data.cfg.newGk.trim();
+    } else if (!data.cfg.gk && existingGk) {
+      data.cfg.gk = existingGk;
+    }
+
+    delete data.cfg.hasGk;
+    delete data.cfg.gkFromEnv;
+    delete data.cfg.gkLast4;
+    delete data.cfg.newGk;
+    delete data.cfg.clearGk;
+
+    data.cfg.lastPublishedAt = new Date().toISOString();
+    data.cfg.lastPublishedBy = req.adminSession.email;
+
     const ts = await publishCatalogToFirebase(req.adminSession, data, pendingImages);
-    return res.json({ ok: true, ts });
+    safeAuditLog(
+      {
+        action: 'catalog_publish',
+        actorEmail: req.adminSession.email,
+        entityType: 'catalog',
+        entityId: String(ts),
+        entityLabel: `نشر الكتالوج (${data.p.length} صنف / ${(data.offers || []).length} عرض)`,
+        details: auditSummary || `نشر تعديلات المتجر والأقسام والعروض`,
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true, ts, data: maskCatalogCfgForAdmin(data) });
   } catch (err) {
     if (err?.status === 401) {
       revokeAdminSession(req.adminToken);
@@ -903,6 +1053,17 @@ app.post('/api/admin/users/:id/approve', requireAdmin, async (req, res) => {
       reviewedBy: req.adminSession.email,
     });
     if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    safeAuditLog(
+      {
+        action: 'user_approve',
+        actorEmail: req.adminSession.email,
+        entityType: 'user',
+        entityId: String(updated.id),
+        entityLabel: updated.fullName || updated.phone,
+        details: 'اعتماد حساب عميل',
+      },
+      req.adminSession
+    );
     return res.json({ ok: true, user: userStore.sanitizeUser(updated) });
   } catch {
     return res.status(502).json({ error: 'تعذر تنفيذ العملية' });
@@ -915,6 +1076,17 @@ app.post('/api/admin/users/:id/activate', requireAdmin, async (req, res) => {
       reviewedBy: req.adminSession.email,
     });
     if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    safeAuditLog(
+      {
+        action: 'user_activate',
+        actorEmail: req.adminSession.email,
+        entityType: 'user',
+        entityId: String(updated.id),
+        entityLabel: updated.fullName || updated.phone,
+        details: 'إعادة تفعيل حساب عميل',
+      },
+      req.adminSession
+    );
     return res.json({ ok: true, user: userStore.sanitizeUser(updated) });
   } catch {
     return res.status(502).json({ error: 'تعذر تنفيذ العملية' });
@@ -929,6 +1101,17 @@ app.post('/api/admin/users/:id/reject', requireAdmin, async (req, res) => {
       reviewedBy: req.adminSession.email,
     });
     if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    safeAuditLog(
+      {
+        action: 'user_reject',
+        actorEmail: req.adminSession.email,
+        entityType: 'user',
+        entityId: String(updated.id),
+        entityLabel: updated.fullName || updated.phone,
+        details: reason ? `رفض الحساب: ${reason}` : 'رفض طلب إنشاء الحساب',
+      },
+      req.adminSession
+    );
     return res.json({ ok: true, user: userStore.sanitizeUser(updated) });
   } catch {
     return res.status(502).json({ error: 'تعذر تنفيذ العملية' });
@@ -941,6 +1124,17 @@ app.post('/api/admin/users/:id/suspend', requireAdmin, async (req, res) => {
       reviewedBy: req.adminSession.email,
     });
     if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    safeAuditLog(
+      {
+        action: 'user_suspend',
+        actorEmail: req.adminSession.email,
+        entityType: 'user',
+        entityId: String(updated.id),
+        entityLabel: updated.fullName || updated.phone,
+        details: 'تعليق حساب العميل',
+      },
+      req.adminSession
+    );
     return res.json({ ok: true, user: userStore.sanitizeUser(updated) });
   } catch {
     return res.status(502).json({ error: 'تعذر تنفيذ العملية' });
@@ -951,6 +1145,17 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
   try {
     const ok = await userStore.deleteUserById(req.params.id);
     if (!ok) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    safeAuditLog(
+      {
+        action: 'user_delete',
+        actorEmail: req.adminSession.email,
+        entityType: 'user',
+        entityId: String(req.params.id),
+        entityLabel: `مستخدم #${req.params.id}`,
+        details: 'حذف حساب عميل من النظام',
+      },
+      req.adminSession
+    );
     return res.json({ ok: true });
   } catch {
     return res.status(502).json({ error: 'تعذر حذف المستخدم' });
@@ -993,6 +1198,17 @@ app.post('/api/admin/orders/:id/status', requireAdmin, async (req, res) => {
     if (!updated) {
       return res.status(404).json({ error: 'الطلب غير موجود.' });
     }
+    safeAuditLog(
+      {
+        action: 'order_status_change',
+        actorEmail: req.adminSession.email,
+        entityType: 'order',
+        entityId: String(updated.id),
+        entityLabel: updated.userName || updated.shopName || updated.id,
+        details: `تغيير حالة الطلب إلى ${status}`,
+      },
+      req.adminSession
+    );
     return res.json({ ok: true, order: updated });
   } catch (err) {
     const cfgErr = handleRtdbConfigError(err, res);
@@ -1017,6 +1233,47 @@ app.get('/api/admin/push/overview', requireAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/admin/push/devices', requireAdmin, async (req, res) => {
+  try {
+    const devices = await listPushDevices({
+      store: userStore,
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    return res.json({ devices });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر تحميل قائمة الأجهزة المشتركة.' });
+  }
+});
+
+app.delete('/api/admin/push/devices/:id', requireAdmin, async (req, res) => {
+  try {
+    const ok = await userStore.deletePushSubscriptionById(req.params.id, {
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    if (!ok) {
+      return res.status(404).json({ error: 'الجهاز غير موجود.' });
+    }
+    safeAuditLog(
+      {
+        action: 'push_device_remove',
+        actorEmail: req.adminSession.email,
+        entityType: 'push',
+        entityId: String(req.params.id),
+        entityLabel: `جهاز #${req.params.id}`,
+        details: 'إزالة اشتراك جهاز من مركز الإشعارات',
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر إزالة الجهاز.' });
+  }
+});
+
 app.post('/api/admin/push/send', requireAdmin, checkRateLimit, async (req, res) => {
   const vapid = resolveVapidEnv(getEffectivePushEnv());
   const origin = `${req.protocol}://${req.get('host')}`;
@@ -1029,6 +1286,17 @@ app.post('/api/admin/push/send', requireAdmin, checkRateLimit, async (req, res) 
       adminIdToken: req.adminSession.fb_id_token || '',
       body: req.body || {},
     });
+    safeAuditLog(
+      {
+        action: 'push_broadcast',
+        actorEmail: req.adminSession.email,
+        entityType: 'push',
+        entityId: String(result?.log?.id || ''),
+        entityLabel: String(req.body?.title || '').slice(0, 80),
+        details: `إرسال إشعار (${result.sentCount} نجح / ${result.failedCount} فشل / ${result.removedCount} أزيل)`,
+      },
+      req.adminSession
+    );
     return res.json(result);
   } catch (err) {
     const cfgErr = handleRtdbConfigError(err, res);
@@ -1037,6 +1305,341 @@ app.post('/api/admin/push/send', requireAdmin, checkRateLimit, async (req, res) 
       error: err?.message || 'تعذر إرسال الإشعار.',
       needsVapidSetup: Boolean(err?.needsVapidSetup),
     });
+  }
+});
+
+// ==================== ADMIN HEALTH, AUDIT, MEDIA & BACKUPS ====================
+app.get('/api/admin/health', requireAdmin, async (req, res) => {
+  const vapid = resolveVapidEnv(getEffectivePushEnv());
+  const catalogCheck = await pingCatalogRtdb().catch((e) => ({
+    ok: false,
+    error: e?.message || 'error',
+  }));
+  let authDbCheck = { ok: false, mode: rtdbStore.hasServerDbCredentials() ? 'rtdb' : 'sqlite' };
+  const t0 = Date.now();
+  try {
+    if (rtdbStore.hasServerDbCredentials()) {
+      const r = await rtdbStore.pingRtdb({ adminIdToken: req.adminSession.fb_id_token || '' });
+      authDbCheck = { ok: Boolean(r?.ok), mode: 'rtdb', latencyMs: r?.latencyMs || (Date.now() - t0) };
+    } else {
+      const users = sqliteStore.listUsers();
+      authDbCheck = { ok: Array.isArray(users), mode: 'sqlite', latencyMs: Date.now() - t0 };
+    }
+  } catch (e) {
+    authDbCheck = {
+      ok: false,
+      mode: rtdbStore.hasServerDbCredentials() ? 'rtdb' : 'sqlite',
+      latencyMs: Date.now() - t0,
+      error: e?.code || e?.message || 'error',
+    };
+  }
+  const aiKey = await getStoreGeminiKey().catch(() => '');
+  return res.json({
+    ok: Boolean(catalogCheck?.ok && authDbCheck?.ok),
+    checkedAt: new Date().toISOString(),
+    catalogRtdb: catalogCheck,
+    authDatabase: authDbCheck,
+    vapid: { configured: Boolean(vapid.configured), reason: vapid.reason || '' },
+    ai: { configured: Boolean(aiKey), source: process.env.GEMINI_API_KEY && !aiKey ? 'env' : aiKey ? 'ready' : 'missing' },
+  });
+});
+
+app.get('/api/admin/audit-logs', requireAdmin, async (req, res) => {
+  const limit = Number(req.query.limit) || 150;
+  const entityType = String(req.query.entityType || '').trim();
+  const entityId = String(req.query.entityId || '').trim();
+  try {
+    const logs = await userStore.listAuditLogs(
+      { limit, entityType, entityId },
+      { adminIdToken: req.adminSession.fb_id_token || '' }
+    );
+    return res.json({ logs });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر تحميل سجل النشاطات.' });
+  }
+});
+
+app.post('/api/admin/audit-logs', requireAdmin, async (req, res) => {
+  const action = String(req.body?.action || '').trim();
+  const entityType = String(req.body?.entityType || 'system').trim();
+  const entityId = String(req.body?.entityId || '').trim();
+  const entityLabel = String(req.body?.entityLabel || '').trim();
+  const details = String(req.body?.details || '').trim();
+  if (!action) {
+    return res.status(400).json({ error: 'نوع الحدث مطلوب.' });
+  }
+  try {
+    const log = await userStore.addAuditLog(
+      {
+        action,
+        actorEmail: req.adminSession.email,
+        entityType,
+        entityId,
+        entityLabel,
+        details,
+      },
+      { adminIdToken: req.adminSession.fb_id_token || '' }
+    );
+    return res.status(201).json({ ok: true, log });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر حفظ سجل النشاط.' });
+  }
+});
+
+app.get('/api/admin/media', requireAdmin, async (req, res) => {
+  try {
+    const raw = await fetchRawCatalog(true);
+    const data = raw.data || {};
+    const usageMap = buildAssetUsageMap(data);
+    const rtdbKeys = await listImageKeys(req.adminSession).catch(() => []);
+    const allKeys = [...new Set([...Object.keys(usageMap), ...rtdbKeys])];
+
+    const items = [];
+    const BATCH = 12;
+    for (let i = 0; i < allKeys.length; i += BATCH) {
+      const chunk = allKeys.slice(i, i + BATCH);
+      const loaded = await Promise.all(
+        chunk.map(async (id) => {
+          const dataUrl = await fetchImageAsset(id).catch(() => null);
+          if (!dataUrl) return null;
+          const info = inspectAssetPayload(id, dataUrl);
+          const usedBy = usageMap[id] || [];
+          return {
+            id,
+            dataUrl,
+            mime: info.mime,
+            sizeBytes: info.sizeBytes,
+            isFont: info.isFont,
+            usedBy,
+            unused: usedBy.length === 0,
+          };
+        })
+      );
+      loaded.forEach((x) => {
+        if (x) items.push(x);
+      });
+    }
+    return res.json({ items, total: items.length });
+  } catch {
+    return res.status(502).json({ error: 'تعذر جلب مركز الملفات والصور.' });
+  }
+});
+
+app.delete('/api/admin/media/:id', requireAdmin, async (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+    return res.status(400).json({ error: 'معرف الملف غير صالح.' });
+  }
+  try {
+    const raw = await fetchRawCatalog(true);
+    const used = collectReferencedAssetIds(raw?.data || {});
+    if (used.has(id)) {
+      return res.status(409).json({
+        error: 'لا يمكن حذف هذا الملف لأنه مرتبط حالياً بصنف أو قسم أو عرض أو شعار.',
+      });
+    }
+    await deleteImageAsset(req.adminSession, id);
+    safeAuditLog(
+      {
+        action: 'media_delete',
+        actorEmail: req.adminSession.email,
+        entityType: 'media',
+        entityId: id,
+        entityLabel: id,
+        details: 'حذف ملف غير مستخدم من مركز الصور والملفات',
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    if (err?.status === 401) {
+      return res.status(401).json({ error: 'انتهت صلاحية جلسة الإدارة، سجل دخول مرة أخرى.' });
+    }
+    return res.status(502).json({ error: err?.message || 'تعذر حذف الملف.' });
+  }
+});
+
+app.get('/api/admin/backups', requireAdmin, async (req, res) => {
+  try {
+    const backups = await userStore.listBackups(40, {
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    return res.json({ backups });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر تحميل النسخ الاحتياطية.' });
+  }
+});
+
+app.post('/api/admin/backups', requireAdmin, async (req, res) => {
+  const label = String(req.body?.label || '').trim() || `نسخة يدوية ${new Date().toLocaleDateString('ar-EG')}`;
+  try {
+    const raw = await fetchRawCatalog(true);
+    const cleanData = maskCatalogCfgForAdmin(raw?.data || {});
+    const stats = sanitizeBackupStats(cleanData);
+    const backup = await userStore.createBackup(
+      {
+        label,
+        actorEmail: req.adminSession.email,
+        triggerType: 'manual',
+        stats,
+        payload: { ts: raw?.ts || Date.now(), data: cleanData },
+      },
+      { adminIdToken: req.adminSession.fb_id_token || '' }
+    );
+    safeAuditLog(
+      {
+        action: 'backup_create',
+        actorEmail: req.adminSession.email,
+        entityType: 'backup',
+        entityId: backup.id,
+        entityLabel: backup.label,
+        details: `إنشاء نسخة احتياطية (${stats.products} صنف / ${stats.offers} عرض)`,
+      },
+      req.adminSession
+    );
+    return res.status(201).json({ ok: true, backup });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر إنشاء النسخة الاحتياطية.' });
+  }
+});
+
+app.get('/api/admin/backups/:id', requireAdmin, async (req, res) => {
+  try {
+    const backup = await userStore.getBackupById(req.params.id, {
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    if (!backup) return res.status(404).json({ error: 'النسخة الاحتياطية غير موجودة.' });
+    return res.json({ backup });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر جلب النسخة الاحتياطية.' });
+  }
+});
+
+app.post('/api/admin/backups/:id/restore', requireAdmin, async (req, res) => {
+  try {
+    const backup = await userStore.getBackupById(req.params.id, {
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    if (!backup || !backup.payload?.data || !Array.isArray(backup.payload.data.p)) {
+      return res.status(404).json({ error: 'النسخة الاحتياطية غير صالحة أو غير موجودة.' });
+    }
+    const currentRaw = await fetchRawCatalog(true).catch(() => null);
+    if (currentRaw?.data && Array.isArray(currentRaw.data.p)) {
+      const safeCurrent = maskCatalogCfgForAdmin(currentRaw.data);
+      await userStore.createBackup(
+        {
+          label: `حماية تلقائية قبل استرجاع (${backup.label})`,
+          actorEmail: req.adminSession.email,
+          triggerType: 'pre_restore',
+          stats: sanitizeBackupStats(safeCurrent),
+          payload: { ts: currentRaw.ts || Date.now(), data: safeCurrent },
+        },
+        { adminIdToken: req.adminSession.fb_id_token || '' }
+      ).catch(() => {});
+    }
+
+    const restoredData = JSON.parse(JSON.stringify(backup.payload.data));
+    if (!restoredData.cfg || typeof restoredData.cfg !== 'object') restoredData.cfg = {};
+    const existingGk = currentRaw?.data?.cfg?.gk ? String(currentRaw.data.cfg.gk).trim() : '';
+    if (!restoredData.cfg.gk && existingGk) restoredData.cfg.gk = existingGk;
+    delete restoredData.cfg.hasGk;
+    delete restoredData.cfg.gkFromEnv;
+    delete restoredData.cfg.gkLast4;
+    delete restoredData.cfg.newGk;
+    delete restoredData.cfg.clearGk;
+    restoredData.cfg.lastPublishedAt = new Date().toISOString();
+    restoredData.cfg.lastPublishedBy = req.adminSession.email;
+
+    const ts = await publishCatalogToFirebase(req.adminSession, restoredData, {});
+    safeAuditLog(
+      {
+        action: 'backup_restore',
+        actorEmail: req.adminSession.email,
+        entityType: 'backup',
+        entityId: backup.id,
+        entityLabel: backup.label,
+        details: 'استعادة الكتالوج من نسخة احتياطية محفوظة',
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true, ts, data: maskCatalogCfgForAdmin(restoredData) });
+  } catch (err) {
+    if (err?.status === 401) {
+      return res.status(401).json({ error: 'انتهت صلاحية جلسة الإدارة، سجل دخول مرة أخرى.' });
+    }
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: err?.message || 'تعذر استرجاع النسخة الاحتياطية.' });
+  }
+});
+
+app.post('/api/admin/backups/import', requireAdmin, async (req, res) => {
+  const incoming = req.body?.payload?.data || req.body?.data;
+  const label = String(req.body?.label || 'استيراد ملف نسخة احتياطية').trim().slice(0, 140);
+  if (
+    !incoming ||
+    typeof incoming !== 'object' ||
+    !Array.isArray(incoming.p) ||
+    !Array.isArray(incoming.cats) ||
+    typeof incoming.cfg !== 'object'
+  ) {
+    return res.status(400).json({ error: 'ملف النسخة الاحتياطية غير صالح أو ينقصه البيانات الأساسية.' });
+  }
+  try {
+    const currentRaw = await fetchRawCatalog(true).catch(() => null);
+    if (currentRaw?.data && Array.isArray(currentRaw.data.p)) {
+      const safeCurrent = maskCatalogCfgForAdmin(currentRaw.data);
+      await userStore.createBackup(
+        {
+          label: 'حماية تلقائية قبل استيراد ملف خارجي',
+          actorEmail: req.adminSession.email,
+          triggerType: 'pre_restore',
+          stats: sanitizeBackupStats(safeCurrent),
+          payload: { ts: currentRaw.ts || Date.now(), data: safeCurrent },
+        },
+        { adminIdToken: req.adminSession.fb_id_token || '' }
+      ).catch(() => {});
+    }
+
+    const restoredData = JSON.parse(JSON.stringify(incoming));
+    const existingGk = currentRaw?.data?.cfg?.gk ? String(currentRaw.data.cfg.gk).trim() : '';
+    if (!restoredData.cfg.gk && existingGk) restoredData.cfg.gk = existingGk;
+    delete restoredData.cfg.hasGk;
+    delete restoredData.cfg.gkFromEnv;
+    delete restoredData.cfg.gkLast4;
+    delete restoredData.cfg.newGk;
+    delete restoredData.cfg.clearGk;
+    restoredData.cfg.lastPublishedAt = new Date().toISOString();
+    restoredData.cfg.lastPublishedBy = req.adminSession.email;
+
+    const ts = await publishCatalogToFirebase(req.adminSession, restoredData, {});
+    safeAuditLog(
+      {
+        action: 'backup_import_restore',
+        actorEmail: req.adminSession.email,
+        entityType: 'backup',
+        entityId: String(ts),
+        entityLabel: label,
+        details: 'استيراد واسترجاع نسخة احتياطية من ملف JSON',
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true, ts, data: maskCatalogCfgForAdmin(restoredData) });
+  } catch (err) {
+    if (err?.status === 401) {
+      return res.status(401).json({ error: 'انتهت صلاحية جلسة الإدارة، سجل دخول مرة أخرى.' });
+    }
+    return res.status(502).json({ error: err?.message || 'تعذر استيراد النسخة الاحتياطية.' });
   }
 });
 
