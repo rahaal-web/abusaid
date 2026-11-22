@@ -930,13 +930,19 @@ function vu(){
   '<input id="uq" value="'+esc(uQuery)+'" placeholder="🔍 ابحث بالاسم، رقم الهاتف، البريد أو اسم المحل..." style="margin-bottom:10px">'+
   '<div id="uListBox">'+uCardsHtml()+'</div></div>';
 }
+async function safeJson(r){
+ var txt='';
+ try{txt=await r.text()}catch(z){return null}
+ if(!txt||!txt.trim())return null;
+ try{return JSON.parse(txt)}catch(z){return null}
+}
 async function loadUsers(silent){
  try{
   var r=await fetch('/api/admin/users?status=all',{credentials:'same-origin',cache:'no-store'});
   if(r.status===401){location.replace('/admin/login');return}
   if(r.status===403){location.replace('/');return}
-  var d=await r.json();
-  if(!r.ok||!d.ok)throw new Error(d.message||'ERR');
+  var d=await safeJson(r);
+  if(!r.ok||!d||!d.ok)throw new Error((d&&d.message)||'ERR');
   UDATA={counts:d.counts||UDATA.counts,users:d.users||[]};
   uLoaded=true;
   updateUserBadge(UDATA.counts.Pending);
@@ -952,8 +958,8 @@ async function submitUserApi(url,method,body){
   if(body!==undefined)opts.body=JSON.stringify(body);
   var r=await fetch(url,opts);
   if(r.status===401){location.replace('/admin/login');return false}
-  var d=await r.json();
-  if(!r.ok||!d.ok){toast(d.message||'تعذر تنفيذ العملية');return false}
+  var d=await safeJson(r);
+  if(!r.ok||!d||!d.ok){toast((d&&d.message)||'تعذر تنفيذ العملية');return false}
   toast(d.message||'تم التنفيذ ✅');
   await loadUsers(true);
   render();
@@ -1013,9 +1019,9 @@ async function pub(){
    credentials:'same-origin',
    body:JSON.stringify({catalog:D,pendingImgs:pendingImgs})
   });
-  var d=await r.json();
-  if(r.status===401){D.v--;toast(d.message||'انتهت جلسة الإدارة، يرجى إعادة الدخول');setTimeout(function(){location.replace('/admin/login')},1200);return}
-  if(!r.ok||!d.ok)throw new Error(d.message||'فشل النشر');
+  var d=await safeJson(r);
+  if(r.status===401){D.v--;toast((d&&d.message)||'انتهت جلسة الإدارة، يرجى إعادة الدخول');setTimeout(function(){location.replace('/admin/login')},1200);return}
+  if(!r.ok||!d||!d.ok)throw new Error((d&&d.message)||'فشل النشر (تأكد من تشغيل خادم Node.js)');
   PEND={};dirty=false;$('st').textContent='اتنشر ✅ العملاء هيشوفوه خلال ثواني';b.classList.remove('hot');toast('اتنشر ✅');
  }catch(e){
   D.v--;console.error(e);toast('مقدرش ينشر: '+(e&&e.message||e));
@@ -1028,7 +1034,10 @@ async function bootstrapAdmin(){
   var r=await fetch('/api/admin/bootstrap',{credentials:'same-origin',cache:'no-store'});
   if(r.status===401){location.replace('/admin/login');return}
   if(r.status===403){location.replace('/');return}
-  var d=await r.json();
+  var d=await safeJson(r);
+  if(!d){
+   throw new Error('لم يتم العثور على خادم API (/api/admin/bootstrap). هذا النظام يتطلب تشغيل خادم Node.js (server.js) ولا يعمل على الاستضافة الثابتة (مثل GitHub Pages) بمفردها.');
+  }
   if(!r.ok||!d.ok)throw new Error(d.message||'خطأ في تحميل البيانات');
   if(d.catalog)D=d.catalog;
   D.offers=D.offers||[];
