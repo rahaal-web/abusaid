@@ -3646,6 +3646,16 @@ img {
   color: #fff;
 }
 
+.ord-btn.del {
+  background: var(--paper);
+  color: var(--red-dark, var(--red));
+}
+
+.ord-btn.del.armed {
+  background: var(--red);
+  color: #fff;
+}
+
 .ord-empty {
   text-align: center;
   padding: 36px 16px;

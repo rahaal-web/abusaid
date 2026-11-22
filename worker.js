@@ -37,6 +37,21 @@ import {
   buildAuthoritativeOrder,
   VALID_ORDER_STATUSES,
 } from './lib/orderService.js';
+import {
+  checkProductDuplicates,
+  previewAndValidateAdminOps,
+  validateCustomerGeminiResponse,
+} from './js/ai-engine.js';
+
+const workerExecutedOpIds = new Map();
+function isWorkerOpExecuted(opId) {
+  if (!opId) return false;
+  const now = Date.now();
+  for (const [k, ts] of workerExecutedOpIds.entries()) {
+    if (now - ts > 15 * 60 * 1000) workerExecutedOpIds.delete(k);
+  }
+  return workerExecutedOpIds.has(opId);
+}
 
 const USER_COOKIE = 'abu_session';
 const STATUS_COOKIE = 'abu_status_token';
@@ -61,6 +76,7 @@ const PROTECTED_STORE_PATHS = new Set([
   '/js/firebase-client.js',
   '/js/push.js',
   '/js/orders.js',
+  '/js/ai-engine.js',
 ]);
 
 const PUBLIC_ASSET_PATHS = new Set([
@@ -902,6 +918,9 @@ export default {
       const prompt = String(body.prompt || '').trim();
       const audioBase64 = body.audioBase64 ? String(body.audioBase64) : null;
       const preferredModel = body.preferredModel ? String(body.preferredModel) : '';
+      const systemInstruction = body.systemInstruction ? String(body.systemInstruction) : '';
+      const taskType = body.taskType ? String(body.taskType) : 'customer_chat';
+      const temperature = body.temperature != null ? Number(body.temperature) : null;
 
       if (!prompt || prompt.length > 80000) {
         return jsonResponse({ error: 'Invalid prompt' }, 400);
@@ -921,14 +940,40 @@ export default {
         const result = await callGemini({
           apiKey,
           prompt,
+          systemInstruction,
           audioBase64,
           preferredModel,
+          temperature,
+          taskType,
         });
         return jsonResponse(result);
       } catch (err) {
         const code = err?.message || 'AI_ERROR';
         const status = code === 'LIMIT' ? 429 : code === 'KEY' ? 403 : 502;
         return jsonResponse({ error: code }, status);
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/ai/validate') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      const body = (await readJsonBody(req)) || {};
+      try {
+        const rawCatalog = await fetchRawCatalog({
+          dbHost,
+          force: false,
+          dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+          serviceAccountJson: getServiceAccountFromEnv(env),
+        });
+        const validated = validateCustomerGeminiResponse({
+          geminiJson: body.geminiResult ?? body.geminiJson ?? {},
+          userMessage: String(body.message || ''),
+          currentDraft: Array.isArray(body.currentDraft) ? body.currentDraft : [],
+          catalogData: rawCatalog?.data || {},
+        });
+        return jsonResponse({ ok: true, ...validated });
+      } catch {
+        return jsonResponse({ error: 'بيانات المساعد غير صالحة للمراجعة.' }, 400);
       }
     }
 
@@ -991,6 +1036,37 @@ export default {
         const cfgErr = handleRtdbConfigError(err);
         if (cfgErr) return cfgErr;
         return jsonResponse({ error: 'تعذر حفظ الطلب في قاعدة البيانات.' }, 502);
+      }
+    }
+
+    const userOrderDelMatch = pathname.match(/^\/api\/orders\/([^/]+)$/);
+    if (method === 'DELETE' && userOrderDelMatch) {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      const ordId = decodeURIComponent(userOrderDelMatch[1]);
+      try {
+        const deleted = await store.deleteUserOrder(check.user.id, ordId);
+        if (!deleted) {
+          return jsonResponse({ error: 'الطلب غير موجود أو لا يخص هذا الحساب.' }, 404);
+        }
+        return jsonResponse({ ok: true, id: ordId });
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'تعذر حذف الطلب من السجل.' }, 502);
+      }
+    }
+
+    if (method === 'DELETE' && pathname === '/api/orders') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      try {
+        const result = await store.clearUserOrders(check.user.id);
+        return jsonResponse({ ok: true, deletedCount: Number(result?.deletedCount || 0) });
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'تعذر مسح سجل الطلبات.' }, 502);
       }
     }
 
@@ -1167,6 +1243,13 @@ export default {
         });
       }
 
+      if (method === 'GET' && pathname === '/admin-ai-engine.js') {
+        return serveAsset(env, req, '/js/ai-engine.js', {
+          noStore: true,
+          setCookies,
+        });
+      }
+
       if (method === 'GET' && pathname === '/admin.css') {
         return serveAsset(env, req, '/protected/admin.css', {
           noStore: true,
@@ -1286,8 +1369,11 @@ export default {
         const audioBase64 = body.audioBase64 ? String(body.audioBase64) : null;
         const preferredModel = body.preferredModel ? String(body.preferredModel) : '';
         const overrideKey = body.apiKey ? String(body.apiKey).trim() : '';
+        const systemInstruction = body.systemInstruction ? String(body.systemInstruction) : '';
+        const taskType = body.taskType ? String(body.taskType) : 'admin_chat';
+        const temperature = body.temperature != null ? Number(body.temperature) : null;
 
-        if (!prompt || prompt.length > 160000) {
+        if (!prompt || prompt.length > 250000) {
           return jsonResponse({ error: 'Invalid prompt' }, 400, setCookies);
         }
 
@@ -1304,14 +1390,64 @@ export default {
           const result = await callGemini({
             apiKey,
             prompt,
+            systemInstruction,
             audioBase64,
             preferredModel,
+            temperature,
+            taskType,
           });
           return jsonResponse(result, 200, setCookies);
         } catch (err) {
           const code = err?.message || 'AI_ERROR';
           const status = code === 'LIMIT' ? 429 : code === 'KEY' ? 403 : 502;
           return jsonResponse({ error: code }, status, setCookies);
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/ai/validate') {
+        const body = (await readJsonBody(req)) || {};
+        try {
+          const opId = String(body.opId || '').trim();
+          if (body.markExecuted === true) {
+            if (opId && isWorkerOpExecuted(opId)) {
+              return jsonResponse({ error: 'تم تنفيذ هذه العملية بالفعل (منع التكرار).', duplicateOp: true }, 409, setCookies);
+            }
+            if (opId) workerExecutedOpIds.set(opId, Date.now());
+            return jsonResponse({ ok: true, opId, marked: true }, 200, setCookies);
+          }
+          if (opId && isWorkerOpExecuted(opId)) {
+            return jsonResponse({ error: 'تم تنفيذ هذه العملية بالفعل.', duplicateOp: true }, 409, setCookies);
+          }
+
+          let catalogData = body.catalogData;
+          if (!catalogData || !Array.isArray(catalogData.p)) {
+            const raw = await fetchRawCatalog({
+              dbHost,
+              force: false,
+              dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+              serviceAccountJson: getServiceAccountFromEnv(env),
+            });
+            catalogData = raw?.data || { p: [], cats: [], offers: [] };
+          }
+          const incomingProducts = Array.isArray(body.products) ? body.products : [];
+          const incomingOps = Array.isArray(body.ops) ? body.ops : [];
+          const productChecks = incomingProducts.map((item) => {
+            const dup = checkProductDuplicates(item, catalogData.p || []);
+            const priceVal = Number(item?.p != null ? item.p : item?.price || 0);
+            return {
+              name: String(item?.n || item?.name || '').trim(),
+              missingPrice: !(priceVal > 0),
+              exactDuplicates: dup.exactMatches.map((x) => ({ idx: x.idx, label: x.label, price: x.price, category: x.category })),
+              similarDuplicates: dup.similarMatches.map((x) => ({ idx: x.idx, label: x.label, price: x.price, category: x.category, reason: x.reason })),
+            };
+          });
+          const preview = incomingOps.length
+            ? previewAndValidateAdminOps({ ops: incomingOps, catalogData, opId })
+            : { opId: opId || '', valid: true, n: 0, del: 0, lines: [], ops: [], needsClarification: [], errors: [] };
+
+          return jsonResponse({ ok: true, opId: preview.opId || opId, productChecks, preview }, 200, setCookies);
+        } catch {
+          return jsonResponse({ error: 'تعذر التحقق من صحة العملية المقترحة.' }, 400, setCookies);
         }
       }
 
@@ -1473,6 +1609,61 @@ export default {
           const cfgErr = handleRtdbConfigError(err);
           if (cfgErr) return cfgErr;
           return jsonResponse({ error: 'تعذر تحديث حالة الطلب.' }, 502, setCookies);
+        }
+      }
+
+      const adminOrderDelMatch = pathname.match(/^\/api\/admin\/orders\/([^/]+)$/);
+      if (method === 'DELETE' && adminOrderDelMatch) {
+        const ordId = decodeURIComponent(adminOrderDelMatch[1]);
+        try {
+          const deleted = await store.deleteOrderById(ordId, {
+            adminIdToken: admin.idToken,
+          });
+          if (!deleted) {
+            return jsonResponse({ error: 'الطلب غير موجود.' }, 404, setCookies);
+          }
+          safeAuditLog(
+            store,
+            {
+              action: 'order_delete',
+              actorEmail: admin.email,
+              entityType: 'order',
+              entityId: ordId,
+              entityLabel: `طلب #${ordId}`,
+              details: 'حذف سجل طلب واتساب من لوحة الإدارة',
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true, id: ordId }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر حذف الطلب.' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'DELETE' && pathname === '/api/admin/orders') {
+        try {
+          const result = await store.clearAllOrders({
+            adminIdToken: admin.idToken,
+          });
+          safeAuditLog(
+            store,
+            {
+              action: 'orders_clear',
+              actorEmail: admin.email,
+              entityType: 'order',
+              entityId: 'all',
+              entityLabel: 'سجل الطلبات',
+              details: `مسح جميع طلبات الواتساب (${Number(result?.deletedCount || 0)} طلب)`,
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true, deletedCount: Number(result?.deletedCount || 0) }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر مسح سجل الطلبات.' }, 502, setCookies);
         }
       }
 

@@ -29,6 +29,25 @@ import {
   buildAuthoritativeOrder,
   VALID_ORDER_STATUSES,
 } from './lib/orderService.js';
+import { generateGeminiServer } from './lib/geminiServer.js';
+import {
+  checkProductDuplicates,
+  previewAndValidateAdminOps,
+  validateCustomerGeminiResponse,
+} from './js/ai-engine.js';
+
+const adminExecutedOpIds = new Map();
+function isOpExecuted(opId) {
+  if (!opId) return false;
+  const now = Date.now();
+  for (const [k, ts] of adminExecutedOpIds.entries()) {
+    if (now - ts > 15 * 60 * 1000) adminExecutedOpIds.delete(k);
+  }
+  return adminExecutedOpIds.has(opId);
+}
+function markOpExecuted(opId) {
+  if (opId) adminExecutedOpIds.set(String(opId), Date.now());
+}
 
 const rtdbStore = createRtdbAuthStore(process.env);
 const userStore = rtdbStore.hasServerDbCredentials() ? rtdbStore : sqliteStore;
@@ -711,6 +730,7 @@ app.get('/js/utils.js', requireApprovedUser, sendProtectedFile('js/utils.js'));
 app.get('/js/firebase-client.js', requireApprovedUser, sendProtectedFile('js/firebase-client.js'));
 app.get('/js/push.js', requireApprovedUser, sendProtectedFile('js/push.js'));
 app.get('/js/orders.js', requireApprovedUser, sendProtectedFile('js/orders.js'));
+app.get('/js/ai-engine.js', requireApprovedUser, sendProtectedFile('js/ai-engine.js'));
 
 app.get('/api/firebase-config', requireApprovedUser, (_req, res) => {
   return res.json({ config: resolveFirebaseWebConfig(process.env) });
@@ -730,10 +750,14 @@ app.get('/api/img/:id', requireApprovedUser, async (req, res) => {
   return res.json(val);
 });
 
-app.post('/api/ai/generate', requireApprovedUser, async (req, res) => {
+app.post('/api/ai/generate', requireApprovedUser, checkRateLimit, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
   const audioBase64 = req.body?.audioBase64 ? String(req.body.audioBase64) : null;
   const preferredModel = req.body?.preferredModel ? String(req.body.preferredModel) : '';
+  const schemaType = req.body?.schemaType ? String(req.body.schemaType) : '';
+  const systemInstruction = req.body?.systemInstruction ? String(req.body.systemInstruction) : '';
+  const taskType = req.body?.taskType ? String(req.body.taskType) : 'customer_chat';
+  const temperature = req.body?.temperature != null ? Number(req.body.temperature) : null;
 
   if (!prompt || prompt.length > 80000) {
     return res.status(400).json({ error: 'Invalid prompt' });
@@ -747,12 +771,40 @@ app.post('/api/ai/generate', requireApprovedUser, async (req, res) => {
     if (!apiKey) {
       return res.status(503).json({ error: 'KEY' });
     }
-    const result = await callGemini({ apiKey, prompt, audioBase64, preferredModel });
+    const result = await generateGeminiServer({
+      apiKey,
+      prompt,
+      systemInstruction,
+      audioBase64,
+      preferredModel,
+      schemaType,
+      temperature,
+      taskType,
+    });
     return res.json(result);
   } catch (err) {
     const code = err?.message || 'AI_ERROR';
     const status = code === 'LIMIT' ? 429 : code === 'KEY' ? 403 : 502;
     return res.status(status).json({ error: code });
+  }
+});
+
+app.post('/api/ai/validate', requireApprovedUser, checkRateLimit, async (req, res) => {
+  try {
+    const rawCatalog = await fetchRawCatalog(false);
+    const catalogData = rawCatalog?.data || {};
+    const geminiJson = req.body?.geminiResult ?? req.body?.geminiJson ?? {};
+    const userMessage = String(req.body?.message || '');
+    const currentDraft = Array.isArray(req.body?.currentDraft) ? req.body.currentDraft : [];
+    const validated = validateCustomerGeminiResponse({
+      geminiJson,
+      userMessage,
+      currentDraft,
+      catalogData,
+    });
+    return res.json({ ok: true, ...validated });
+  } catch (err) {
+    return res.status(400).json({ error: 'بيانات المساعد غير صالحة للمراجعة.' });
   }
 });
 
@@ -797,6 +849,31 @@ app.post('/api/orders', requireApprovedUser, checkRateLimit, async (req, res) =>
     const cfgErr = handleRtdbConfigError(err, res);
     if (cfgErr) return cfgErr;
     return res.status(502).json({ error: 'تعذر حفظ الطلب في قاعدة البيانات.' });
+  }
+});
+
+app.delete('/api/orders/:id', requireApprovedUser, checkRateLimit, async (req, res) => {
+  try {
+    const deleted = await userStore.deleteUserOrder(req.user.id, req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: 'الطلب غير موجود أو لا يخص هذا الحساب.' });
+    }
+    return res.json({ ok: true, id: String(req.params.id) });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر حذف الطلب من السجل.' });
+  }
+});
+
+app.delete('/api/orders', requireApprovedUser, checkRateLimit, async (req, res) => {
+  try {
+    const result = await userStore.clearUserOrders(req.user.id);
+    return res.json({ ok: true, deletedCount: Number(result?.deletedCount || 0) });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر مسح سجل الطلبات.' });
   }
 });
 
@@ -869,6 +946,7 @@ app.get(['/admin', '/admin.html'], (_req, res) => {
 });
 
 app.get('/admin-app.js', requireAdmin, sendProtectedFile('protected/admin-app.js'));
+app.get('/admin-ai-engine.js', requireAdmin, sendProtectedFile('js/ai-engine.js'));
 app.get('/admin.css', requireAdmin, sendProtectedFile('protected/admin.css'));
 
 app.use('/api/admin', verifyAdminSameOrigin);
@@ -1013,13 +1091,17 @@ app.post('/api/admin/publish', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/admin/ai/generate', requireAdmin, async (req, res) => {
+app.post('/api/admin/ai/generate', requireAdmin, checkRateLimit, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
   const audioBase64 = req.body?.audioBase64 ? String(req.body.audioBase64) : null;
   const preferredModel = req.body?.preferredModel ? String(req.body.preferredModel) : '';
   const overrideKey = req.body?.apiKey ? String(req.body.apiKey).trim() : '';
+  const schemaType = req.body?.schemaType ? String(req.body.schemaType) : '';
+  const systemInstruction = req.body?.systemInstruction ? String(req.body.systemInstruction) : '';
+  const taskType = req.body?.taskType ? String(req.body.taskType) : 'admin_chat';
+  const temperature = req.body?.temperature != null ? Number(req.body.temperature) : null;
 
-  if (!prompt || prompt.length > 160000) {
+  if (!prompt || prompt.length > 250000) {
     return res.status(400).json({ error: 'Invalid prompt' });
   }
 
@@ -1028,12 +1110,70 @@ app.post('/api/admin/ai/generate', requireAdmin, async (req, res) => {
     if (!apiKey) {
       return res.status(400).json({ error: 'KEY' });
     }
-    const result = await callGemini({ apiKey, prompt, audioBase64, preferredModel });
+    const result = await generateGeminiServer({
+      apiKey,
+      prompt,
+      systemInstruction,
+      audioBase64,
+      preferredModel,
+      schemaType,
+      temperature,
+      taskType,
+    });
     return res.json(result);
   } catch (err) {
     const code = err?.message || 'AI_ERROR';
     const status = code === 'LIMIT' ? 429 : code === 'KEY' ? 403 : 502;
     return res.status(status).json({ error: code });
+  }
+});
+
+app.post('/api/admin/ai/validate', requireAdmin, checkRateLimit, async (req, res) => {
+  try {
+    const opId = String(req.body?.opId || '').trim();
+    if (req.body?.markExecuted === true) {
+      if (opId && isOpExecuted(opId)) {
+        return res.status(409).json({ error: 'تم تنفيذ هذه العملية بالفعل (منع التكرار).', duplicateOp: true });
+      }
+      if (opId) markOpExecuted(opId);
+      return res.json({ ok: true, opId, marked: true });
+    }
+    if (opId && isOpExecuted(opId)) {
+      return res.status(409).json({ error: 'تم تنفيذ هذه العملية بالفعل.', duplicateOp: true });
+    }
+
+    let catalogData = req.body?.catalogData;
+    if (!catalogData || !Array.isArray(catalogData.p)) {
+      const raw = await fetchRawCatalog(false);
+      catalogData = raw?.data || { p: [], cats: [], offers: [] };
+    }
+
+    const incomingProducts = Array.isArray(req.body?.products) ? req.body.products : [];
+    const incomingOps = Array.isArray(req.body?.ops) ? req.body.ops : [];
+
+    const productChecks = incomingProducts.map((item) => {
+      const dup = checkProductDuplicates(item, catalogData.p || []);
+      const priceVal = Number(item?.p != null ? item.p : item?.price || 0);
+      return {
+        name: String(item?.n || item?.name || '').trim(),
+        missingPrice: !(priceVal > 0),
+        exactDuplicates: dup.exactMatches.map((x) => ({ idx: x.idx, label: x.label, price: x.price, category: x.category })),
+        similarDuplicates: dup.similarMatches.map((x) => ({ idx: x.idx, label: x.label, price: x.price, category: x.category, reason: x.reason })),
+      };
+    });
+
+    const preview = incomingOps.length
+      ? previewAndValidateAdminOps({ ops: incomingOps, catalogData, opId })
+      : { opId: opId || '', valid: true, n: 0, del: 0, lines: [], ops: [], needsClarification: [], errors: [] };
+
+    return res.json({
+      ok: true,
+      opId: preview.opId || opId,
+      productChecks,
+      preview,
+    });
+  } catch (err) {
+    return res.status(400).json({ error: 'تعذر التحقق من صحة العملية المقترحة.' });
   }
 });
 
@@ -1223,6 +1363,57 @@ app.post('/api/admin/orders/:id/status', requireAdmin, async (req, res) => {
     const cfgErr = handleRtdbConfigError(err, res);
     if (cfgErr) return cfgErr;
     return res.status(502).json({ error: 'تعذر تحديث حالة الطلب.' });
+  }
+});
+
+app.delete('/api/admin/orders/:id', requireAdmin, async (req, res) => {
+  try {
+    const deleted = await userStore.deleteOrderById(req.params.id, {
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    if (!deleted) {
+      return res.status(404).json({ error: 'الطلب غير موجود.' });
+    }
+    safeAuditLog(
+      {
+        action: 'order_delete',
+        actorEmail: req.adminSession.email,
+        entityType: 'order',
+        entityId: String(req.params.id),
+        entityLabel: `طلب #${req.params.id}`,
+        details: 'حذف سجل طلب واتساب من لوحة الإدارة',
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true, id: String(req.params.id) });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر حذف الطلب.' });
+  }
+});
+
+app.delete('/api/admin/orders', requireAdmin, async (req, res) => {
+  try {
+    const result = await userStore.clearAllOrders({
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    safeAuditLog(
+      {
+        action: 'orders_clear',
+        actorEmail: req.adminSession.email,
+        entityType: 'order',
+        entityId: 'all',
+        entityLabel: 'سجل الطلبات',
+        details: `مسح جميع طلبات الواتساب (${Number(result?.deletedCount || 0)} طلب)`,
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true, deletedCount: Number(result?.deletedCount || 0) });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر مسح سجل الطلبات.' });
   }
 });
 
@@ -1714,6 +1905,10 @@ app.use((req, res) => {
   });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`Server running at http://${HOST}:${PORT}`);
-});
+if (process.env.NO_LISTEN !== '1') {
+  app.listen(PORT, HOST, () => {
+    console.log(`Server running at http://${HOST}:${PORT}`);
+  });
+}
+
+export { app };

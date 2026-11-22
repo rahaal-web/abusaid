@@ -2515,6 +2515,8 @@
             acts +=
               '<button class="btn btn-danger btn-sm" type="button" data-os="cancelled" data-oid="' + esc(ord.id) + '"' + dis + '>❌ إلغاء</button>';
           }
+          acts +=
+            '<button class="btn btn-danger btn-sm" type="button" data-odel="' + esc(ord.id) + '"' + dis + '>🗑 حذف</button>';
 
           return (
             '<article class="ucard">' +
@@ -2568,6 +2570,9 @@
       '<div class="sec-hdr-r">' +
       '<button class="btn btn-sm" type="button" id="oExportCsv">⬇ تصدير CSV</button>' +
       '<button class="btn btn-sm" type="button" id="oRefresh">🔄 تحديث</button>' +
+      '<button class="btn btn-danger btn-sm" type="button" id="oClearAll"' +
+      (!ordersData.length || ordersBusyId === '__all__' ? ' disabled' : '') +
+      '>🗑 مسح السجل</button>' +
       '</div></div>' +
       (ordersSetupNotice ? '<div class="alert alert-warn"><span>⚠️ ' + esc(ordersSetupNotice) + '</span></div>' : '') +
       '<div class="ufil">' +
@@ -2650,6 +2655,69 @@
       toast('تم تحديث حالة الطلب ✅');
     } catch (err) {
       toast(err && err.message ? err.message : 'تعذر تحديث حالة الطلب');
+    } finally {
+      ordersBusyId = '';
+      if (tab === 'orders') render();
+    }
+  }
+
+  async function deleteOrderAdmin(ordId) {
+    var ok = await askConfirm('هل تريد حذف هذا الطلب من سجل الطلبات؟', 'حذف الطلب');
+    if (!ok) return;
+    ordersBusyId = String(ordId);
+    if (tab === 'orders' && $('oList')) $('oList').innerHTML = renderOrderCardsHtml();
+    try {
+      var res = await fetch('/api/admin/orders/' + encodeURIComponent(ordId), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return;
+      }
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) throw new Error(data.error || 'تعذر حذف الطلب');
+      await loadOrders(true);
+      loadAuditLogs(true);
+      toast('تم حذف الطلب 🗑');
+    } catch (err) {
+      toast(err && err.message ? err.message : 'تعذر حذف الطلب');
+    } finally {
+      ordersBusyId = '';
+      if (tab === 'orders') render();
+    }
+  }
+
+  async function clearAllOrdersAdmin() {
+    var countAll = orderCounts.all || ordersData.length;
+    if (!countAll) return;
+    var ok = await askConfirm(
+      'سيتم حذف جميع الطلبات المسجلة (' + countAll + ' طلب) نهائياً. هل أنت متأكد؟',
+      'مسح سجل الطلبات'
+    );
+    if (!ok) return;
+    ordersBusyId = '__all__';
+    if (tab === 'orders') render();
+    try {
+      var res = await fetch('/api/admin/orders', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return;
+      }
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) throw new Error(data.error || 'تعذر مسح سجل الطلبات');
+      await loadOrders(true);
+      loadAuditLogs(true);
+      toast('تم مسح سجل الطلبات (' + Number(data.removed || 0) + ') 🗑');
+    } catch (err) {
+      toast(err && err.message ? err.message : 'تعذر مسح سجل الطلبات');
     } finally {
       ordersBusyId = '';
       if (tab === 'orders') render();
@@ -4100,23 +4168,60 @@
     });
     return out;
   }
-  function aiPrompt(text) {
-    return 'أنت مساعد لإدخال بيانات أصناف متجر جملة. حوّل النص التالي إلى JSON فقط بالشكل: {"products":[{"name":"","category":"","pack":"","price":0,"oldPrice":0,"variant":"","emoji":"","flavors":[""]}]}\nالأقسام الحالية: ' + JSON.stringify(D.cats) + '\nالنص:\n' + text;
+  function eng() {
+    return window.__ABU_AI_ENGINE__ || null;
   }
 
-  async function askGemini(key, prompt) {
+  var ADMIN_CHAT_SYS = [
+    'أنت مساعد ذكي لتاجر جملة مصري يدير كتالوج متجر أبو سعيد.',
+    'القاعدة الذهبية: لا تغيّر أو تحذف أو تعدّل أي صنف غير موجود في الكتالوج، ولا تخترع أسعاراً.',
+    'عند إضافة صنف جديد بدون سعر أو ببيانات ناقصة، اذكر النقص بوضوح واسأل التاجر بدل اختراع سعر.',
+    'إذا تشابه أكثر من صنف (مثلاً أحجام مختلفة لنفس الاسم)، لا تخمّن: اترك ops فارغة واسأل التاجر ليحدد الصنف المطلوب.',
+    'عند طلب تعديل جماعي أو حذف، جهّز ops دقيقة ليراجعها التاجر قبل الضغط على تنفيذ.',
+    'أعد الرد JSON فقط وفق المخطط المحدد.',
+  ].join('\n');
+
+  var ADMIN_BATCH_SYS = [
+    'أنت مساعد لاستخراج بيانات أصناف جملة مصرية من نص حر إلى JSON.',
+    'لا تخترع أسعاراً غير مذكورة في النص (اجعل price: 0 إذا لم يُذكر السعر).',
+    'التزم بأسماء الأقسام الحالية إن وُجد قسم مطابق، واستخرج النكهات والأحجام والعبوات بدقة.',
+  ].join('\n');
+
+  function aiPrompt(text) {
+    return (
+      'حوّل النص التالي إلى JSON فقط:\n' +
+      'الأقسام الحالية: ' + JSON.stringify(D.cats) + '\n' +
+      'الأصناف الحالية (للرجوع إلى الأسماء الدقيقة فقط): ' +
+      JSON.stringify(D.p.map(function (p) { return p[0] + (p[10] ? ' · ' + p[10] : ''); })) +
+      '\nالنص:\n' + text
+    );
+  }
+
+  async function askGemini(key, prompt, opts) {
+    opts = opts || {};
     var pref = '';
     try { pref = localStorage.getItem('abu_gm') || ''; } catch (e) {}
     var res = await fetch('/api/admin/ai/generate', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt, apiKey: key || undefined, preferredModel: pref }),
+      body: JSON.stringify({
+        prompt: prompt,
+        apiKey: key || undefined,
+        preferredModel: pref,
+        schemaType: opts.schemaType || undefined,
+        systemInstruction: opts.systemInstruction || undefined,
+        taskType: opts.taskType || 'admin_chat',
+        temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.2,
+      }),
     });
     if (res.status === 401) { handleAdminUnauthorized(); throw new Error('UNAUTH'); }
-    var data = await res.json();
+    var data = await res.json().catch(function () { return {}; });
     if (!res.ok) throw new Error(data.error || 'NOMODEL');
     if (data.model) { try { localStorage.setItem('abu_gm', data.model); } catch (e) {} }
+    if (opts.returnObject) {
+      return { text: data.text || '', structured: data.structured || null, model: data.model || '' };
+    }
     return data.text || '';
   }
 
@@ -4192,8 +4297,16 @@
   }
   function smOpen() { SM = []; smIn(SMT); }
 
-  var CH = { msgs: [], draft: [], busy: 0 }, CHF = false, chPendingPrompt = '';
-  function chReset() { CH.msgs = []; CH.draft = []; CH.busy = 0; CH.pend = null; CH.undo = null; }
+  var CH = { msgs: [], draft: [], busy: 0, pend: null, undo: null, pendingClarification: null, executedOpIds: {} }, CHF = false, chPendingPrompt = '';
+  function chReset() {
+    CH.msgs = [];
+    CH.draft = [];
+    CH.busy = 0;
+    CH.pend = null;
+    CH.undo = null;
+    CH.pendingClarification = null;
+    CH.executedOpIds = {};
+  }
 
   function renderChOpenDom(initialPrompt) {
     vStop(); CHF = true;
@@ -4233,12 +4346,16 @@
     d.innerHTML =
       (L.length
         ? '<div class="card2" style="margin:6px 0;padding:10px"><b>📝 المسودة (' + L.length + ')</b><div class="hint">' +
-          L.map(function (o) { return esc(o.n + (o.v ? ' · ' + o.v : '')) + ' — ' + (o.p > 0 ? o.p + ' ج' : 'بدون سعر'); }).join('<br>') +
+          L.map(function (o) {
+            var line = esc(o.n + (o.v ? ' · ' + o.v : '')) + ' — ' + (o.p > 0 ? o.p + ' ج' : 'بدون سعر');
+            if (o.w && o.w.length) line += ' <span style="color:#d97706">(' + esc(o.w[0]) + ')</span>';
+            return line;
+          }).join('<br>') +
           '</div><div class="r2" style="margin-top:8px"><button class="btn btn-success btn-sm" id="chrv" type="button">✅ مراجعة وإضافة</button><button class="btn btn-danger btn-sm" id="chnw" type="button" style="flex:none">مسح</button></div></div>'
         : '') + chEdCard();
   }
 
-  function nr(s) { return String(s == null ? '' : s).replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }).toLowerCase().trim(); }
+  function nr(s) { return String(s == null ? '' : s).replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }).toLowerCase().trim(); }
   function nn(v) { if (v == null || v === '') return null; v = parseFloat(nr(v)); return isFinite(v) ? v : null; }
   function ar(v) { return v == null ? [] : [].concat(v); }
   function sv(b, i, v) { if (v || b.length > i) b[i] = v; }
@@ -4262,8 +4379,10 @@
   }
   function edProd(X, o, R) {
     var d = o['do'] || {}, w = o.where || {}, keep = [];
-    X.p.forEach(function (p) {
-      if (!edMatch(X, p, w)) { keep.push(p); return; }
+    var idxSet = Array.isArray(o.resolvedIndices) && o.resolvedIndices.length ? o.resolvedIndices : null;
+    X.p.forEach(function (p, idx) {
+      var hit = idxSet ? idxSet.indexOf(idx) > -1 : edMatch(X, p, w);
+      if (!hit) { keep.push(p); return; }
       if (d['delete'] === true) { R.lines.push('🗑 حذف: ' + pl(p)); R.del++; R.n++; return; }
       var a = JSON.parse(JSON.stringify(p)), b = p, pr = +b[3], bo = +b[11] || 0, t;
       if ((t = nn(d.setPrice)) != null) pr = t;
@@ -4278,23 +4397,52 @@
       if (d.setName && String(d.setName).trim()) b[0] = String(d.setName).trim();
       if (d.setCategory) { var cc = catOf(X, d.setCategory) || String(d.setCategory).trim(); if (cc && X.cats.indexOf(cc) < 0) X.cats.push(cc); if (cc) b[1] = cc; }
       if (d.setPack != null) b[2] = String(d.setPack).trim();
+      if (d.setVariant != null) sv(b, 10, String(d.setVariant).trim());
       if (d.hide === true) b[7] = 1; else if (d.hide === false) b[7] = 0;
-      if (a[3] != b[3] || a[0] != b[0] || a[1] != b[1] || !!a[7] != !!b[7]) { R.lines.push(pl(a) + ' ← ' + b[3] + ' ج'); R.n++; }
+      var fl = Array.isArray(b[9]) ? b[9] : [];
+      if (Array.isArray(d.addFlavors) && d.addFlavors.length) {
+        d.addFlavors.forEach(function (rf) {
+          var cf = String(rf || '').trim();
+          if (cf && !fl.some(function (f) { return nr(f[0]) === nr(cf); })) fl.push([cf, 0]);
+        });
+        b[9] = fl;
+      }
+      if (Array.isArray(d.removeFlavors) && d.removeFlavors.length) {
+        var rms = d.removeFlavors.map(nr).filter(Boolean);
+        fl = fl.filter(function (f) { return !rms.some(function (r) { return nr(f[0]) === r || nr(f[0]).indexOf(r) > -1; }); });
+        b[9] = fl;
+      }
+      if (Array.isArray(d.hideFlavors) && d.hideFlavors.length) {
+        var hds = d.hideFlavors.map(nr).filter(Boolean);
+        fl.forEach(function (f) { if (hds.some(function (r) { return nr(f[0]) === r || nr(f[0]).indexOf(r) > -1; })) f[1] = 1; });
+        b[9] = fl;
+      }
+      if (Array.isArray(d.showFlavors) && d.showFlavors.length) {
+        var shs = d.showFlavors.map(nr).filter(Boolean);
+        fl.forEach(function (f) { if (shs.some(function (r) { return nr(f[0]) === r || nr(f[0]).indexOf(r) > -1; })) f[1] = 0; });
+        b[9] = fl;
+      }
+      b[12] = new Date().toISOString();
+      if (JSON.stringify(a) !== JSON.stringify(b)) { R.lines.push(pl(a) + ' ← ' + b[3] + ' ج'); R.n++; }
       keep.push(b);
     });
     X.p = keep;
   }
   function edCat(X, o, R) {
-    var a = o['do'], f = o.from || o.name, t = String(o.to == null ? '' : o.to).trim(), c;
+    var a = o['do'] || o.action, f = o.from || o.name, t = String(o.to == null ? '' : o.to).trim(), c;
     if (a == 'add') { var n = String(o.name || o.to || '').trim(); if (n && !catEx(X, n)) { X.cats.push(n); R.lines.push('➕ قسم جديد: ' + n); R.n++; } }
     else if (a == 'rename') { c = catOf(X, f); if (!c || !t || t == c) return; X.p.forEach(function (p) { if (p[1] == c) p[1] = t; }); X.cats[X.cats.indexOf(c)] = t; R.lines.push('🗂 تعديل قسم «' + c + '» ← «' + t + '»'); R.n++; }
     else if (a == 'delete') { c = catEx(X, f); if (!c) return; var k2 = X.p.filter(function (p) { return p[1] == c; }).length; X.p = X.p.filter(function (p) { return p[1] != c; }); X.cats.splice(X.cats.indexOf(c), 1); R.lines.push('🗑 حذف قسم «' + c + '»'); R.del += k2 || 1; R.n++; }
   }
   function edOff(X, o, R) {
-    var L = X.offers || (X.offers = []), a = o['do'];
+    var L = X.offers || (X.offers = []), a = o['do'] || o.action;
     if (a == 'add') { var t = String(o.title || '').trim(); if (!t) return; L.push({ t: t, d: String(o.desc || ''), pr: String(o.price || ''), g: String(o.badge || ''), c: PAL[0][1], i: '', x: 0 }); R.lines.push('🎁 عرض جديد: ' + t); R.n++; }
   }
   function edApply(X, ops) {
+    var E = eng();
+    if (E && typeof E.applyValidatedAdminOps === 'function') {
+      return E.applyValidatedAdminOps(X, ops);
+    }
     var R = { lines: [], n: 0, del: 0 };
     (ops || []).forEach(function (o) {
       if (!o || typeof o != 'object') return;
@@ -4305,9 +4453,75 @@
     return R;
   }
   function chPrompt() {
-    var cat = D.p.slice(0, 200).map(function (p) { return p[0] + ' | ' + p[1] + ' | ' + p[3] + (p[7] ? ' | مخفي' : ''); }).join('\n');
+    // Pass the ENTIRE catalog (never truncate with slice(0, 200))
+    var cat = D.p.map(function (p, idx) {
+      var fl = Array.isArray(p[9])
+        ? p[9].map(function (f) { return f[0] + (f[1] ? '(مخفي)' : ''); }).join('،')
+        : '';
+      return (
+        idx + '|' + p[0] +
+        (p[10] ? ' [' + p[10] + ']' : '') +
+        (p[2] ? ' (' + p[2] + ')' : '') +
+        ' | ' + p[1] +
+        ' | ' + p[3] + 'ج' +
+        (p[7] ? ' | مخفي' : '') +
+        (fl ? ' | نكهات: ' + fl : '')
+      );
+    }).join('\n');
+    var draftTxt = CH.draft.length
+      ? '\nالمسودة الحالية:\n' + CH.draft.map(function (o) {
+          return '- ' + o.n + (o.v ? ' · ' + o.v : '') + ' | سعر: ' + (o.p > 0 ? o.p : 'ناقص') + ' | قسم: ' + (o.c || 'غير محدد');
+        }).join('\n')
+      : '';
+    var clarTxt = CH.pendingClarification
+      ? '\nسؤال توضيحي مفتوح بانتظار التاجر:\n' + JSON.stringify(CH.pendingClarification)
+      : '';
     var tr = CH.msgs.slice(-12).map(function (x) { return (x.r == 'u' ? 'التاجر: ' : 'المساعد: ') + x.t; }).join('\n');
-    return 'أنت مساعد تاجر جملة مصري. ارجع JSON فقط بالشكل: {"reply":"","products":[{"name":"","category":"","pack":"","price":0,"oldPrice":0,"variant":"","emoji":"","flavors":[""]}],"ops":[],"action":"none"}\nالأقسام: ' + JSON.stringify(D.cats) + '\nالأصناف الحالية:\n' + cat + '\nالمحادثة:\n' + tr;
+    return (
+      'الأقسام (' + D.cats.length + '): ' + JSON.stringify(D.cats) +
+      '\nإجمالي الأصناف (' + D.p.length + '):\n' + cat +
+      draftTxt +
+      clarTxt +
+      '\nالمحادثة:\n' + tr
+    );
+  }
+  function annotateDraftDuplicates(items) {
+    var E = eng();
+    return (items || []).map(function (o) {
+      o.w = Array.isArray(o.w) ? o.w : [];
+      if (!(o.p > 0) && o.w.indexOf('مفيش سعر، اكتبه') < 0 && o.w.indexOf('السعر مطلوب ولم يتم تحديده') < 0) {
+        o.w.push('السعر مطلوب ولم يتم تحديده');
+      }
+      if (E && typeof E.checkProductDuplicates === 'function') {
+        var dup = E.checkProductDuplicates(o, D.p);
+        var matches = (dup.exactMatches || []).concat(dup.similarMatches || []);
+        if (matches.length) {
+          var dupWarn = '⚠️ صنف مشابه/مكرر موجود بالفعل: ' + matches.slice(0, 3).map(function (x) {
+            return x.label + ' (' + x.price + ' ج)';
+          }).join('، ');
+          if (o.w.indexOf(dupWarn) < 0) o.w.push(dupWarn);
+        }
+      }
+      return o;
+    });
+  }
+  async function validateAdminWithServer(payload) {
+    try {
+      var res = await fetch('/api/admin/ai/validate', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return null;
+      }
+      var data = await res.json().catch(function () { return null; });
+      return { status: res.status, ok: res.ok, data: data };
+    } catch (e) {
+      return null;
+    }
   }
   function chEdCard() {
     var P = CH.pend, h = '';
@@ -4320,15 +4534,52 @@
     return h;
   }
   function chExec() {
-    var P = CH.pend; if (!P) return;
-    var proceed = function () {
-      CH.undo = JSON.stringify(D);
-      var R = edApply(D, P.ops);
-      D.offers = D.offers || [];
+    var P = CH.pend;
+    if (!P || CH.busy) return;
+    if (P.opId && CH.executedOpIds[P.opId]) {
+      toast('تم تنفيذ هذه العملية بالفعل.');
       CH.pend = null;
-      mark();
-      CH.msgs.push({ r: 'a', t: 'تم التنفيذ ✅ (' + R.n + ' تعديل). لا تنسَ الضغط على «نشر التعديلات».' });
-      chRender(); render();
+      chRender();
+      return;
+    }
+    var proceed = async function () {
+      var btn = $('chex');
+      if (btn) btn.disabled = true;
+      CH.busy = 1;
+      try {
+        if (P.opId) {
+          var srv = await validateAdminWithServer({
+            ops: P.ops || [],
+            catalogData: D,
+            opId: P.opId,
+            markExecuted: true,
+          });
+          if (srv && srv.data && srv.data.duplicateOp) {
+            CH.pend = null;
+            CH.msgs.push({ r: 'a', t: 'هذه العملية نُفذت مسبقاً (تم منع التكرار).' });
+            chRender();
+            return;
+          }
+          if (srv && !srv.ok && srv.data && srv.data.error) {
+            toast(srv.data.error);
+            chRender();
+            return;
+          }
+          CH.executedOpIds[P.opId] = true;
+        }
+        CH.undo = JSON.stringify(D);
+        var R = edApply(D, P.ops);
+        D.offers = D.offers || [];
+        CH.pend = null;
+        CH.pendingClarification = null;
+        mark();
+        CH.msgs.push({ r: 'a', t: 'تم التنفيذ ✅ (' + R.n + ' تعديل). لا تنسَ الضغط على «نشر التعديلات».' });
+      } finally {
+        CH.busy = 0;
+        if (btn) btn.disabled = false;
+        chRender();
+        render();
+      }
     };
     if (P.del) askConfirm('العملية ستحذف ' + P.del + ' عنصر. هل أنت متأكد؟', 'تنفيذ الحذف').then(function (ok) { if (ok) proceed(); });
     else proceed();
@@ -4336,9 +4587,17 @@
   function chUndo() {
     if (!CH.undo) return;
     D = JSON.parse(CH.undo);
-    CH.undo = null; CH.pend = null; mark();
+    CH.undo = null; CH.pend = null; CH.pendingClarification = null; mark();
     CH.msgs.push({ r: 'a', t: 'تم التراجع عن آخر تعديل ↩️' });
     chRender(); render();
+  }
+  function applyAdminLocalTurnResult(resObj) {
+    if (Array.isArray(resObj.draft)) {
+      CH.draft = annotateDraftDuplicates(resObj.draft);
+    }
+    CH.pendingClarification = resObj.pendingClarification || null;
+    CH.pend = resObj.pendingOps && resObj.pendingOps.valid ? resObj.pendingOps : null;
+    CH.msgs.push({ r: 'a', t: String(resObj.reply || 'تمام') });
   }
   async function chSend() {
     if (CH.busy) return;
@@ -4347,21 +4606,92 @@
     var k = $('smk') ? $('smk').value.trim() : '';
     er.textContent = '';
     CH.msgs.push({ r: 'u', t: t }); ta.value = ''; SMT = ''; CH.busy = 1; chRender();
+    var E = eng();
     try {
-      var raw = await askGemini(k, chPrompt()), j = JSON.parse(raw.replace(/```json|```/g, '').trim());
+      // If an explicit numeric/text disambiguation choice was pending, try local resolution immediately too
+      if (CH.pendingClarification && E && typeof E.parseAdminLocalTurn === 'function') {
+        var clarRes = E.parseAdminLocalTurn({
+          text: t,
+          catalogData: D,
+          currentDraft: CH.draft,
+          pendingClarification: CH.pendingClarification,
+        });
+        if (clarRes && (clarRes.pendingOps || clarRes.pendingClarification === null && clarRes.draft.length !== CH.draft.length)) {
+          applyAdminLocalTurnResult(clarRes);
+          CH.busy = 0; chRender();
+          return;
+        }
+      }
+
+      var aiRes = await askGemini(k, chPrompt(), {
+        schemaType: 'admin_chat',
+        systemInstruction: ADMIN_CHAT_SYS,
+        taskType: 'admin_chat',
+        temperature: 0.2,
+        returnObject: true,
+      });
+      var j = aiRes.structured;
+      if (!j || typeof j !== 'object') {
+        j = JSON.parse(String(aiRes.text || '').replace(/```json|```/g, '').trim());
+      }
       if (Array.isArray(j)) j = { products: j };
       var L = (Array.isArray(j.products) ? j.products : []).map(nz).filter(function (o) { return o.n; });
-      if (L.length) CH.draft = fixList(L, t);
-      CH.msgs.push({ r: 'a', t: String(j.reply || 'تمام') });
+      if (L.length) CH.draft = annotateDraftDuplicates(fixList(L, t));
+
       var ops = Array.isArray(j.ops) ? j.ops : [];
       CH.pend = null;
       if (ops.length) {
-        var R1 = edApply(JSON.parse(JSON.stringify(D)), ops);
-        if (R1.n) { R1.ops = ops; CH.pend = R1; }
+        var preview = E && typeof E.previewAndValidateAdminOps === 'function'
+          ? E.previewAndValidateAdminOps({ ops: ops, catalogData: D })
+          : null;
+        var srvPreview = await validateAdminWithServer({ ops: ops, catalogData: D });
+        if (srvPreview && srvPreview.ok && srvPreview.data && srvPreview.data.preview) {
+          preview = srvPreview.data.preview;
+        }
+        if (preview) {
+          if (preview.needsClarification && preview.needsClarification.length) {
+            var nc = preview.needsClarification[0];
+            CH.pendingClarification = { type: 'disambiguate_op', op: nc.op, candidates: nc.candidates };
+            CH.msgs.push({
+              r: 'a',
+              t: 'يوجد أكثر من صنف مطابق، حدد المقصود بالرقم أو الاسم:\n' +
+                nc.candidates.map(function (c, idx2) { return (idx2 + 1) + ') ' + c.label + ' (' + c.category + ') — ' + c.price + ' ج'; }).join('\n'),
+            });
+          } else if (preview.valid) {
+            CH.pend = preview;
+            CH.pendingClarification = null;
+            CH.msgs.push({ r: 'a', t: String(j.reply || 'راجِع التعديلات المقترحة ثم اضغط «تنفيذ».') });
+          } else {
+            var errMsg = (preview.errors && preview.errors.length) ? preview.errors.join('\n') : 'لم أجد أصنافاً مطابقة للتعديل المطلوب.';
+            CH.msgs.push({ r: 'a', t: errMsg });
+          }
+        } else {
+          var R1 = edApply(JSON.parse(JSON.stringify(D)), ops);
+          if (R1.n) {
+            R1.ops = ops;
+            R1.opId = 'op_' + Date.now().toString(36);
+            CH.pend = R1;
+          }
+          CH.msgs.push({ r: 'a', t: String(j.reply || 'تمام') });
+        }
+      } else {
+        CH.msgs.push({ r: 'a', t: String(j.reply || 'تمام') });
       }
       CH.busy = 0; chRender();
       if (j.action == 'review' && CH.draft.length) chReview();
     } catch (x) {
+      if (E && typeof E.parseAdminLocalTurn === 'function') {
+        var localRes = E.parseAdminLocalTurn({
+          text: t,
+          catalogData: D,
+          currentDraft: CH.draft,
+          pendingClarification: CH.pendingClarification,
+        });
+        applyAdminLocalTurnResult(localRes);
+        CH.busy = 0;
+        chRender();
+        return;
+      }
       CH.msgs.pop(); CH.busy = 0;
       if ($('smt')) $('smt').value = t;
       if ($('sme')) $('sme').textContent = x && x.message == 'KEY' ? 'مفتاح Gemini غير مضبوط في الإعدادات' : 'تعذر الاتصال بالمساعد، حاول مرة أخرى';
@@ -4375,7 +4705,9 @@
     SM.forEach(function (o, i) {
       var cs = D.cats.slice(); if (o.c && cs.indexOf(o.c) < 0) cs.push(o.c);
       var a = ' data-si="' + i + '" data-sk=';
+      var warns = (o.w && o.w.length) ? '<div class="hint" style="color:#d97706;margin-bottom:6px">' + o.w.map(esc).join('<br>') + '</div>' : '';
       h += '<div class="card2"><label class="ck" style="margin:0"><input type="checkbox"' + a + '"on"' + (o.on ? ' checked' : '') + '> إضافة الصنف</label>' +
+        warns +
         '<label>الاسم</label><input' + a + '"n" value="' + esc(o.n) + '">' +
         '<div class="r2"><div><label>السعر</label><input type="number"' + a + '"p" value="' + (o.p || '') + '"></div><div><label>القسم</label><select' + a + '"c">' +
         cs.map(function (c) { return '<option' + (c == o.c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') +
@@ -4423,7 +4755,7 @@
     return ok;
   }
   function chReview() {
-    var list = JSON.parse(JSON.stringify(CH.draft));
+    var list = annotateDraftDuplicates(JSON.parse(JSON.stringify(CH.draft)));
     list.forEach(function (o) { o.on = 1; o.c = o.c ? mc(o.c) : D.cats[0] || 'عام'; });
     SM = list; smRv();
   }
@@ -4437,10 +4769,21 @@
       if (ai) {
         var k = $('smk') ? $('smk').value.trim() : '';
         er.textContent = '⏳ جاري التحليل...';
-        var raw = await askGemini(k, aiPrompt(tx)), j = JSON.parse(raw.replace(/```json|```/g, '').trim());
-        list = (Array.isArray(j) ? j : j.products || []).map(nz);
+        try {
+          var aiRes = await askGemini(k, aiPrompt(tx), {
+            schemaType: 'admin_batch',
+            systemInstruction: ADMIN_BATCH_SYS,
+            taskType: 'admin_batch',
+            temperature: 0.1,
+            returnObject: true,
+          });
+          var j = aiRes.structured || JSON.parse(String(aiRes.text || '').replace(/```json|```/g, '').trim());
+          list = (Array.isArray(j) ? j : j.products || []).map(nz);
+        } catch (aiErr) {
+          list = lp(tx);
+        }
       } else list = lp(tx);
-      list = fixList(list.filter(function (o) { return o.n; }), tx);
+      list = annotateDraftDuplicates(fixList(list.filter(function (o) { return o.n; }), tx));
       if (!list.length) { er.textContent = 'لم أستطع استخراج أصناف من النص'; return; }
       list.forEach(function (o) { o.c = o.c ? mc(o.c) : D.cats[0] || 'عام'; });
       SM = list; smRv();
@@ -4546,16 +4889,30 @@
       var sel = SM.filter(function (o) { return o.on && o.n; });
       if (!sel.length) return toast('اختر صنفاً واحداً على الأقل');
       if (sel.some(function (o) { return !(o.p > 0); })) return toast('أكمل السعر لكل الأصناف المحددة');
-      sel.forEach(function (o) {
-        var k = pk(o), a = [o.n, o.c, o.d, o.p, PAL[k][1], PAL[k][2], o.e || '🥔', 0, ''];
-        if (o.f.length) a[9] = o.f.map(function (f) { return [f, 0]; });
-        if (o.v) a[10] = o.v;
-        if (o.o > o.p) a[11] = o.o;
-        if (D.cats.indexOf(o.c) < 0) D.cats.push(o.c);
-        D.p.push(a);
-      });
-      chReset(); SM = []; SMT = ''; mark(); closeEd(true); render();
-      toast('تمت إضافة ' + sel.length + ' صنف ✅ لا تنسَ النشر');
+      var E = eng();
+      var hasExactDup = E && typeof E.checkProductDuplicates === 'function'
+        ? sel.some(function (o) { return (E.checkProductDuplicates(o, D.p).exactMatches || []).length > 0; })
+        : false;
+      var commitAdd = function () {
+        sel.forEach(function (o) {
+          var k = pk(o), a = [o.n, o.c, o.d, o.p, PAL[k][1], PAL[k][2], o.e || '🥔', 0, ''];
+          if (o.f.length) a[9] = o.f.map(function (f) { return [f, 0]; });
+          if (o.v) a[10] = o.v;
+          if (o.o > o.p) a[11] = o.o;
+          a[12] = new Date().toISOString();
+          if (D.cats.indexOf(o.c) < 0) D.cats.push(o.c);
+          D.p.push(a);
+        });
+        chReset(); SM = []; SMT = ''; mark(); closeEd(true); render();
+        toast('تمت إضافة ' + sel.length + ' صنف ✅ لا تنسَ النشر');
+      };
+      if (hasExactDup) {
+        askConfirm('يوجد صنف مطابق بالفعل في الكتالوج لبعض الاختيارات المحددة. هل تريد إضافته على أي حال؟', 'تأكيد إضافة مكرر').then(function (ok) {
+          if (ok) commitAdd();
+        });
+      } else {
+        commitAdd();
+      }
     }
   });
 
@@ -4725,8 +5082,10 @@
 
     // Orders & Users
     if (t.id === 'oRefresh') { loadOrders(false); return; }
+    if (t.id === 'oClearAll' || t.closest('#oClearAll')) { clearAllOrdersAdmin(); return; }
     if ((b = t.closest('[data-of]'))) { orderFilter = b.dataset.of; render(); return; }
     if ((b = t.closest('[data-os]'))) { updateOrderStatusAdmin(b.dataset.oid, b.dataset.os); return; }
+    if ((b = t.closest('[data-odel]'))) { deleteOrderAdmin(b.dataset.odel); return; }
     if (t.id === 'oExportCsv' || t.id === 'repExportOrdersCsv') {
       exportCsvRows('abusaid-orders.csv', ['رقم الطلب', 'العميل', 'الهاتف', 'المحل', 'الحالة', 'الكمية', 'الإجمالي', 'التاريخ'], ordersData.map(function (o) {
         return [o.id, o.userName, o.userPhone, o.shopName, o.status, o.totalQty, o.totalPrice, o.createdAt];

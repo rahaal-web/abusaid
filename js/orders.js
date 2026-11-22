@@ -9,7 +9,12 @@ const ordersState = {
   error: '',
   lastPostKey: '',
   lastPostAt: 0,
+  armedDeleteId: '',
+  armedClearAll: false,
+  busy: false,
 };
+let armSingleTimer = null;
+let armClearTimer = null;
 
 function formatDateTimeAr(iso) {
   if (!iso) return '—';
@@ -76,8 +81,14 @@ function buildOrderItemsFromCart() {
 function updateOrdersHeaderBadge() {
   const badge = $('hdrOrdersCount');
   const btn = $('hdrOrdersBtn');
-  if (!badge) return;
+  const clearBtn = $('ordersClearBtn');
   const count = ordersState.orders.length;
+  if (clearBtn) {
+    clearBtn.hidden = count === 0;
+    clearBtn.disabled = ordersState.busy;
+    clearBtn.textContent = ordersState.armedClearAll ? 'تأكيد مسح السجل؟' : 'مسح السجل';
+  }
+  if (!badge) return;
   if (count > 0) {
     badge.textContent = numAr(count);
     badge.hidden = false;
@@ -90,6 +101,7 @@ function updateOrdersHeaderBadge() {
 
 function renderOrdersBody() {
   const body = $('ordersBody');
+  updateOrdersHeaderBadge();
   if (!body) return;
 
   if (ordersState.loading && !ordersState.orders.length) {
@@ -210,6 +222,11 @@ function renderOrdersBody() {
                   ? `<a class="ord-btn wa" target="_blank" rel="noopener noreferrer" href="${waHref}">📲 إرسال واتساب</a>`
                   : ''
               }
+              <button type="button" class="ord-btn del${
+                ordersState.armedDeleteId === String(ord.id) ? ' armed' : ''
+              }" data-ord-del="${esc(ord.id)}"${ordersState.busy ? ' disabled' : ''}>${
+                ordersState.armedDeleteId === String(ord.id) ? '⚠️ تأكيد الحذف؟' : '🗑 حذف'
+              }</button>
             </div>
           </div>
         </article>`;
@@ -440,16 +457,103 @@ export function closeOrdersModal() {
   popOverlay('orders');
 }
 
+async function handleDeleteSingleOrder(orderId) {
+  const idStr = String(orderId || '').trim();
+  if (!idStr || ordersState.busy) return;
+  if (ordersState.armedDeleteId !== idStr) {
+    ordersState.armedDeleteId = idStr;
+    clearTimeout(armSingleTimer);
+    armSingleTimer = setTimeout(() => {
+      ordersState.armedDeleteId = '';
+      if ($('ordersSheet')?.classList.contains('on')) renderOrdersBody();
+    }, 3200);
+    renderOrdersBody();
+    return;
+  }
+  clearTimeout(armSingleTimer);
+  ordersState.armedDeleteId = '';
+  ordersState.busy = true;
+  renderOrdersBody();
+  try {
+    const res = await fetch('/api/orders/' + encodeURIComponent(idStr), {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (res.status === 401) {
+      window.location.replace('/login?reason=expired');
+      return;
+    }
+    if (res.status === 403) {
+      window.location.replace('/account-status');
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'تعذر حذف الطلب.');
+    ordersState.orders = ordersState.orders.filter((o) => String(o.id) !== idStr);
+    showToast('تم حذف الطلب من السجل 🗑');
+  } catch (err) {
+    showToast(err?.message || 'تعذر حذف الطلب', 'warn');
+  } finally {
+    ordersState.busy = false;
+    updateOrdersHeaderBadge();
+    if ($('ordersSheet')?.classList.contains('on')) renderOrdersBody();
+  }
+}
+
+async function handleClearAllOrders() {
+  if (!ordersState.orders.length || ordersState.busy) return;
+  if (!ordersState.armedClearAll) {
+    ordersState.armedClearAll = true;
+    clearTimeout(armClearTimer);
+    armClearTimer = setTimeout(() => {
+      ordersState.armedClearAll = false;
+      updateOrdersHeaderBadge();
+    }, 3200);
+    updateOrdersHeaderBadge();
+    return;
+  }
+  clearTimeout(armClearTimer);
+  ordersState.armedClearAll = false;
+  ordersState.busy = true;
+  renderOrdersBody();
+  try {
+    const res = await fetch('/api/orders', {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (res.status === 401) {
+      window.location.replace('/login?reason=expired');
+      return;
+    }
+    if (res.status === 403) {
+      window.location.replace('/account-status');
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'تعذر مسح سجل الطلبات.');
+    ordersState.orders = [];
+    showToast('تم مسح سجل طلباتك بالكامل 🗑');
+  } catch (err) {
+    showToast(err?.message || 'تعذر مسح سجل الطلبات', 'warn');
+  } finally {
+    ordersState.busy = false;
+    updateOrdersHeaderBadge();
+    if ($('ordersSheet')?.classList.contains('on')) renderOrdersBody();
+  }
+}
+
 export function initOrdersUI() {
   const hdrBtn = $('hdrOrdersBtn');
   const closeBtn = $('ordersClose');
   const refreshBtn = $('ordersRefreshBtn');
+  const clearBtn = $('ordersClearBtn');
   const sheet = $('ordersSheet');
   const body = $('ordersBody');
 
   if (hdrBtn) hdrBtn.addEventListener('click', openOrdersModal);
   if (closeBtn) closeBtn.addEventListener('click', closeOrdersModal);
   if (refreshBtn) refreshBtn.addEventListener('click', () => loadUserOrders(true));
+  if (clearBtn) clearBtn.addEventListener('click', handleClearAllOrders);
   if (sheet) {
     sheet.addEventListener('click', (e) => {
       if (e.target === sheet) closeOrdersModal();
@@ -460,6 +564,11 @@ export function initOrdersUI() {
       const retry = e.target.closest('#ordRetryBtn');
       if (retry) {
         loadUserOrders(true);
+        return;
+      }
+      const delBtn = e.target.closest('[data-ord-del]');
+      if (delBtn) {
+        handleDeleteSingleOrder(delBtn.dataset.ordDel);
         return;
       }
       const reorderBtn = e.target.closest('[data-ord-reorder]');

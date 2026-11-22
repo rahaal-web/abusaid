@@ -227,7 +227,17 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
   function loadAdminScript() {
     if (loaded) return;
     loaded = true;
-    ensureAdminCss()
+    var ver = Date.now();
+    Promise.all([
+      ensureAdminCss(),
+      import('/admin-ai-engine.js?v=' + ver)
+        .then(function (mod) {
+          window.__ABU_AI_ENGINE__ = mod;
+        })
+        .catch(function () {
+          return null;
+        }),
+    ])
       .then(function () {
         var srcUrl = '/admin-app.js?v=' + Date.now();
         var s = document.createElement('script');

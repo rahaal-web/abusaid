@@ -9,6 +9,16 @@ import {
 import { ovf } from './store.js';
 import { $, AN, pname, saveCart, state, totals } from './state.js';
 import { esc, FL, isOut, money, numAr, rnd, rn, rtk } from './utils.js';
+import {
+  buildStoreKB as engineBuildStoreKB,
+  computeDraftTotals,
+  dedupeAndNormalizeDraft,
+  getProductDisplayName,
+  getProductFlavors,
+  isProductOutOfStock,
+  processCustomerTurn,
+  validateCustomerGeminiResponse,
+} from './ai-engine.js';
 
 let RL = [];
 let RU = [];
@@ -21,9 +31,23 @@ const CH = {
   quick: [],
   pendingFlavorIdx: -1,
   pendingAltCands: null,
+  pendingClarification: null,
+  lastReferencedProductIdx: -1,
 };
 
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function getCatalogSnapshot() {
+  return {
+    p: Array.isArray(state.P) ? state.P : [],
+    cats: Array.isArray(state.D?.cats) ? state.D.cats : [],
+    offers: Array.isArray(state.D?.offers) ? state.D.offers : [],
+    cfg: state.CFG && typeof state.CFG === 'object' ? state.CFG : {},
+  };
+}
+
+const SR =
+  typeof window !== 'undefined'
+    ? window.SpeechRecognition || window.webkitSpeechRecognition
+    : null;
 let VR = null;
 let VON = false;
 let VERR = 0;
@@ -414,7 +438,7 @@ function handleAiAuthCheck(status, data) {
   }
 }
 
-async function rGem(prompt) {
+async function rGem(prompt, opts = {}) {
   let preferredModel = '';
   try {
     preferredModel = localStorage.getItem('rai_m') || '';
@@ -427,22 +451,60 @@ async function rGem(prompt) {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       signal: ac.signal,
-      body: JSON.stringify({ prompt, preferredModel }),
+      body: JSON.stringify({
+        prompt,
+        preferredModel,
+        schemaType: opts.schemaType || '',
+        systemInstruction: opts.systemInstruction || '',
+        taskType: opts.taskType || 'customer_chat',
+        temperature: opts.temperature,
+      }),
     });
     const d = await r.json().catch(() => ({}));
     handleAiAuthCheck(r.status, d);
-    if (r.ok && d.text) {
+    if (r.ok && (d.text || d.structured)) {
       if (d.model) {
         try {
           localStorage.setItem('rai_m', d.model);
         } catch {}
       }
-      return d.text;
+      if (opts.returnObject) return d;
+      return d.text || JSON.stringify(d.structured);
     }
     throw new Error(d.error || 'NOMODEL');
   } finally {
     clearTimeout(tm);
   }
+}
+
+async function validateCustomerWithServer(geminiJson, userMessage) {
+  const localValidated = validateCustomerGeminiResponse({
+    geminiJson,
+    userMessage,
+    currentDraft: RL,
+    catalogData: getCatalogSnapshot(),
+  });
+  try {
+    const res = await fetch('/api/ai/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        geminiResult: geminiJson,
+        message: userMessage,
+        currentDraft: RL,
+      }),
+    });
+    if (res.ok) {
+      const serverData = await res.json().catch(() => null);
+      if (serverData && serverData.ok && Array.isArray(serverData.draft)) {
+        return serverData;
+      }
+    }
+  } catch {
+    // Non-fatal fallback to local authoritative validator
+  }
+  return localValidated;
 }
 
 function rCat() {
@@ -514,24 +576,39 @@ function chFix(L) {
 }
 
 async function rAI(text) {
+  const unit = (state.CFG && state.CFG.unit) || 'كرتونة';
+  const sys =
+    'أنت محلل طلبات جملة دقيق لمتجر أبو سعيد. التزم تماماً بالكتالوج المرفق، ولا تخترع أصنافاً أو نكهات أو أسعاراً غير موجودة. احترم وحدة البيع: ' +
+    unit +
+    '.';
   const pr =
-    'أنت مساعد دقيق لاستلام طلبات متجر جملة. العميل كتب أو قال طلبه بالعامية المصرية (ممكن يكون فيه أخطاء إملائية أو أخطاء من التعرف على الصوت). طابق كل صنف في كلامه مع الكتالوج بدقة واستخرج الكمية.\n' +
+    'العميل كتب أو قال طلبه بالعامية المصرية (ممكن يحتوي أخطاء إملائية أو أخطاء تحويل صوت لنص). طابق كل صنف مع الكتالوج واستخرج الكمية والنكهة.\n' +
     'الكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|القسم|النكهات بصيغة رقم=اسم):\n' +
     rCat() +
-    '\nأرجع JSON فقط بالشكل: {"items":[{"i":0,"f":-1,"q":1,"a":false,"alt":[]}],"unknown":[""]}\nالقواعد:\n' +
-    '- i هو رقم الصنف من الكتالوج بالظبط، و f رقم النكهة أو -1 لو الصنف مالوش نكهات أو العميل ماحددش نكهة، و q الكمية.\n' +
-    '- لو الكتالوج فيه أكتر من صنف بنفس الاسم (أحجام أو أسعار مختلفة) اختار بالحجم أو السعر أو العبوة اللي ذكرها العميل (زي 5 جنيه أو 10 جنيه أو كبير أو صغير). لو ماذكرش حاجة تفرّق، اعتبر الصنف غير مؤكد.\n' +
-    '- a تكون true لو مش متأكد من الصنف أو في أكتر من صنف ممكن يكون المقصود، وحط في alt أرقام الأصناف البديلة المحتملة (لحد 4). لو متأكد خلي a=false و alt=[].\n' +
-    '- لو ذكر العميل أكتر من نكهة لنفس الصنف اعمل عنصر لكل نكهة بكميتها. لو ذكر نكهة بدون كمية خلي كميتها 1.\n' +
-    '- لو ذكر كمية واحدة لأكتر من نكهة (مثال: «٣ شيبسي ملح وشطة») وزّعها بعدل أو خليها لكل نكهة حسب المعنى الأقرب، وماتحسبهاش مرتين.\n' +
-    '- الكمية بالأرقام الإنجليزية. فهم الأرقام المكتوبة بالكلام (اتنين، تلاتة، دستة=12...) والكميات زي «كرتونتين» = 2.\n' +
-    '- ماتخلطش بين نكهة وصنف: كلمة بعد اسم الصنف غالبًا نكهته لو موجودة في نكهات الصنف.\n' +
-    '- ماتخترعش أصناف أو نكهات مش في الكتالوج، وحط أي كلام مش لاقي له صنف في unknown بنصه.\nطلب العميل:\n' +
+    '\nالقواعد:\n' +
+    '- i هو رقم الصنف من الكتالوج بالظبط، name اسمه في الكتالوج، f رقم النكهة أو -1، flavorName اسم النكهة المطلوبة، q الكمية بالأرقام الإنجليزية.\n' +
+    '- لو هناك أكثر من حجم/سعر لنفس الاسم والعميل لم يحدد، ضع a=true و alt=[أرقام البدائل].\n' +
+    '- لا تخترع أصنافاً أو نكهات. ضع غير الموجود في unknown.\nطلب العميل:\n' +
     text;
-  const raw = await rGem(pr);
-  const j = JSON.parse(raw.replace(/```json|```/g, '').trim());
-  const items = rNorm(j);
-  return { items, unk: (j.unknown || []).map(String) };
+  const res = await rGem(pr, {
+    schemaType: 'customer_extract',
+    systemInstruction: sys,
+    taskType: 'customer_extract',
+    temperature: 0.05,
+    returnObject: true,
+  });
+  const j = res.structured || JSON.parse(String(res.text || '{}').replace(/```json|```/g, '').trim());
+  const validated = validateCustomerGeminiResponse({
+    geminiJson: j,
+    userMessage: text,
+    currentDraft: [],
+    catalogData: getCatalogSnapshot(),
+  });
+  return {
+    items: validated.draft,
+    unk: validated.unknown || [],
+    soldOutHits: validated.rejectedReasons || [],
+  };
 }
 
 function rErr(m) {
@@ -670,7 +747,13 @@ async function gAud(b64) {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       signal: ac.signal,
-      body: JSON.stringify({ prompt: pr, audioBase64: b64, preferredModel }),
+      body: JSON.stringify({
+        prompt: pr,
+        audioBase64: b64,
+        preferredModel,
+        taskType: 'voice_raw',
+        temperature: 0,
+      }),
     });
     const d = await r.json().catch(() => ({}));
     handleAiAuthCheck(r.status, d);
@@ -942,8 +1025,13 @@ async function vPolish() {
       JSON.stringify(vc.f) +
       '\nأرجع JSON فقط بالشكل {"text":""}\nالنص:\n' +
       tx;
-    const raw = await rGem(pr);
-    const j = JSON.parse(raw.replace(/```json|```/g, '').trim());
+    const resObj = await rGem(pr, {
+      schemaType: 'voice_polish',
+      taskType: 'voice_polish',
+      temperature: 0,
+      returnObject: true,
+    });
+    const j = resObj.structured || JSON.parse(String(resObj.text || '{}').replace(/```json|```/g, '').trim());
     const out = String(j.text || '').trim();
     const nl = (x) => x.split(/\n+/).filter((q) => q.trim()).length;
     const t2 = $('rt');
@@ -1112,6 +1200,8 @@ function chReset() {
   CH.quick = [];
   CH.pendingFlavorIdx = -1;
   CH.pendingAltCands = null;
+  CH.pendingClarification = null;
+  CH.lastReferencedProductIdx = -1;
   RL = [];
   RU = [];
   RT = '';
@@ -1276,70 +1366,38 @@ function chRender() {
 }
 
 function buildStoreKB() {
-  const avail = [];
-  const soldOut = [];
-  const discounts = [];
-  const cats = {};
+  return engineBuildStoreKB(getCatalogSnapshot());
+}
 
-  state.P.forEach((p, idx) => {
-    const fl = FL(p);
-    const availFlavors = [];
-    const outFlavors = [];
-    fl.forEach((f, j) => {
-      if (f[1]) outFlavors.push({ j, name: f[0] });
-      else availFlavors.push({ j, name: f[0] });
-    });
-    const out = !!(p[7] || (fl.length && !availFlavors.length));
-    const oldP = +p[11] > p[3] ? +p[11] : 0;
-    const discPct = oldP ? Math.round(((oldP - p[3]) / oldP) * 100) : 0;
-    const rec = {
-      idx,
-      p,
-      name: pname(idx),
-      baseName: p[0],
-      cat: p[1],
-      pack: p[2] || '',
-      price: +p[3] || 0,
-      oldPrice: oldP,
-      discPct,
-      variant: p[10] || '',
-      availFlavors,
-      outFlavors,
-      out,
-    };
-    if (out) soldOut.push(rec);
-    else {
-      avail.push(rec);
-      if (!cats[p[1]]) cats[p[1]] = [];
-      cats[p[1]].push(rec);
-      if (discPct > 0) discounts.push(rec);
-    }
-  });
-
-  discounts.sort((a, b) => b.discPct - a.discPct);
-  const offers = (state.D.offers || []).filter((o) => !o.x);
-  return { avail, soldOut, discounts, cats, offers };
+function chSystemInstruction() {
+  const brand = (state.CFG && state.CFG.brandName) || 'أبو سعيد';
+  const unit = (state.CFG && state.CFG.unit) || 'كرتونة';
+  return (
+    `أنت «${AN()}» مساعد طلبات ذكي لمتجر جملة «${brand}». ` +
+    `تتحدث بالعامية المصرية بوضوح واختصار. وحدة البيع الرسمية هي «${unit}». ` +
+    'ممنوع تماماً اختراع أصناف أو نكهات أو عروض أو أسعار غير موجودة في الكتالوج، وممنوع حذف أصناف من الطلب الحالي إلا بأمر صريح من العميل.'
+  );
 }
 
 function chPrompt() {
   const kb = buildStoreKB();
-  const dr = RL.map((l) => ({ i: l.i, f: l.f, q: l.q }));
+  const dr = RL.map((l) => ({
+    i: l.i,
+    name: pname(l.i),
+    f: l.f,
+    q: l.q,
+  }));
   const tr = CH.msgs
     .slice(-14)
     .map((x) => (x.r === 'u' ? 'العميل: ' : 'المساعد: ') + x.t)
     .join('\n');
   const offTxt = kb.offers.length
     ? kb.offers.map((o) => o.t + (o.pr ? ' (' + o.pr + ')' : '') + (o.d ? ' - ' + o.d : '')).join(' | ')
-    : 'مفيش عروض سلايدر حالياً';
-  const outTxt = kb.soldOut.slice(0, 20).map((x) => x.name).join('، ') || 'مفيش';
+    : 'مفيش عروض سلايدر نشطة حالياً';
+  const outTxt = kb.soldOut.slice(0, 30).map((x) => x.name).join('، ') || 'مفيش';
   const cartTot = totals();
 
   return (
-    'أنت «' +
-    AN() +
-    '» مساعد ذكي لمتجر جملة اسمه «' +
-    ((state.CFG && state.CFG.brandName) || 'أبو سعيد') +
-    '». بتكلم العميل بالعامية المصرية بشكل ودود ومختصر (سطرين أو ٣ بالكتير)، ومهمتك تستقبل طلبه، تجاوب على أسئلته عن الأسعار والعروض والأصناف والنكهات والحد الأدنى للطلب، وترتب طلبه بدقة.\n' +
     'معلومات المتجر:\n' +
     '- الوحدة: ' +
     ((state.CFG && state.CFG.unit) || 'كرتونة') +
@@ -1350,23 +1408,23 @@ function chPrompt() {
     ' وحدة بإجمالي ' +
     cartTot.s +
     ' جنيه.\n' +
-    '- العروض الحالية: ' +
+    '- العروض النشطة الآن فقط: ' +
     offTxt +
     '\n- أصناف خلصانة حالياً (غير متاحة للطلب): ' +
     outTxt +
-    '\nالكتالوج المتاح (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|القسم|النكهات بصيغة رقم=اسم):\n' +
+    '\nالكتالوج المتاح بالكامل (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|القسم|النكهات بصيغة رقم=اسم):\n' +
     rCat() +
-    '\nارجع JSON فقط (من غير أي كلام برّاه) بالشكل: {"reply":"","items":[{"i":0,"f":-1,"q":1,"a":false,"alt":[]}],"unknown":[""],"clear":false,"action":"none","quick":[{"label":"","val":""}]}\n' +
-    'القواعد:\n' +
-    '- items هي الطلب الكامل الحالي في كل رد: ابدأ من «الطلب الحالي»، طبّق عليها آخر كلام العميل (إضافة أو تعديل كمية أو حذف)، وارجعه كله. ماتشيلش صنف غير لو العميل طلب ده صراحة، ولو شال كل الأصناف خلّي clear=true.\n' +
-    '- i هو رقم الصنف من الكتالوج بالظبط، و f رقم النكهة أو -1 لو الصنف مالوش نكهات أو العميل ماحددش، و q الكمية بالأرقام الإنجليزية (فهم الأرقام بالكلام: اتنين، تلاتة، دستة=12، كرتونتين=2).\n' +
-    '- لو العميل سأل عن سعر صنف أو نكهاته أو العروض أو أقل طلب: جاوب بدقة من البيانات فوق، وارجع الطلب الحالي زي ما هو.\n' +
-    '- لو الكتالوج فيه أكتر من صنف بنفس الاسم (أحجام أو أسعار مختلفة) اختار بالحجم أو السعر اللي ذكره العميل (زي 5 جنيه أو 10 جنيه أو كبير أو صغير). لو ماذكرش حاجة تفرّق اعتبره غير مؤكد: a=true وحط في alt الأصناف البديلة (لحد 4) واسأله هو قصده أنهي واحد.\n' +
-    '- لو الصنف ليه نكهات والعميل ماحددش نكهة اسأله عن النكهة (واذكر كام نكهة في reply وحطهم في quick كأزرار سريعة لو حابب). لو قال أي نكهة أو مش فارق سيب f=-1 وقوله هيختارها وهو بيراجع الطلب.\n' +
-    '- اسأل سؤال واحد بس في المرة، وماتخترعش أصناف أو نكهات أو أسعار مش في الكتالوج.\n' +
-    '- action تبقى "review" بس لو العميل وافق صراحة (قال أيوه أو تمام أو خلاص أو كده بس أو راجع أو يلا) والمسودة مش فاضية، غير كده تبقى "none".\n' +
-    '- quick (اختياري، بحد أقصى ٤ أزرار قصيرة) لاقتراح خطوة تالية مفيدة للعميل.\n' +
-    'الطلب الحالي: ' +
+    '\nالقواعد:\n' +
+    '- أرجع JSON مطابق للـ Schema بدقة.\n' +
+    '- items تمثل المسودة الكاملة بعد تطبيق آخر رسالة للعميل على «الطلب الحالي». لو أضاف صنفاً، احتفظ بكل الأصناف السابقة في items ولا تحذفها إلا إذا طلب العميل الحذف صراحة.\n' +
+    '- لو طلب نكهة غير موجودة في نكهات الصنف، لا تضفه، واذكر النكهات المتاحة فعلياً لهذا الصنف.\n' +
+    '- لو قال «أي نكهة» أو «مش فارقة»، ضع f=-1 وذكّره أن اختيار النكهة مطلوب قبل الإضافة النهائية للسلة.\n' +
+    '- لو الكتالوج به أكثر من حجم/سعر لنفس الصنف والعميل لم يحدد، ضع a=true و alt=[أرقام البدائل] واسأله بدلاً من التخمين.\n' +
+    '- اسأل سؤالاً واحداً مختصراً في المرة، ولا تخترع أي سعر أو عرض غير مكتوب أعلاه.\n' +
+    '- action="review" فقط عند موافقة العميل الصريحة على المراجعة والمسودة ليست فارغة.\n' +
+    'حالة التوضيح السابقة: ' +
+    JSON.stringify(CH.pendingClarification || null) +
+    '\nالطلب الحالي: ' +
     JSON.stringify(dr) +
     '\nالمحادثة:\n' +
     tr
@@ -2197,12 +2255,20 @@ function rOpenF(n) {
 }
 
 function rAdd() {
-  if (RL.some((l) => FL(state.P[l.i]).length && l.f < 0)) {
+  RL = dedupeAndNormalizeDraft(RL, state.P);
+  if (!RL.length) {
+    rErr('الطلب فاضي أو الأصناف غير متاحة حالياً');
+    return;
+  }
+  if (RL.some((l) => getProductFlavors(state.P[l.i]).some((f) => !f[1]) && l.f < 0)) {
     rErr('اختار النكهة في الأصناف اللي لسه ما اتحددتش');
     return;
   }
   RL.forEach((l) => {
-    const k = FL(state.P[l.i]).length ? l.i + ':' + l.f : String(l.i);
+    const p = state.P[l.i];
+    if (!p || isProductOutOfStock(p)) return;
+    const fl = getProductFlavors(p);
+    const k = fl.length ? l.i + ':' + l.f : String(l.i);
     state.cart[k] = Math.min((state.cart[k] || 0) + l.q, 99);
   });
   saveCart();
