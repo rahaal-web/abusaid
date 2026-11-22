@@ -274,12 +274,14 @@ body {
 }
 
 .field input.has-eye {
-  padding-inline-end: 48px;
+  padding-left: 14px;
+  padding-right: 48px;
 }
 
 .eye-btn {
   position: absolute;
-  inset-inline-end: 8px;
+  right: 8px;
+  left: auto;
   background: var(--paper-2);
   border: 2px solid var(--border);
   border-radius: 10px;
