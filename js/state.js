@@ -39,6 +39,15 @@ export const state = {
     openAI: () => {},
     closeAI: () => {},
     closeSearch: () => {},
+    syncFilterInputs: () => {},
+    syncSearchOverlay: () => {},
+    syncCartOverlay: () => {},
+    syncFlavorOverlay: () => {},
+    syncAiOverlay: () => {},
+    syncOrdersOverlay: () => {},
+    syncAccountOverlay: () => {},
+    isMandatoryPushOpen: () => false,
+    openOrdersModal: () => {},
   },
 };
 

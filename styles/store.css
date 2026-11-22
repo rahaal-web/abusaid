@@ -1084,9 +1084,33 @@ img {
 }
 
 .catalog-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   font-size: 13px;
   font-weight: 700;
   color: var(--ink);
+}
+
+.nav-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 2px solid var(--border);
+  border-radius: 9px;
+  padding: 3px 10px;
+  font-size: 12.5px;
+  font-weight: 800;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+
+.nav-back-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
 }
 
 .link-reset {
@@ -1628,6 +1652,18 @@ img {
 
 .ov.on {
   display: flex;
+}
+
+#accountSheet.on {
+  z-index: 62;
+}
+
+#ordersSheet.on {
+  z-index: 63;
+}
+
+#fsheet.on {
+  z-index: 64;
 }
 
 .pn {

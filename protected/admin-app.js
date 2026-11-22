@@ -257,11 +257,387 @@
     } catch (e) {}
   }
 
-  function closeMobileDrawer() {
+  function closeMobileDrawerDom() {
     var shell = $('app');
     var bd = $('sbBackdrop');
     if (shell) shell.classList.remove('sb-mobile-open');
     if (bd) bd.classList.remove('on');
+  }
+
+  function openMobileDrawerDom() {
+    var shell = $('app');
+    var bd = $('sbBackdrop');
+    if (shell) shell.classList.add('sb-mobile-open');
+    if (bd) bd.classList.add('on');
+  }
+
+  // ===== History API Navigation & Scroll Restoration Router =====
+  var ADM_SCROLL_KEY = 'abu_admin_scroll_v1';
+  var VALID_TABS = {};
+  Object.keys(PAGE_META).forEach(function (k) {
+    VALID_TABS[k] = 1;
+  });
+  var VALID_SUBS = {
+    s: ['general', 'appearance', 'security', 'health'],
+    n: ['compose', 'devices', 'logs'],
+    o: ['all', 'active', 'scheduled', 'expired', 'hidden'],
+  };
+  var DEFAULT_SUBS = { s: 'general', n: 'compose', o: 'all' };
+
+  var admNavIdx = 0;
+  var admBaseIdx = 0;
+  var admOvSteps = 0;
+  var admCurrentSnap = null;
+  var admRestoringPop = false;
+  var admBootstrapDone = false;
+  var admPendingDeepOv = null;
+  var admScrollMap = {};
+  var activeCovCancel = null;
+  var activeCovCommit = null;
+
+  try {
+    var rawAdmScroll = sessionStorage.getItem(ADM_SCROLL_KEY);
+    if (rawAdmScroll) admScrollMap = JSON.parse(rawAdmScroll) || {};
+  } catch (e) {}
+
+  function persistAdmScrollMap() {
+    try {
+      var keys = Object.keys(admScrollMap);
+      if (keys.length > 60) {
+        keys.slice(0, keys.length - 60).forEach(function (k) {
+          delete admScrollMap[k];
+        });
+      }
+      sessionStorage.setItem(ADM_SCROLL_KEY, JSON.stringify(admScrollMap));
+    } catch (e) {}
+  }
+
+  function getAdmPageKey(snap) {
+    var s = snap || admCurrentSnap || {};
+    return String(s.tab || 'dashboard') + ':' + String(s.sub || '');
+  }
+
+  function saveAdmScroll(idx, snap) {
+    var y = Math.max(0, Math.round(window.scrollY || window.pageYOffset || 0));
+    var targetIdx = typeof idx === 'number' ? idx : admNavIdx;
+    admScrollMap['idx_' + targetIdx] = y;
+    admScrollMap['page_' + getAdmPageKey(snap)] = y;
+    persistAdmScrollMap();
+  }
+
+  function readAdmScroll(idx, snap) {
+    var kIdx = 'idx_' + idx;
+    if (typeof admScrollMap[kIdx] === 'number') return admScrollMap[kIdx];
+    var kPage = 'page_' + getAdmPageKey(snap);
+    if (typeof admScrollMap[kPage] === 'number') return admScrollMap[kPage];
+    return 0;
+  }
+
+  function restoreAdmScroll(y) {
+    var target = Math.max(0, Number(y) || 0);
+    requestAnimationFrame(function () {
+      window.scrollTo({ top: target, behavior: 'auto' });
+      setTimeout(function () {
+        window.scrollTo({ top: target, behavior: 'auto' });
+      }, 40);
+    });
+  }
+
+  function normalizeAdminSnap(raw) {
+    var r = raw && typeof raw === 'object' ? raw : {};
+    var nextTab = VALID_TABS[r.tab] ? String(r.tab) : 'dashboard';
+    var subList = VALID_SUBS[nextTab];
+    var nextSub = '';
+    if (subList) {
+      nextSub = subList.indexOf(r.sub) > -1 ? String(r.sub) : DEFAULT_SUBS[nextTab];
+    }
+    var validOv = ['prod', 'offer', 'user', 'ai-chat', 'ai-batch', 'ai-review'];
+    var nextOv = validOv.indexOf(r.ov) > -1 ? String(r.ov) : '';
+    var nextOvIdx = Number.isFinite(Number(r.ovIdx)) ? Math.trunc(Number(r.ovIdx)) : -1;
+    var nextOvDupFrom = Number.isFinite(Number(r.ovDupFrom)) ? Math.trunc(Number(r.ovDupFrom)) : -1;
+    var nextOvCat = nextOv === 'prod' && r.ovCat ? String(r.ovCat) : '';
+    var nextOvUid = nextOv === 'user' && r.ovUid ? String(r.ovUid) : '';
+    return {
+      tab: nextTab,
+      sub: nextSub,
+      drawer: Boolean(r.drawer) && !nextOv,
+      ov: nextOv,
+      ovIdx: nextOv === 'prod' || nextOv === 'offer' ? nextOvIdx : -1,
+      ovCat: nextOvCat,
+      ovDupFrom: nextOv === 'prod' ? nextOvDupFrom : -1,
+      ovUid: nextOvUid,
+      cov: Boolean(r.cov),
+    };
+  }
+
+  function sameAdminSnap(a, b) {
+    if (!a || !b) return false;
+    return (
+      a.tab === b.tab &&
+      a.sub === b.sub &&
+      Boolean(a.drawer) === Boolean(b.drawer) &&
+      a.ov === b.ov &&
+      a.ovIdx === b.ovIdx &&
+      a.ovCat === b.ovCat &&
+      a.ovDupFrom === b.ovDupFrom &&
+      a.ovUid === b.ovUid &&
+      Boolean(a.cov) === Boolean(b.cov)
+    );
+  }
+
+  function parseAdminSnapFromLocation() {
+    var params = new URLSearchParams(location.search || '');
+    var raw = {
+      tab: params.get('tab') || 'dashboard',
+      sub: params.get('sub') || '',
+      ov: params.get('modal') || '',
+      ovIdx: params.has('id') ? params.get('id') : -1,
+      ovCat: params.get('cat') || '',
+      ovDupFrom: params.has('dup') ? params.get('dup') : -1,
+      ovUid: params.get('uid') || '',
+      drawer: false,
+      cov: false,
+    };
+    return normalizeAdminSnap(raw);
+  }
+
+  function buildAdminUrl(snap) {
+    var s = normalizeAdminSnap(snap);
+    var url = new URL(location.href);
+    var params = new URLSearchParams();
+    if (s.tab && s.tab !== 'dashboard') params.set('tab', s.tab);
+    if (s.sub && VALID_SUBS[s.tab] && s.sub !== DEFAULT_SUBS[s.tab]) params.set('sub', s.sub);
+    if (s.ov) {
+      params.set('modal', s.ov);
+      if (s.ov === 'prod' || s.ov === 'offer') params.set('id', String(s.ovIdx));
+      if (s.ov === 'prod' && s.ovCat) params.set('cat', s.ovCat);
+      if (s.ov === 'prod' && s.ovDupFrom >= 0) params.set('dup', String(s.ovDupFrom));
+      if (s.ov === 'user' && s.ovUid) params.set('uid', s.ovUid);
+    }
+    var qs = params.toString();
+    url.search = qs ? '?' + qs : '';
+    return url.pathname + url.search + (url.hash || '');
+  }
+
+  function admCanGoBack() {
+    return admNavIdx > admBaseIdx;
+  }
+
+  function syncAdmBackButton() {
+    var btn = $('admBackBtn');
+    if (!btn) return;
+    var s = admCurrentSnap || normalizeAdminSnap({ tab: tab });
+    var show = admCanGoBack() || s.tab !== 'dashboard' || Boolean(s.ov) || Boolean(s.drawer) || Boolean(s.cov);
+    btn.hidden = !show;
+    if (s.cov || s.ov || s.drawer) btn.title = 'إغلاق والرجوع';
+    else if (admCanGoBack()) btn.title = 'الرجوع للخطوة السابقة';
+    else btn.title = 'العودة للوحة المعلومات';
+  }
+
+  function ensureTabSubSynced(snap) {
+    tab = snap.tab;
+    if (snap.tab === 's' && snap.sub) settingsSubTab = snap.sub;
+    else if (snap.tab === 'n' && snap.sub) pushSubTab = snap.sub;
+    else if (snap.tab === 'o' && snap.sub) offerSubTab = snap.sub;
+  }
+
+  function triggerTabDataLoads(targetTab) {
+    if (targetTab === 'orders') loadOrders(true);
+    if (targetTab === 'u') loadUsers(true);
+    if (targetTab === 'n') {
+      loadPushOverview(true);
+      loadPushDevices(true);
+    }
+    if (targetTab === 'media' && !mediaLoaded) loadMedia(false);
+    if (targetTab === 'audit') loadAuditLogs(true);
+    if (targetTab === 'backups') loadBackups(true);
+    if (targetTab === 's' && settingsSubTab === 'health' && !healthData) loadHealth(true);
+    if (targetTab === 'dashboard') {
+      loadAuditLogs(true);
+      if (!healthData) loadHealth(true);
+    }
+  }
+
+  function applyAdminSnapToUI(nextSnap, opts) {
+    var prev = admCurrentSnap || normalizeAdminSnap({ tab: tab });
+    var o = opts || {};
+    var tabOrSubChanged = prev.tab !== nextSnap.tab || prev.sub !== nextSnap.sub;
+
+    // 1. Handle #cov transient confirm/reject dialog
+    if (prev.cov && !nextSnap.cov) {
+      if (activeCovCommit) {
+        var commitCb = activeCovCommit;
+        activeCovCommit = null;
+        activeCovCancel = null;
+        commitCb();
+      } else if (activeCovCancel) {
+        var cancelCb = activeCovCancel;
+        activeCovCancel = null;
+        cancelCb();
+      } else {
+        var covEl = $('cov');
+        if (covEl) {
+          covEl.classList.remove('on');
+          covEl.innerHTML = '';
+        }
+      }
+    } else if (nextSnap.cov && !activeCovCancel) {
+      // Browser Forward into an already completed/dismissed confirm dialog — do not resurrect
+      nextSnap.cov = false;
+      var covEl2 = $('cov');
+      if (covEl2) {
+        covEl2.classList.remove('on');
+        covEl2.innerHTML = '';
+      }
+    }
+
+    // 2. Sync mobile drawer
+    if (nextSnap.drawer) openMobileDrawerDom();
+    else closeMobileDrawerDom();
+
+    // 3. Sync tab & subtab + lazy loads + render
+    ensureTabSubSynced(nextSnap);
+    admCurrentSnap = nextSnap;
+    if (tabOrSubChanged || !o.skipTabRender) {
+      render();
+      if (tabOrSubChanged) triggerTabDataLoads(nextSnap.tab);
+    }
+
+    // 4. Sync #ov modal
+    var ovSame =
+      prev.ov === nextSnap.ov &&
+      prev.ovIdx === nextSnap.ovIdx &&
+      prev.ovCat === nextSnap.ovCat &&
+      prev.ovDupFrom === nextSnap.ovDupFrom &&
+      prev.ovUid === nextSnap.ovUid;
+
+    if (!nextSnap.ov) {
+      if (prev.ov || $('ov').classList.contains('on')) {
+        vStop();
+        $('ov').classList.remove('on');
+      }
+      admOvSteps = 0;
+    } else if (!ovSame || o.forceOverlay) {
+      if (!admBootstrapDone && (nextSnap.ov === 'prod' || nextSnap.ov === 'offer' || nextSnap.ov === 'user')) {
+        admPendingDeepOv = nextSnap;
+      } else {
+        openOverlayFromSnap(nextSnap);
+      }
+    }
+
+    // 5. Scroll position handling
+    if (o.isPop) {
+      if (!nextSnap.ov && !nextSnap.cov) {
+        if (prev.ov && !tabOrSubChanged) {
+          restoreAdmScroll(readAdmScroll(admNavIdx, nextSnap));
+        } else if (tabOrSubChanged) {
+          restoreAdmScroll(readAdmScroll(admNavIdx, nextSnap));
+        }
+      }
+    } else if (tabOrSubChanged && !o.preserveScroll) {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+
+    syncAdmBackButton();
+  }
+
+  function commitAdminRoute(patch, opts) {
+    if (admRestoringPop) return admCurrentSnap;
+    var o = opts || {};
+    var prev = admCurrentSnap || normalizeAdminSnap({ tab: tab });
+    var next = normalizeAdminSnap(Object.assign({}, prev, patch || {}));
+    var mode = o.mode === 'replace' ? 'replace' : 'push';
+
+    if (sameAdminSnap(prev, next) && !o.forceOverlay) {
+      syncAdmBackButton();
+      return prev;
+    }
+
+    saveAdmScroll(admNavIdx, prev);
+
+    if (mode === 'push') {
+      admNavIdx += 1;
+      if (next.ov && !next.cov) {
+        admOvSteps = prev.ov ? admOvSteps + 1 : 1;
+      } else if (!next.ov && !next.cov) {
+        admOvSteps = 0;
+      }
+    } else {
+      if (!next.ov && !next.cov) admOvSteps = 0;
+    }
+
+    var stateObj = {
+      __abuAdmNav: 1,
+      idx: admNavIdx,
+      baseIdx: admBaseIdx,
+      ovSteps: admOvSteps,
+      snap: next,
+    };
+    var url = buildAdminUrl(next);
+    try {
+      if (mode === 'replace') history.replaceState(stateObj, '', url);
+      else history.pushState(stateObj, '', url);
+    } catch (e) {}
+
+    applyAdminSnapToUI(next, Object.assign({}, o, { isPop: false }));
+    return next;
+  }
+
+  function popAdminOverlay(preferTarget) {
+    var cur = admCurrentSnap || normalizeAdminSnap({ tab: tab });
+    if (cur.cov || activeCovCancel || ($('cov') && $('cov').classList.contains('on'))) {
+      if (cur.cov && admCanGoBack()) {
+        history.back();
+      } else if (activeCovCancel) {
+        var cancelCb = activeCovCancel;
+        activeCovCancel = null;
+        activeCovCommit = null;
+        cancelCb();
+        commitAdminRoute({ cov: false }, { mode: 'replace' });
+      }
+      return true;
+    }
+    if (cur.ov || $('ov').classList.contains('on')) {
+      if (preferTarget === 'base') {
+        if (admOvSteps > 0 && admNavIdx - admOvSteps >= admBaseIdx) {
+          history.go(-admOvSteps);
+        } else {
+          commitAdminRoute({ ov: '', ovIdx: -1, ovCat: '', ovDupFrom: -1, ovUid: '' }, { mode: 'replace' });
+        }
+      } else if (admCanGoBack()) {
+        history.back();
+      } else {
+        commitAdminRoute({ ov: '', ovIdx: -1, ovCat: '', ovDupFrom: -1, ovUid: '' }, { mode: 'replace' });
+      }
+      return true;
+    }
+    if (cur.drawer || ($('app') && $('app').classList.contains('sb-mobile-open'))) {
+      if (cur.drawer && admCanGoBack()) history.back();
+      else commitAdminRoute({ drawer: false }, { mode: 'replace' });
+      return true;
+    }
+    return false;
+  }
+
+  function admGoBackOrHome() {
+    if (admCanGoBack()) {
+      history.back();
+      return;
+    }
+    if (popAdminOverlay('base')) return;
+    if (tab !== 'dashboard') {
+      switchTab('dashboard', { mode: 'replace' });
+    }
+  }
+
+  function closeMobileDrawer() {
+    var cur = admCurrentSnap || normalizeAdminSnap({ tab: tab });
+    if (cur.drawer) {
+      if (admCanGoBack()) history.back();
+      else commitAdminRoute({ drawer: false }, { mode: 'replace' });
+    } else {
+      closeMobileDrawerDom();
+    }
   }
 
   function renderSkeletonCards(count) {
@@ -281,6 +657,7 @@
         resolve(false);
         return;
       }
+      var settled = false;
       var cls = okTone === 'primary' ? 'btn btn-primary btn-lg' : 'btn btn-danger-solid btn-lg';
       cov.innerHTML =
         '<div class="pn" style="max-width:440px">' +
@@ -297,18 +674,45 @@
         '<button class="btn btn-lg" type="button" id="covCancel">إلغاء</button>' +
         '</div></div>';
       cov.classList.add('on');
-      function done(val) {
+      function cleanup() {
         cov.classList.remove('on');
         cov.innerHTML = '';
         cov.removeEventListener('click', onClick);
-        resolve(val);
+        if (activeCovCancel === cancelFromHistory) activeCovCancel = null;
+        if (activeCovCommit === commitCallback) activeCovCommit = null;
+      }
+      function cancelFromHistory() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(false);
+      }
+      var commitCallback = null;
+      function finishYes() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(true);
       }
       function onClick(e) {
         var t = e.target;
-        if (t === cov || t.id === 'covNo' || t.id === 'covCancel') done(false);
-        else if (t.id === 'covYes') done(true);
+        if (t === cov || t.id === 'covNo' || t.id === 'covCancel') {
+          if (admCurrentSnap && admCurrentSnap.cov && admCanGoBack()) history.back();
+          else cancelFromHistory();
+        } else if (t.id === 'covYes') {
+          if (admCurrentSnap && admCurrentSnap.cov && admCanGoBack()) {
+            commitCallback = finishYes;
+            activeCovCommit = finishYes;
+            history.back();
+            setTimeout(finishYes, 150);
+          } else {
+            finishYes();
+          }
+        }
       }
+      activeCovCancel = cancelFromHistory;
       cov.addEventListener('click', onClick);
+      commitAdminRoute({ cov: true }, { mode: 'push', skipTabRender: true });
     });
   }
 
@@ -319,6 +723,7 @@
         resolve(null);
         return;
       }
+      var settled = false;
       cov.innerHTML =
         '<div class="pn" style="max-width:460px">' +
         '<h2>رفض طلب الحساب<button class="x" type="button" id="rejNo">✕</button></h2>' +
@@ -336,21 +741,48 @@
         var ta = $('rejReason');
         if (ta) ta.focus();
       }, 40);
-      function done(val) {
+      function cleanup() {
         cov.classList.remove('on');
         cov.innerHTML = '';
         cov.removeEventListener('click', onClick);
-        resolve(val);
+        if (activeCovCancel === cancelFromHistory) activeCovCancel = null;
+        if (activeCovCommit === commitCallback) activeCovCommit = null;
+      }
+      function cancelFromHistory() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(null);
+      }
+      var pendingReason = '';
+      var commitCallback = null;
+      function finishYes() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(pendingReason);
       }
       function onClick(e) {
         var t = e.target;
-        if (t === cov || t.id === 'rejNo' || t.id === 'rejCancel') done(null);
-        else if (t.id === 'rejYes') {
+        if (t === cov || t.id === 'rejNo' || t.id === 'rejCancel') {
+          if (admCurrentSnap && admCurrentSnap.cov && admCanGoBack()) history.back();
+          else cancelFromHistory();
+        } else if (t.id === 'rejYes') {
           var ta = $('rejReason');
-          done(ta ? ta.value.trim() : '');
+          pendingReason = ta ? ta.value.trim() : '';
+          if (admCurrentSnap && admCurrentSnap.cov && admCanGoBack()) {
+            commitCallback = finishYes;
+            activeCovCommit = finishYes;
+            history.back();
+            setTimeout(finishYes, 150);
+          } else {
+            finishYes();
+          }
         }
       }
+      activeCovCancel = cancelFromHistory;
       cov.addEventListener('click', onClick);
+      commitAdminRoute({ cov: true }, { mode: 'push', skipTabRender: true });
     });
   }
 
@@ -1795,11 +2227,11 @@
     );
   }
 
-  async function openUserDetailModal(uid) {
+  async function renderUserDetailModalDom(uid) {
     var u = usersData.find(function (x) {
       return String(x.id) === String(uid);
     });
-    if (!u) return;
+    if (!u) return false;
     var uOrders = ordersData.filter(function (o) {
       return String(o.userId) === String(uid) || (u.phone && o.userPhone === u.phone);
     });
@@ -1856,7 +2288,7 @@
         return {};
       });
       var slot = $('userAuditSlot');
-      if (!slot) return;
+      if (!slot) return true;
       var logs = Array.isArray(data.logs) ? data.logs : [];
       slot.innerHTML = logs.length
         ? logs
@@ -1877,6 +2309,15 @@
       var slot2 = $('userAuditSlot');
       if (slot2) slot2.innerHTML = '<p class="hint">تعذر جلب السجل.</p>';
     }
+    return true;
+  }
+
+  function openUserDetailModal(uid) {
+    var u = usersData.find(function (x) {
+      return String(x.id) === String(uid);
+    });
+    if (!u) return;
+    commitAdminRoute({ ov: 'user', ovUid: String(uid), drawer: false }, { mode: 'push' });
   }
 
   async function loadUsers(silent) {
@@ -3216,26 +3657,29 @@
         : vs();
 
     bindChartTooltips(v);
+    syncAdmBackButton();
   }
 
-  function switchTab(nextTab) {
-    tab = nextTab || 'dashboard';
-    closeMobileDrawer();
-    render();
-    if (tab === 'orders') loadOrders(true);
-    if (tab === 'u') loadUsers(true);
-    if (tab === 'n') {
-      loadPushOverview(true);
-      loadPushDevices(true);
-    }
-    if (tab === 'media' && !mediaLoaded) loadMedia(false);
-    if (tab === 'audit') loadAuditLogs(true);
-    if (tab === 'backups') loadBackups(true);
-    if (tab === 's' && settingsSubTab === 'health' && !healthData) loadHealth(true);
-    if (tab === 'dashboard') {
-      loadAuditLogs(true);
-      if (!healthData) loadHealth(true);
-    }
+  function switchTab(nextTab, opts) {
+    var target = VALID_TABS[nextTab] ? nextTab : 'dashboard';
+    var o = opts || {};
+    var cur = admCurrentSnap || normalizeAdminSnap({ tab: tab });
+    var mode = o.mode || (cur.drawer ? 'replace' : cur.tab === target && !cur.ov ? 'replace' : 'push');
+    var nextSub = VALID_SUBS[target] ? (o.sub || (target === 's' ? settingsSubTab : target === 'n' ? pushSubTab : offerSubTab)) : '';
+    commitAdminRoute(
+      {
+        tab: target,
+        sub: nextSub,
+        drawer: false,
+        ov: '',
+        ovIdx: -1,
+        ovCat: '',
+        ovDupFrom: -1,
+        ovUid: '',
+        cov: false,
+      },
+      { mode: mode, preserveScroll: Boolean(o.preserveScroll) }
+    );
   }
 
   // ===== IMAGE & FONT VALIDATED HELPERS =====
@@ -3302,6 +3746,7 @@
 
     var cov = $('cov');
     if (!cov) return;
+    var settled = false;
     cov.innerHTML =
       '<div class="pn" style="max-width:480px">' +
       '<h2>حذف قسم «' + esc(catName) + '»<button class="x" type="button" id="cdNo">✕</button></h2>' +
@@ -3315,41 +3760,54 @@
       '<button class="btn btn-lg" type="button" id="cdCancelBtn" style="width:100%;margin-top:8px">إلغاء</button>' +
       '</div>';
     cov.classList.add('on');
-    function done() {
+    function cleanup() {
       cov.classList.remove('on');
       cov.innerHTML = '';
       cov.removeEventListener('click', onClick);
+      if (activeCovCancel === cancelFromHistory) activeCovCancel = null;
+    }
+    function cancelFromHistory() {
+      if (settled) return;
+      settled = true;
+      cleanup();
+    }
+    function closeAfterAction() {
+      if (admCurrentSnap && admCurrentSnap.cov && admCanGoBack()) history.back();
+      else cancelFromHistory();
     }
     function onClick(e) {
       var t = e.target;
       if (t === cov || t.id === 'cdNo' || t.id === 'cdCancelBtn') {
-        done();
+        closeAfterAction();
       } else if (t.id === 'cdMoveBtn') {
         var target = $('cdTarget') ? $('cdTarget').value : '';
         if (!target) return;
         D.p.forEach(function (p) { if (p[1] === catName) p[1] = target; });
         D.cats.splice(catIndex, 1);
         if (D.catMeta) delete D.catMeta[catName];
-        done();
         mark();
         render();
+        closeAfterAction();
         toast('تم نقل الأصناف إلى «' + target + '» وحذف القسم ✅');
       } else if (t.id === 'cdAllBtn') {
         D.p = D.p.filter(function (p) { return p[1] !== catName; });
         D.cats.splice(catIndex, 1);
         if (D.catMeta) delete D.catMeta[catName];
-        done();
         mark();
         render();
+        closeAfterAction();
         toast('تم حذف القسم وأصنافه');
       }
     }
+    activeCovCancel = cancelFromHistory;
     cov.addEventListener('click', onClick);
+    commitAdminRoute({ cov: true }, { mode: 'push', skipTabRender: true });
   }
 
   // ===== PRODUCT EDITOR MODAL =====
-  function closeEd() {
-    $('ov').classList.remove('on');
+  function closeEd(toBase) {
+    vStop();
+    popAdminOverlay(toBase ? 'base' : undefined);
   }
 
   function renderFl() {
@@ -3388,13 +3846,14 @@
     el.focus();
   }
 
-  function openEd(i, c, dup) {
+  function renderEdModalDom(i, c, dup) {
     var sp = null;
     if (dup && D.p[i]) {
       sp = D.p[i];
       dupFrom = i;
       i = -1;
     } else dupFrom = -1;
+    if (i >= 0 && !D.p[i]) return false;
     ei = i;
     var p = sp
       ? JSON.parse(JSON.stringify(sp))
@@ -3440,6 +3899,23 @@
         if (f) { f.focus(); if (sp) f.select(); }
       }, 50);
     }
+    return true;
+  }
+
+  function openEd(i, c, dup) {
+    var cur = admCurrentSnap || normalizeAdminSnap({ tab: tab });
+    var mode = cur.ov ? 'replace' : 'push';
+    commitAdminRoute(
+      {
+        ov: 'prod',
+        ovIdx: dup ? -1 : i,
+        ovCat: c || '',
+        ovDupFrom: dup ? i : -1,
+        ovUid: '',
+        drawer: false,
+      },
+      { mode: mode, forceOverlay: true }
+    );
   }
 
   // ===== OFFER EDITOR MODAL (Schedule + Auto Discount + Linked Product + Live Preview) =====
@@ -3464,7 +3940,8 @@
       '<b style="font-size:15px;color:#b3201a">' + esc(pr || (pa ? pa + ' جنيه' : 'السعر / الميزة')) + '</b>';
   }
 
-  function openOf(i) {
+  function renderOfModalDom(i) {
+    if (i >= 0 && !OFS()[i]) return false;
     oei = i;
     var o = i >= 0 ? OFS()[i] : { t: '', d: '', pr: '', g: '', c: PAL[0][1], i: '', x: 0, startDate: '', endDate: '', priceBefore: '', priceAfter: '', productIndex: '' };
     pal = 0;
@@ -3499,6 +3976,21 @@
       '</div></div>';
     $('ov').classList.add('on');
     updateOfferLivePreview();
+    return true;
+  }
+
+  function openOf(i) {
+    commitAdminRoute(
+      {
+        ov: 'offer',
+        ovIdx: i,
+        ovCat: '',
+        ovDupFrom: -1,
+        ovUid: '',
+        drawer: false,
+      },
+      { mode: admCurrentSnap && admCurrentSnap.ov ? 'replace' : 'push', forceOverlay: true }
+    );
   }
 
   // ===== RAHAL AI & VOICE COPILOT (Preserved Core + Safe Server Key) =====
@@ -3679,7 +4171,7 @@
     else vUI(false);
   }
 
-  function smIn(t) {
+  function renderSmInModalDom(t) {
     vStop(); CHF = false;
     $('ov').innerHTML =
       '<div class="pn"><h2>' + esc(AN()) + ' — إضافة ذكية<button class="x" type="button" id="smx">✕</button></h2>' +
@@ -3691,12 +4183,19 @@
       '<div class="err" id="sme"></div></div>';
     $('ov').classList.add('on');
   }
+  function smIn(t) {
+    commitAdminRoute(
+      { ov: 'ai-batch', ovIdx: -1, ovCat: '', ovDupFrom: -1, ovUid: '', drawer: false },
+      { mode: admCurrentSnap && admCurrentSnap.ov ? 'push' : 'push', forceOverlay: true }
+    );
+    if (t != null && $('smt')) $('smt').value = t;
+  }
   function smOpen() { SM = []; smIn(SMT); }
 
-  var CH = { msgs: [], draft: [], busy: 0 }, CHF = false;
+  var CH = { msgs: [], draft: [], busy: 0 }, CHF = false, chPendingPrompt = '';
   function chReset() { CH.msgs = []; CH.draft = []; CH.busy = 0; CH.pend = null; CH.undo = null; }
 
-  function chOpen(initialPrompt) {
+  function renderChOpenDom(initialPrompt) {
     vStop(); CHF = true;
     $('ov').innerHTML =
       '<div class="pn" id="chp" style="display:flex;flex-direction:column;height:88vh;max-height:88vh;overflow:hidden">' +
@@ -3708,8 +4207,17 @@
       '<div class="err" id="sme" style="min-height:0"></div>' +
       '<button class="btn btn-sm" id="chold" type="button" style="align-self:flex-start;margin-top:6px">✍️ الإضافة من نص مرة واحدة</button></div>';
     $('ov').classList.add('on');
-    if (initialPrompt && $('smt')) $('smt').value = initialPrompt;
+    var promptToFill = initialPrompt || chPendingPrompt;
+    chPendingPrompt = '';
+    if (promptToFill && $('smt')) $('smt').value = promptToFill;
     chRender();
+  }
+  function chOpen(initialPrompt) {
+    chPendingPrompt = initialPrompt || '';
+    commitAdminRoute(
+      { ov: 'ai-chat', ovIdx: -1, ovCat: '', ovDupFrom: -1, ovUid: '', drawer: false },
+      { mode: 'push', forceOverlay: true }
+    );
   }
 
   function chRender() {
@@ -3861,7 +4369,7 @@
     }
   }
   function pk(o) { var h = 0, i; for (i = 0; i < o.n.length; i++) h += o.n.charCodeAt(i); return h % PAL.length; }
-  function smRv() {
+  function renderSmRvModalDom() {
     vStop();
     var h = '<div class="pn"><h2>مراجعة الأصناف (' + SM.length + ')<button class="x" type="button" id="smx">✕</button></h2>';
     SM.forEach(function (o, i) {
@@ -3876,6 +4384,43 @@
     });
     $('ov').innerHTML = h + '<div class="r2" style="margin-top:14px"><button class="btn btn-success btn-lg" id="smok" type="button">➕ إضافة المحدد</button><button class="btn btn-lg" id="smbk" type="button">رجوع</button></div></div>';
     $('ov').classList.add('on');
+  }
+  function smRv() {
+    commitAdminRoute(
+      { ov: 'ai-review', ovIdx: -1, ovCat: '', ovDupFrom: -1, ovUid: '', drawer: false },
+      { mode: 'push', forceOverlay: true }
+    );
+  }
+  function openOverlayFromSnap(snap) {
+    if (!snap || !snap.ov) return false;
+    var ok = false;
+    if (snap.ov === 'prod') ok = renderEdModalDom(snap.ovIdx, snap.ovCat, snap.ovDupFrom >= 0 ? true : false);
+    else if (snap.ov === 'offer') ok = renderOfModalDom(snap.ovIdx);
+    else if (snap.ov === 'user') {
+      ok = Boolean(usersData.find(function (x) { return String(x.id) === String(snap.ovUid); }));
+      if (ok) renderUserDetailModalDom(snap.ovUid);
+    } else if (snap.ov === 'ai-chat') {
+      renderChOpenDom();
+      ok = true;
+    } else if (snap.ov === 'ai-batch') {
+      renderSmInModalDom(SMT);
+      ok = true;
+    } else if (snap.ov === 'ai-review') {
+      if (SM.length) {
+        renderSmRvModalDom();
+        ok = true;
+      } else {
+        // Reloaded on ai-review when volatile SM draft no longer exists: gracefully degrade
+        renderChOpenDom();
+        commitAdminRoute({ ov: 'ai-chat' }, { mode: 'replace', skipTabRender: true });
+        return true;
+      }
+    }
+    if (!ok) {
+      $('ov').classList.remove('on');
+      commitAdminRoute({ ov: '', ovIdx: -1, ovCat: '', ovDupFrom: -1, ovUid: '' }, { mode: 'replace', skipTabRender: true });
+    }
+    return ok;
   }
   function chReview() {
     var list = JSON.parse(JSON.stringify(CH.draft));
@@ -3907,7 +4452,8 @@
     var t = e.target;
     var b = t.closest && t.closest('button');
     if (t === $('ov') || t.id === 'edx' || t.id === 'ofx' || t.id === 'smx') {
-      vStop(); closeEd(); return;
+      closeEd(t.id === 'smx' || (t === $('ov') && String((admCurrentSnap && admCurrentSnap.ov) || '').indexOf('ai-') === 0));
+      return;
     }
     if (t.dataset.pal != null) {
       pal = +t.dataset.pal;
@@ -3936,13 +4482,13 @@
       if (ei >= 0) D.p[ei] = p;
       else if (dupFrom >= 0 && D.p[dupFrom] && D.p[dupFrom][1] == p[1]) D.p.splice(dupFrom + 1, 0, p);
       else D.p.push(p);
-      dupFrom = -1; mark(); closeEd(); render();
+      dupFrom = -1; mark(); closeEd(true); render();
       return;
     }
     if (t.id === 'edl' && ei >= 0) {
       askConfirm('هل أنت متأكد من حذف هذا الصنف؟', 'حذف الصنف').then(function (ok) {
         if (!ok) return;
-        D.p.splice(ei, 1); mark(); closeEd(); render();
+        D.p.splice(ei, 1); mark(); closeEd(true); render();
       });
       return;
     }
@@ -3971,13 +4517,13 @@
       if (o.startDate && o.endDate && o.endDate < o.startDate) return toast('تاريخ النهاية يجب أن يكون بعد البداية');
       if (enew) { var nid2 = 'i' + Date.now().toString(36); IMG[nid2] = enew; PEND[nid2] = 1; o.i = nid2; }
       if (oei >= 0) OFS()[oei] = o; else OFS().push(o);
-      mark(); closeEd(); render();
+      mark(); closeEd(true); render();
       return;
     }
     if (t.id === 'ofdl' && oei >= 0) {
       askConfirm('هل أنت متأكد من حذف هذا العرض؟', 'حذف العرض').then(function (ok) {
         if (!ok) return;
-        OFS().splice(oei, 1); mark(); closeEd(); render();
+        OFS().splice(oei, 1); mark(); closeEd(true); render();
       });
       return;
     }
@@ -3989,7 +4535,11 @@
     if (b && b.id === 'chrv') { chReview(); return; }
     if (b && b.id === 'chnw') { chReset(); chRender(); return; }
     if (b && b.id === 'chold') { smOpen(); return; }
-    if (t.id === 'smbk') { CHF ? chOpen() : smIn(SMT); return; }
+    if (t.id === 'smbk') {
+      if (admCanGoBack()) history.back();
+      else commitAdminRoute({ ov: CHF ? 'ai-chat' : 'ai-batch' }, { mode: 'replace', forceOverlay: true });
+      return;
+    }
     if (t.id === 'smai') { smGo(true); return; }
     if (t.id === 'smlp') { smGo(false); return; }
     if (t.id === 'smok') {
@@ -4004,7 +4554,7 @@
         if (D.cats.indexOf(o.c) < 0) D.cats.push(o.c);
         D.p.push(a);
       });
-      chReset(); SM = []; SMT = ''; mark(); closeEd(); render();
+      chReset(); SM = []; SMT = ''; mark(); closeEd(true); render();
       toast('تمت إضافة ' + sel.length + ' صنف ✅ لا تنسَ النشر');
     }
   });
@@ -4077,12 +4627,12 @@
   $('app').addEventListener('click', function (e) {
     var t = e.target;
     var b;
-    if (t.id === 'mobMenuBtn') {
-      $('app').classList.add('sb-mobile-open');
-      $('sbBackdrop').classList.add('on');
+    if (t.id === 'mobMenuBtn' || t.closest('#mobMenuBtn')) {
+      commitAdminRoute({ drawer: true }, { mode: 'push', skipTabRender: true });
       return;
     }
-    if (t.id === 'sbBackdrop' || t.id === 'sbMobileClose') { closeMobileDrawer(); return; }
+    if (t.id === 'sbBackdrop' || t.id === 'sbMobileClose' || t.closest('#sbMobileClose')) { closeMobileDrawer(); return; }
+    if (t.id === 'admBackBtn' || t.closest('#admBackBtn')) { admGoBackOrHome(); return; }
     if (t.id === 'sbCollapseBtn') {
       $('app').classList.toggle('sb-collapsed');
       try { localStorage.setItem('abu_sb_collapsed', $('app').classList.contains('sb-collapsed') ? '1' : '0'); } catch (z) {}
@@ -4160,7 +4710,12 @@
     }
 
     // Offers
-    if ((b = t.closest('[data-off-tab]'))) { offerSubTab = b.dataset.offTab; render(); return; }
+    if ((b = t.closest('[data-off-tab]'))) {
+      if (offerSubTab !== b.dataset.offTab) {
+        commitAdminRoute({ tab: 'o', sub: b.dataset.offTab }, { mode: 'push' });
+      }
+      return;
+    }
     if (t.dataset.oadd != null) { openOf(-1); return; }
     if (t.dataset.oup != null || t.dataset.odn != null) {
       var L = OFS(), oi = +(t.dataset.oup != null ? t.dataset.oup : t.dataset.odn), oj = t.dataset.oup != null ? oi - 1 : oi + 1;
@@ -4190,7 +4745,14 @@
     if ((b = t.closest('[data-ua]'))) { runUserAction(b.dataset.ua, b.dataset.uid); return; }
 
     // Push
-    if ((b = t.closest('[data-ptab]'))) { pushSubTab = b.dataset.ptab; if (pushSubTab === 'devices') loadPushDevices(true); render(); return; }
+    if ((b = t.closest('[data-ptab]'))) {
+      var nextPTab = b.dataset.ptab;
+      if (nextPTab === 'devices') loadPushDevices(true);
+      if (pushSubTab !== nextPTab) {
+        commitAdminRoute({ tab: 'n', sub: nextPTab }, { mode: 'push' });
+      }
+      return;
+    }
     if (t.id === 'pushRefresh') { loadPushOverview(false); if (pushSubTab === 'devices') loadPushDevices(true); return; }
     if ((b = t.closest('[data-ptarget]'))) { pushForm.targetType = b.dataset.ptarget; render(); return; }
     if (t.id === 'pushImgRm') { pushForm.imageDataUrl = ''; render(); return; }
@@ -4220,9 +4782,11 @@
       return;
     }
     if ((b = t.closest('[data-stab]'))) {
-      settingsSubTab = b.dataset.stab;
-      render();
-      if (settingsSubTab === 'health') loadHealth(false);
+      var nextSTab = b.dataset.stab;
+      if (settingsSubTab !== nextSTab) {
+        commitAdminRoute({ tab: 's', sub: nextSTab }, { mode: 'push' });
+      }
+      if (nextSTab === 'health') loadHealth(false);
       return;
     }
     if (t.id === 'healthRefreshBtn' || t.id === 'dashHealthRefresh') { loadHealth(false); return; }
@@ -4469,6 +5033,88 @@
     }
   }
 
+  function initAdminRouter() {
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
+    var existing = history.state;
+    var initSnap = parseAdminSnapFromLocation();
+    if (existing && existing.__abuAdmNav && typeof existing.idx === 'number') {
+      admNavIdx = existing.idx;
+      admBaseIdx = typeof existing.baseIdx === 'number' ? existing.baseIdx : existing.idx;
+      admOvSteps = typeof existing.ovSteps === 'number' ? existing.ovSteps : 0;
+      initSnap = normalizeAdminSnap(existing.snap || initSnap);
+      if (initSnap.cov) initSnap.cov = false;
+    } else {
+      admNavIdx = 0;
+      admBaseIdx = 0;
+      admOvSteps = 0;
+    }
+
+    ensureTabSubSynced(initSnap);
+    admCurrentSnap = initSnap;
+    try {
+      history.replaceState(
+        { __abuAdmNav: 1, idx: admNavIdx, baseIdx: admBaseIdx, ovSteps: admOvSteps, snap: initSnap },
+        '',
+        buildAdminUrl(initSnap)
+      );
+    } catch (e) {}
+
+    window.addEventListener('popstate', function (e) {
+      var st = e.state;
+      var targetSnap;
+      var nextIdx;
+      var nextOvSteps = 0;
+      saveAdmScroll(admNavIdx, admCurrentSnap);
+
+      if (st && st.__abuAdmNav && st.snap) {
+        targetSnap = normalizeAdminSnap(st.snap);
+        nextIdx = typeof st.idx === 'number' ? st.idx : admNavIdx;
+        if (typeof st.baseIdx === 'number' && st.baseIdx < admBaseIdx) admBaseIdx = st.baseIdx;
+        nextOvSteps = typeof st.ovSteps === 'number' ? st.ovSteps : 0;
+      } else {
+        targetSnap = parseAdminSnapFromLocation();
+        nextIdx = admNavIdx;
+      }
+
+      admNavIdx = nextIdx;
+      admOvSteps = nextOvSteps;
+      admRestoringPop = true;
+      try {
+        applyAdminSnapToUI(targetSnap, { isPop: true });
+      } finally {
+        admRestoringPop = false;
+      }
+    });
+
+    var scrollTick = null;
+    window.addEventListener(
+      'scroll',
+      function () {
+        clearTimeout(scrollTick);
+        scrollTick = setTimeout(function () {
+          if (admCurrentSnap && !admCurrentSnap.ov && !admCurrentSnap.cov) {
+            saveAdmScroll(admNavIdx, admCurrentSnap);
+          }
+        }, 120);
+      },
+      { passive: true }
+    );
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        if (popAdminOverlay('base')) e.preventDefault();
+      }
+    });
+
+    if (initSnap.ov === 'ai-chat' || initSnap.ov === 'ai-batch') {
+      openOverlayFromSnap(initSnap);
+    } else if (initSnap.ov) {
+      admPendingDeepOv = initSnap;
+    }
+    syncAdmBackButton();
+  }
+
   async function init() {
     var lfWrap = $('lfWrap');
     if (lfWrap) lfWrap.hidden = true;
@@ -4476,7 +5122,9 @@
     $('app').hidden = false;
     applySavedSidebarState();
     syncThemeUI();
+    initAdminRouter();
     render();
+    triggerTabDataLoads(tab);
     try {
       await Promise.all([
         loadAdminMe(),
@@ -4487,9 +5135,18 @@
         loadAuditLogs(true),
         loadHealth(true),
       ]);
+      admBootstrapDone = true;
       updatePublishStatusUI();
       render();
+      if (admPendingDeepOv) {
+        var deep = admPendingDeepOv;
+        admPendingDeepOv = null;
+        if (sameAdminSnap(admCurrentSnap, deep)) openOverlayFromSnap(deep);
+      }
+      var savedY = readAdmScroll(admNavIdx, admCurrentSnap);
+      if (savedY > 0 && admCurrentSnap && !admCurrentSnap.ov) restoreAdmScroll(savedY);
     } catch (e) {
+      admBootstrapDone = true;
       toast((e && e.message) || 'تعذر تحميل لوحة التحكم');
       render();
     }

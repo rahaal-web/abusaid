@@ -1,21 +1,26 @@
-import { aiHide, bindAIEvents, closeAI, openAI, vStop } from './ai.js';
+import { bindAIEvents, closeAI, openAI, syncAiOverlay, vStop } from './ai.js';
 import {
   bindCartEvents,
-  closeCartSheet,
-  fClose,
-  lines,
   openFlavorModal,
+  syncCartOverlay,
+  syncFlavorOverlay,
   updCartSummary,
 } from './cart.js';
 import { clearCachedData, LOGO_FALLBACK, saveCachedData } from './data.js';
 import { initFirebaseAnalytics } from './firebase-client.js';
 import { bindOfferEvents, renderOffers } from './offers.js';
 import {
-  closeAccountModal,
   initPushUI,
+  isMandatoryPushOpen,
   refreshPushAccountInfo,
+  syncAccountOverlay,
 } from './push.js';
-import { closeOrdersModal, initOrdersUI } from './orders.js';
+import { initOrdersUI, syncOrdersOverlay } from './orders.js';
+import {
+  closeTopOverlay,
+  initRouter,
+  reconcilePendingRouteAfterSync,
+} from './router.js';
 import {
   $,
   AN,
@@ -32,7 +37,8 @@ import {
   renderHeroSpotlight,
   renderTabs,
   sClose,
-  sHide,
+  syncFilterInputs,
+  syncSearchOverlay,
 } from './store.js';
 import { numAr } from './utils.js';
 
@@ -499,7 +505,7 @@ function ref() {
   renderHeroSpotlight();
   renderGrid();
   updCartSummary();
-  if ($('sheet') && $('sheet').classList.contains('on')) lines();
+  if ($('sheet') && $('sheet').classList.contains('on')) state.hooks.syncCartOverlay?.(true);
   loadImgs();
   logoLoad();
   loadFontAssets();
@@ -537,6 +543,7 @@ function sync() {
       state.syncing = false;
       if (!v.json || v.ts === state.ct) {
         renderGrid();
+        reconcilePendingRouteAfterSync();
         return;
       }
       state.ct = v.ts;
@@ -557,12 +564,14 @@ function sync() {
       saveCart();
       saveCachedData(o, v.ts);
       ref();
+      reconcilePendingRouteAfterSync();
     })
     .catch(() => {
       if (state.syncing) {
         state.syncing = false;
         renderGrid();
       }
+      reconcilePendingRouteAfterSync();
     });
 }
 
@@ -574,7 +583,7 @@ function registerHooks() {
   };
   state.hooks.renderCartUI = () => {
     updCartSummary();
-    if ($('sheet')?.classList.contains('on')) lines();
+    if ($('sheet')?.classList.contains('on')) syncCartOverlay(true);
   };
   state.hooks.renderOffers = renderOffers;
   state.hooks.renderSpotlight = renderHeroSpotlight;
@@ -584,6 +593,14 @@ function registerHooks() {
   state.hooks.openAI = openAI;
   state.hooks.closeAI = closeAI;
   state.hooks.closeSearch = sClose;
+  state.hooks.syncFilterInputs = syncFilterInputs;
+  state.hooks.syncSearchOverlay = syncSearchOverlay;
+  state.hooks.syncCartOverlay = syncCartOverlay;
+  state.hooks.syncFlavorOverlay = syncFlavorOverlay;
+  state.hooks.syncAiOverlay = syncAiOverlay;
+  state.hooks.syncOrdersOverlay = syncOrdersOverlay;
+  state.hooks.syncAccountOverlay = syncAccountOverlay;
+  state.hooks.isMandatoryPushOpen = isMandatoryPushOpen;
 }
 
 function bindGlobalEvents() {
@@ -592,46 +609,9 @@ function bindGlobalEvents() {
   if (raiH) raiH.addEventListener('click', openAI);
   if (hdrAi) hdrAi.addEventListener('click', openAI);
 
-  window.addEventListener('popstate', () => {
-    if (state.IGN) {
-      state.IGN--;
-      return;
-    }
-    const fOn = $('fsheet')?.classList.contains('on');
-    const cOn = $('sheet')?.classList.contains('on');
-    if (fOn || cOn) {
-      if (fOn) fClose();
-      if (cOn) closeCartSheet();
-      const t = state.LY[state.LY.length - 1];
-      if (t) {
-        try {
-          history.pushState({ ly: 1 }, '');
-        } catch (e) {}
-      }
-      return;
-    }
-    const x = state.LY.pop();
-    if (x) x.f();
-  });
-
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if ($('pushMandatoryModal')?.classList.contains('on')) {
-        return;
-      }
-      if ($('accountSheet')?.classList.contains('on')) {
-        closeAccountModal();
-      } else if ($('ordersSheet')?.classList.contains('on')) {
-        closeOrdersModal();
-      } else if ($('fsheet')?.classList.contains('on')) {
-        fClose();
-      } else if ($('sheet')?.classList.contains('on')) {
-        closeCartSheet();
-      } else if ($('rsheet')?.classList.contains('on')) {
-        closeAI();
-      } else if ($('spage')?.classList.contains('on')) {
-        sClose();
-      }
+      closeTopOverlay();
       return;
     }
 
@@ -686,6 +666,7 @@ function bootstrap() {
   bindOfferEvents();
   bindAIEvents();
   bindGlobalEvents();
+  initRouter();
 
   ref();
   checkSession();
@@ -698,6 +679,7 @@ function bootstrap() {
     if (state.syncing) {
       state.syncing = false;
       renderGrid();
+      reconcilePendingRouteAfterSync();
     }
   }, 1500);
 

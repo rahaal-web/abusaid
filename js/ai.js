@@ -1,10 +1,12 @@
+import { openAIReviewFlavor, updCartSummary } from './cart.js';
 import {
-  lines,
-  openCartSheet,
-  openAIReviewFlavor,
-  updCartSummary,
-} from './cart.js';
-import { lyClose, lyPush, ovf } from './store.js';
+  canGoBack,
+  commitRoute,
+  popOverlay,
+  pushOverlay,
+  switchOverlay,
+} from './router.js';
+import { ovf } from './store.js';
 import { $, AN, pname, saveCart, state, totals } from './state.js';
 import { esc, FL, isOut, money, numAr, rnd, rn, rtk } from './utils.js';
 
@@ -1115,7 +1117,7 @@ function chReset() {
   RT = '';
 }
 
-function rIn() {
+function renderAiOld() {
   vStop(false);
   RMODE = 'old';
   const pn = $('rpn');
@@ -1136,7 +1138,7 @@ function rIn() {
     '<button class="send rgold" id="rgo" type="button">حلّل طلبي 🤖</button>';
 }
 
-function chOpen() {
+function renderAiChat() {
   vStop(false);
   RMODE = 'chat';
   const p = $('rpn');
@@ -1930,7 +1932,7 @@ async function rGo() {
   }
   RL = res.items;
   RU = res.unk;
-  rRv();
+  commitRoute({ aiStep: 'review' }, { mode: 'push' });
 }
 
 async function chSend() {
@@ -1992,7 +1994,7 @@ function chReview() {
     rErr('الطلب فاضي، اكتب اللي عايزه الأول');
     return;
   }
-  rRv();
+  commitRoute({ aiStep: 'review' }, { mode: 'push' });
 }
 
 function ropts(l) {
@@ -2018,14 +2020,19 @@ function ropts(l) {
   return h + '</optgroup>';
 }
 
-function rRv() {
+function rRv(fromSync = false) {
   const pn = $('rpn');
   if (!pn) return;
   pn.className = 'pn';
   RL = RL.filter((l) => state.P[l.i]);
   if (!RL.length) {
-    if (RMODE === 'old') rIn();
-    else chOpen();
+    const fallbackStep = RMODE === 'old' ? 'old' : 'chat';
+    if (fromSync) {
+      if (fallbackStep === 'old') renderAiOld();
+      else renderAiChat();
+    } else {
+      commitRoute({ aiStep: fallbackStep }, { mode: 'replace' });
+    }
     return;
   }
   const ord = [];
@@ -2135,14 +2142,30 @@ function rRv() {
     '</button>';
 }
 
-function rOpenF(n) {
-  const l = RL[n];
-  if (!l) return;
+function openAiFlavorForProdIdx(prodIdx, meta = {}) {
+  const hasMatch = RL.some((o) => o.i === prodIdx);
+  if (!hasMatch) {
+    if (meta?.isInitialLoad) {
+      commitRoute(
+        (s) => ({
+          ...s,
+          layers: s.layers.filter((x) => x !== 'flavor'),
+          flavorProdIdx: -1,
+          flavorAiMode: false,
+        }),
+        { mode: 'replace' }
+      );
+    } else {
+      const fs = $('fsheet');
+      if (fs) fs.classList.remove('on');
+    }
+    return;
+  }
   const fd = {};
   RL.forEach((o) => {
-    if (o.i === l.i && o.f >= 0) fd[o.f] = (fd[o.f] || 0) + o.q;
+    if (o.i === prodIdx && o.f >= 0) fd[o.f] = (fd[o.f] || 0) + o.q;
   });
-  openAIReviewFlavor(l.i, fd, (i, nextFD) => {
+  openAIReviewFlavor(prodIdx, fd, (i, nextFD) => {
     const fs = Object.keys(nextFD)
       .map(Number)
       .sort((a, b) => a - b);
@@ -2163,8 +2186,14 @@ function rOpenF(n) {
       });
       RL = out;
     }
-    rRv();
+    rRv(true);
   });
+}
+
+function rOpenF(n) {
+  const l = RL[n];
+  if (!l) return;
+  pushOverlay('flavor', { flavorProdIdx: l.i, flavorAiMode: true });
 }
 
 function rAdd() {
@@ -2180,9 +2209,7 @@ function rAdd() {
   state.hooks.renderCatalog();
   updCartSummary();
   chReset();
-  closeAI();
-  lines();
-  openCartSheet();
+  switchOverlay('cart');
 }
 
 export function aiHide() {
@@ -2201,22 +2228,52 @@ export function aiHide() {
   }
 }
 
-export function openAI() {
-  chOpen();
+export function syncAiOverlay(isOpen, aiStep = 'chat', meta = {}) {
   const rs = $('rsheet');
-  if (rs && !rs.classList.contains('on')) {
+  if (!rs) return;
+  if (!isOpen) {
+    aiHide();
+    return;
+  }
+
+  if (!rs.classList.contains('on')) {
     rs.classList.add('on');
     document.body.classList.add('modal-open');
-    lyPush(aiHide);
+    ovf();
   }
-  ovf();
+
+  if (aiStep === 'review') {
+    if (RL.length) {
+      rRv(true);
+      return;
+    }
+    const fallbackStep = RMODE === 'old' ? 'old' : 'chat';
+    if (meta?.isInitialLoad) {
+      commitRoute({ aiStep: fallbackStep }, { mode: 'replace' });
+      return;
+    }
+    if (fallbackStep === 'old') renderAiOld();
+    else renderAiChat();
+    return;
+  }
+
+  if (aiStep === 'old') {
+    renderAiOld();
+  } else {
+    renderAiChat();
+  }
+}
+
+export function openAI() {
+  pushOverlay('ai', { aiStep: 'chat' });
 }
 
 export function closeAI() {
-  lyClose(aiHide);
+  popOverlay('ai');
 }
 
 export function bindAIEvents() {
+  state.hooks.openAiFlavorByProdIdx = openAiFlavorForProdIdx;
   const rs = $('rsheet');
   if (!rs) return;
 
@@ -2290,11 +2347,11 @@ export function bindAIEvents() {
     if (t.id === 'chold') {
       RL = [];
       RU = [];
-      rIn();
+      commitRoute({ aiStep: 'old' }, { mode: 'push' });
       return;
     }
     if (t.id === 'chback') {
-      chOpen();
+      commitRoute({ aiStep: 'chat' }, { mode: 'push' });
       return;
     }
     if (t.id === 'rmic') {
@@ -2302,8 +2359,11 @@ export function bindAIEvents() {
       return;
     }
     if (t.id === 'rbk') {
-      if (RMODE === 'old') rIn();
-      else chOpen();
+      if (canGoBack()) {
+        history.back();
+      } else {
+        commitRoute({ aiStep: RMODE === 'old' ? 'old' : 'chat' }, { mode: 'replace' });
+      }
       return;
     }
     if (t.id === 'rok') {

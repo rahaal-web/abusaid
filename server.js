@@ -705,6 +705,7 @@ app.get('/js/cart.js', requireApprovedUser, sendProtectedFile('js/cart.js'));
 app.get('/js/offers.js', requireApprovedUser, sendProtectedFile('js/offers.js'));
 app.get('/js/ai.js', requireApprovedUser, sendProtectedFile('js/ai.js'));
 app.get('/js/data.js', requireApprovedUser, sendProtectedFile('js/data.js'));
+app.get('/js/router.js', requireApprovedUser, sendProtectedFile('js/router.js'));
 app.get('/js/state.js', requireApprovedUser, sendProtectedFile('js/state.js'));
 app.get('/js/utils.js', requireApprovedUser, sendProtectedFile('js/utils.js'));
 app.get('/js/firebase-client.js', requireApprovedUser, sendProtectedFile('js/firebase-client.js'));

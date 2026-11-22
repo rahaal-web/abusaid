@@ -11,6 +11,7 @@ import {
 } from './state.js';
 import { bag, esc, FL, money, numAr, pk, rn } from './utils.js';
 import { recordWhatsAppOrder } from './orders.js';
+import { popOverlay, pushOverlay } from './router.js';
 
 let fi = -1;
 let FM = false;
@@ -247,30 +248,37 @@ export function lines() {
   }
 }
 
-export function openCartSheet() {
-  lines();
+function syncBodyModalLock() {
+  const anyOpen = Boolean(
+    $('sheet')?.classList.contains('on') ||
+      $('fsheet')?.classList.contains('on') ||
+      $('rsheet')?.classList.contains('on') ||
+      $('ordersSheet')?.classList.contains('on') ||
+      $('accountSheet')?.classList.contains('on') ||
+      $('pushMandatoryModal')?.classList.contains('on')
+  );
+  document.body.classList.toggle('modal-open', anyOpen);
+}
+
+export function syncCartOverlay(isOpen) {
   const sheet = $('sheet');
-  if (sheet) {
+  if (!sheet) return;
+  if (isOpen) {
+    lines();
     sheet.classList.add('on');
-    document.body.classList.add('modal-open');
+  } else {
+    sheet.classList.remove('on');
+    resetClearConfirm();
   }
+  syncBodyModalLock();
+}
+
+export function openCartSheet() {
+  pushOverlay('cart');
 }
 
 export function closeCartSheet() {
-  const sheet = $('sheet');
-  if (sheet) {
-    sheet.classList.remove('on');
-    resetClearConfirm();
-    if (
-      !$('fsheet')?.classList.contains('on') &&
-      !$('rsheet')?.classList.contains('on') &&
-      !$('ordersSheet')?.classList.contains('on') &&
-      !$('accountSheet')?.classList.contains('on') &&
-      !$('pushMandatoryModal')?.classList.contains('on')
-    ) {
-      document.body.classList.remove('modal-open');
-    }
-  }
+  popOverlay('cart');
 }
 
 function resetClearConfirm() {
@@ -283,19 +291,60 @@ function resetClearConfirm() {
   }
 }
 
-export function openFlavorModal(i) {
-  fi = i;
+export function syncFlavorOverlay(isOpen, prodIdx = -1, fromAi = false, meta = {}) {
+  const fs = $('fsheet');
+  if (!fs) return;
+
+  if (!isOpen) {
+    if (fs.classList.contains('on')) {
+      fs.classList.remove('on');
+    }
+    if (FM) {
+      FM = false;
+      const cb = aiApplyCallback;
+      aiApplyCallback = null;
+      if (cb) cb(fi, FD);
+    }
+    syncBodyModalLock();
+    return;
+  }
+
+  if (fromAi) {
+    if (fs.classList.contains('on') && fi === prodIdx && FM) {
+      flav();
+      syncBodyModalLock();
+      return;
+    }
+    state.hooks.openAiFlavorByProdIdx?.(prodIdx, meta);
+    return;
+  }
+
+  if (!state.P[prodIdx] || !FL(state.P[prodIdx]).length) {
+    if (!meta?.isInitialLoad) {
+      popOverlay('flavor');
+    }
+    return;
+  }
+
+  if (fs.classList.contains('on') && fi === prodIdx && !FM) {
+    flav();
+    syncBodyModalLock();
+    return;
+  }
+
+  fi = prodIdx;
   FM = false;
   aiApplyCallback = null;
   flavorFilter = '';
   const fSearch = $('fsearch');
   if (fSearch) fSearch.value = '';
   flav();
-  const fs = $('fsheet');
-  if (fs) {
-    fs.classList.add('on');
-    document.body.classList.add('modal-open');
-  }
+  fs.classList.add('on');
+  syncBodyModalLock();
+}
+
+export function openFlavorModal(i) {
+  pushOverlay('flavor', { flavorProdIdx: i, flavorAiMode: false });
 }
 
 export function openAIReviewFlavor(i, initialFD, onApply) {
@@ -310,7 +359,7 @@ export function openAIReviewFlavor(i, initialFD, onApply) {
   const fs = $('fsheet');
   if (fs) {
     fs.classList.add('on');
-    document.body.classList.add('modal-open');
+    syncBodyModalLock();
   }
 }
 
@@ -385,23 +434,7 @@ export function flav() {
 }
 
 export function fClose() {
-  const fs = $('fsheet');
-  if (fs) fs.classList.remove('on');
-  if (FM) {
-    FM = false;
-    const cb = aiApplyCallback;
-    aiApplyCallback = null;
-    if (cb) cb(fi, FD);
-  }
-  if (
-    !$('sheet')?.classList.contains('on') &&
-    !$('rsheet')?.classList.contains('on') &&
-    !$('ordersSheet')?.classList.contains('on') &&
-    !$('accountSheet')?.classList.contains('on') &&
-    !$('pushMandatoryModal')?.classList.contains('on')
-  ) {
-    document.body.classList.remove('modal-open');
-  }
+  popOverlay('flavor');
 }
 
 export function bindCartEvents() {

@@ -1,3 +1,4 @@
+import { popOverlay, pushOverlay, switchOverlay } from './router.js';
 import { $, grp, pname, pq, saveCart, showToast, state } from './state.js';
 import { esc, FL, money, numAr, pk } from './utils.js';
 
@@ -398,12 +399,7 @@ function reorderIntoCart(orderId) {
     saveCart();
     state.hooks.renderCatalog?.();
     state.hooks.renderCartUI?.();
-    closeOrdersModal();
-    const sheet = $('sheet');
-    if (sheet) {
-      sheet.classList.add('on');
-      document.body.classList.add('modal-open');
-    }
+    switchOverlay('cart');
     showToast(
       skippedCount > 0
         ? 'تمت إضافة الأصناف المتوفرة للسلة ✅'
@@ -414,27 +410,34 @@ function reorderIntoCart(orderId) {
   }
 }
 
-export function openOrdersModal() {
+export function syncOrdersOverlay(isOpen) {
   const sheet = $('ordersSheet');
   if (!sheet) return;
-  sheet.classList.add('on');
-  document.body.classList.add('modal-open');
-  renderOrdersBody();
-  loadUserOrders(true);
-}
-
-export function closeOrdersModal() {
-  const sheet = $('ordersSheet');
-  if (!sheet) return;
+  if (isOpen) {
+    sheet.classList.add('on');
+    document.body.classList.add('modal-open');
+    renderOrdersBody();
+    loadUserOrders(!ordersState.loaded);
+    return;
+  }
   sheet.classList.remove('on');
   if (
     !$('sheet')?.classList.contains('on') &&
     !$('fsheet')?.classList.contains('on') &&
     !$('rsheet')?.classList.contains('on') &&
+    !$('accountSheet')?.classList.contains('on') &&
     !$('pushMandatoryModal')?.classList.contains('on')
   ) {
     document.body.classList.remove('modal-open');
   }
+}
+
+export function openOrdersModal() {
+  pushOverlay('orders');
+}
+
+export function closeOrdersModal() {
+  popOverlay('orders');
 }
 
 export function initOrdersUI() {

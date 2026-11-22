@@ -55,6 +55,7 @@ const PROTECTED_STORE_PATHS = new Set([
   '/js/offers.js',
   '/js/ai.js',
   '/js/data.js',
+  '/js/router.js',
   '/js/state.js',
   '/js/utils.js',
   '/js/firebase-client.js',

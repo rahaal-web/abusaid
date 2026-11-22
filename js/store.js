@@ -1,5 +1,14 @@
 import { chg, openFlavorModal } from './cart.js';
 import {
+  commitRoute,
+  getCurrentSnapshot,
+  goBackOrHome,
+  hasInternalFilterOrSection,
+  popOverlay,
+  pushOverlay,
+  scheduleSearchRoute,
+} from './router.js';
+import {
   $,
   getSelectedVariantIndex,
   gidx,
@@ -354,8 +363,14 @@ export function renderGrid() {
   const items = buildGroupedItems(qNorm, !qNorm);
 
   if (statusEl) {
+    const snap = getCurrentSnapshot();
+    const showBack = hasInternalFilterOrSection(snap) || Boolean(qNorm) || state.cat !== 'الكل' || state.inStockOnly || state.sort !== 'default';
+    const backBtnHtml = showBack
+      ? '<button type="button" class="nav-back-btn" id="catalogBackBtn">→ رجوع</button> '
+      : '';
     if (qNorm) {
       statusEl.innerHTML =
+        backBtnHtml +
         'نتائج البحث عن «<b>' +
         esc(state.searchQuery.trim()) +
         '</b>» · ' +
@@ -364,16 +379,16 @@ export function renderGrid() {
       statusEl.hidden = false;
     } else if (state.cat !== 'الكل' || state.inStockOnly || state.sort !== 'default') {
       statusEl.innerHTML =
+        backBtnHtml +
         'عرض ' +
         numAr(items.length) +
         ' صنف' +
         (state.cat !== 'الكل' ? ' في قسم <b>' + esc(state.cat) + '</b>' : '') +
-        (state.cat !== 'الكل' || state.inStockOnly || state.sort !== 'default'
-          ? ' <button type="button" class="link-reset" id="resetFilterBtn">إعادة ضبط</button>'
-          : '');
+        ' <button type="button" class="link-reset" id="resetFilterBtn">إعادة ضبط</button>';
       statusEl.hidden = false;
     } else {
       statusEl.innerHTML =
+        backBtnHtml +
         'كل الأصناف (' + numAr(items.length) + ' صنف)';
       statusEl.hidden = false;
     }
@@ -406,29 +421,62 @@ export function renderGrid() {
   }
 }
 
-export function setSearchQuery(val) {
-  state.searchQuery = val;
+export function syncFilterInputs() {
+  const sortEl = $('sortSelect');
+  const stockEl = $('inStockToggle');
   const qEl = $('q');
   const qHdr = $('qHeader');
   const qClear = $('qClear');
-  if (qEl && qEl.value !== val) qEl.value = val;
-  if (qHdr && qHdr.value !== val) qHdr.value = val;
-  if (qClear) qClear.hidden = !val.trim();
+  if (sortEl && sortEl.value !== state.sort) sortEl.value = state.sort;
+  if (stockEl && stockEl.checked !== Boolean(state.inStockOnly)) {
+    stockEl.checked = Boolean(state.inStockOnly);
+  }
+  if (qEl && qEl.value !== state.searchQuery) qEl.value = state.searchQuery;
+  if (qHdr && qHdr.value !== state.searchQuery) qHdr.value = state.searchQuery;
+  if (qClear) qClear.hidden = !String(state.searchQuery || '').trim();
+}
+
+export function setSearchQuery(val) {
+  state.searchQuery = val;
+  syncFilterInputs();
   renderCategoriesShowcase();
   renderGrid();
 }
 
 export function resetAllFilters() {
-  state.cat = 'الكل';
-  state.sort = 'default';
-  state.inStockOnly = false;
-  const sortEl = $('sortSelect');
-  const stockEl = $('inStockToggle');
-  if (sortEl) sortEl.value = 'default';
-  if (stockEl) stockEl.checked = false;
-  setSearchQuery('');
-  renderTabs();
-  renderCategoriesShowcase();
+  commitRoute(
+    {
+      cat: 'الكل',
+      sort: 'default',
+      inStockOnly: false,
+      searchQuery: '',
+      sec: '',
+      spot: -1,
+    },
+    { mode: 'push' }
+  );
+}
+
+export function syncSearchOverlay(isOpen, modalQuery = '') {
+  const spage = $('spage');
+  const q2 = $('q2');
+  if (isOpen) {
+    state.searchModalQuery = rn(String(modalQuery || '').trim());
+    if (q2 && document.activeElement !== q2) {
+      q2.value = state.searchModalQuery || '';
+    }
+    if (spage && !spage.classList.contains('on')) {
+      spage.classList.add('on');
+      spage.scrollTop = 0;
+    }
+    state.SOPEN = 1;
+  } else {
+    if (spage && spage.classList.contains('on')) {
+      spage.classList.remove('on');
+    }
+    state.SOPEN = 0;
+  }
+  ovf();
   renderGrid();
 }
 
@@ -439,17 +487,15 @@ export function openSearchPage(v) {
     if (qEl) qEl.focus();
     return;
   }
-  state.searchModalQuery = t;
+  const spage = $('spage');
   const q2 = $('q2');
   if (q2) q2.value = String(v).trim();
-  const spage = $('spage');
-  if (spage && !spage.classList.contains('on')) {
-    spage.classList.add('on');
-    state.SOPEN = 1;
-    lyPush(sHide);
+
+  if (spage && spage.classList.contains('on')) {
+    commitRoute({ searchModalQuery: t }, { mode: 'replace' });
+  } else {
+    pushOverlay('search', { searchModalQuery: t });
   }
-  ovf();
-  renderGrid();
   if (spage) spage.scrollTop = 0;
   if (document.activeElement && document.activeElement.blur) {
     document.activeElement.blur();
@@ -457,14 +503,11 @@ export function openSearchPage(v) {
 }
 
 export function sHide() {
-  const spage = $('spage');
-  if (spage) spage.classList.remove('on');
-  state.SOPEN = 0;
-  ovf();
+  syncSearchOverlay(false, '');
 }
 
 export function sClose() {
-  lyClose(sHide);
+  popOverlay('search');
 }
 
 export function ovf() {
@@ -473,43 +516,14 @@ export function ovf() {
   document.body.style.overflow = rOn || sOn ? 'hidden' : '';
 }
 
-export function lyPush(f) {
-  const h = f && f.name === 'aiHide' ? '#ai' : '#s';
-  let p = 1;
-  try {
-    history.pushState({ ly: 1 }, '', h);
-  } catch (e) {
-    try {
-      history.pushState({ ly: 1 }, '');
-    } catch (e2) {
-      try {
-        location.hash = h;
-      } catch (e3) {
-        p = 0;
-      }
-    }
-  }
-  state.LY.push({ f, p });
-}
-
-export function lyClose(f) {
-  const t = state.LY[state.LY.length - 1];
-  if (t && t.f === f) {
-    state.LY.pop();
-    f();
-    if (t.p) {
-      state.IGN++;
-      history.back();
-    }
-  } else {
-    f();
-  }
-}
-
 export function bindStoreEvents() {
   const handleGridClick = (e) => {
     if (e.target.id === 'emptyResetBtn' || e.target.id === 'resetFilterBtn') {
       resetAllFilters();
+      return;
+    }
+    if (e.target.id === 'catalogBackBtn') {
+      goBackOrHome();
       return;
     }
     const b = e.target.closest('[data-d]');
@@ -540,20 +554,55 @@ export function bindStoreEvents() {
     statusEl.addEventListener('click', (e) => {
       if (e.target.id === 'resetFilterBtn') {
         resetAllFilters();
+      } else if (e.target.id === 'catalogBackBtn') {
+        goBackOrHome();
       }
     });
   }
+
+  // Intercept internal top/section links so every section navigation records proper History state
+  document.querySelectorAll('.brand-link[href="#top"], .hdr-nav a[href^="#"], .hero-ctas a[href="#catalog"]').forEach((lnk) => {
+    lnk.addEventListener('click', (e) => {
+      const href = lnk.getAttribute('href') || '';
+      if (!href.startsWith('#')) return;
+      e.preventDefault();
+      const targetId = href.slice(1);
+      if (targetId === 'top') {
+        commitRoute(
+          {
+            cat: 'الكل',
+            sort: 'default',
+            inStockOnly: false,
+            searchQuery: '',
+            sec: '',
+            spot: -1,
+            layers: [],
+          },
+          { mode: 'push', resetScrollTop: true }
+        );
+      } else {
+        commitRoute(
+          { sec: targetId, spot: -1, layers: [] },
+          { mode: 'push', scrollTarget: 'section' }
+        );
+      }
+    });
+  });
 
   const catsEl = $('cats');
   if (catsEl) {
     catsEl.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-c]');
       if (!btn) return;
-      state.cat = btn.dataset.c;
-      if (state.searchQuery) setSearchQuery('');
-      renderTabs();
-      renderCategoriesShowcase();
-      renderGrid();
+      commitRoute(
+        {
+          cat: btn.dataset.c,
+          searchQuery: '',
+          sec: 'catalog',
+          spot: -1,
+        },
+        { mode: 'push' }
+      );
     });
   }
 
@@ -562,13 +611,15 @@ export function bindStoreEvents() {
     catShowcase.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-cat-pick]');
       if (!btn) return;
-      state.cat = btn.dataset.catPick;
-      if (state.searchQuery) setSearchQuery('');
-      renderTabs();
-      renderCategoriesShowcase();
-      renderGrid();
-      const catEl = $('catalog');
-      if (catEl) catEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      commitRoute(
+        {
+          cat: btn.dataset.catPick,
+          searchQuery: '',
+          sec: 'catalog',
+          spot: -1,
+        },
+        { mode: 'push', scrollTarget: 'section' }
+      );
     });
   }
 
@@ -580,34 +631,30 @@ export function bindStoreEvents() {
       const idx = +btn.dataset.spot;
       const p = state.P[idx];
       if (!p) return;
-      state.cat = p[1];
       state.SEL[gk(p)] = idx;
-      if (state.searchQuery) setSearchQuery('');
-      renderTabs();
-      renderCategoriesShowcase();
-      renderGrid();
-      const card = $('prod-' + idx);
-      if (card) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        card.classList.add('spotlight-flash');
-        setTimeout(() => card.classList.remove('spotlight-flash'), 1200);
-      }
+      commitRoute(
+        {
+          cat: p[1],
+          searchQuery: '',
+          sec: 'catalog',
+          spot: idx,
+        },
+        { mode: 'push', scrollTarget: 'section' }
+      );
     });
   }
 
   const sortSelect = $('sortSelect');
   if (sortSelect) {
     sortSelect.addEventListener('change', () => {
-      state.sort = sortSelect.value;
-      renderGrid();
+      commitRoute({ sort: sortSelect.value, spot: -1 }, { mode: 'push' });
     });
   }
 
   const inStockToggle = $('inStockToggle');
   if (inStockToggle) {
     inStockToggle.addEventListener('change', () => {
-      state.inStockOnly = inStockToggle.checked;
-      renderGrid();
+      commitRoute({ inStockOnly: inStockToggle.checked, spot: -1 }, { mode: 'push' });
     });
   }
 
@@ -619,30 +666,40 @@ export function bindStoreEvents() {
   const sback = $('sback');
 
   if (qEl) {
-    qEl.addEventListener('input', () => setSearchQuery(qEl.value));
+    qEl.addEventListener('input', () => {
+      setSearchQuery(qEl.value);
+      scheduleSearchRoute(qEl.value, false);
+    });
     qEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        const catSec = $('catalog');
-        if (catSec) catSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        commitRoute(
+          { searchQuery: qEl.value, sec: 'catalog', spot: -1 },
+          { mode: qEl.value.trim() ? 'push' : 'replace', scrollTarget: 'section' }
+        );
       }
     });
   }
 
   if (qHdr) {
-    qHdr.addEventListener('input', () => setSearchQuery(qHdr.value));
+    qHdr.addEventListener('input', () => {
+      setSearchQuery(qHdr.value);
+      scheduleSearchRoute(qHdr.value, false);
+    });
     qHdr.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        const catSec = $('catalog');
-        if (catSec) catSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        commitRoute(
+          { searchQuery: qHdr.value, sec: 'catalog', spot: -1 },
+          { mode: qHdr.value.trim() ? 'push' : 'replace', scrollTarget: 'section' }
+        );
       }
     });
   }
 
   if (qClear) {
     qClear.addEventListener('click', () => {
-      setSearchQuery('');
+      commitRoute({ searchQuery: '', spot: -1 }, { mode: 'push' });
       if (qEl) qEl.focus();
     });
   }
@@ -662,6 +719,7 @@ export function bindStoreEvents() {
     q2.addEventListener('input', () => {
       state.searchModalQuery = rn(q2.value.trim());
       renderGrid();
+      scheduleSearchRoute(q2.value, true);
     });
   }
 

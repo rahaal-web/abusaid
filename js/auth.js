@@ -492,8 +492,29 @@ function initStatusPage() {
   pollTimer = setInterval(refreshStatus, 8000);
 }
 
+function initBackButton() {
+  const btn = $('authBackBtn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    try {
+      const ref = document.referrer ? new URL(document.referrer) : null;
+      const sameOrigin = ref && ref.origin === window.location.origin;
+      if (
+        sameOrigin &&
+        ref.href !== window.location.href &&
+        window.history.length > 1
+      ) {
+        window.history.back();
+        return;
+      }
+    } catch {}
+    window.location.href = '/login';
+  });
+}
+
 initTheme();
 initLogo();
+initBackButton();
 initPasswordToggles();
 initLoginPage();
 initRegisterPage();

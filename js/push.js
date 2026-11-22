@@ -1,3 +1,4 @@
+import { commitRoute, popOverlay, pushOverlay } from './router.js';
 import { $, showToast, state } from './state.js';
 import { esc, numAr } from './utils.js';
 
@@ -465,19 +466,35 @@ export async function enablePushNotifications() {
   }
 }
 
-export function openAccountModal() {
+export function isMandatoryPushOpen() {
+  return Boolean($('pushMandatoryModal')?.classList.contains('on'));
+}
+
+export function syncAccountOverlay(isOpen) {
   const sheet = $('accountSheet');
   if (!sheet) return;
-  renderAccountModalContent();
-  sheet.classList.add('on');
-  syncBodyModalLock();
-  refreshPushState({ silentSync: false });
+  if (isOpen) {
+    const wasOpen = sheet.classList.contains('on');
+    renderAccountModalContent();
+    if (!wasOpen) {
+      sheet.classList.add('on');
+      syncBodyModalLock();
+      refreshPushState({ silentSync: false });
+    }
+    return;
+  }
+  if (sheet.classList.contains('on')) {
+    sheet.classList.remove('on');
+    syncBodyModalLock();
+  }
+}
+
+export function openAccountModal() {
+  pushOverlay('account');
 }
 
 export function closeAccountModal() {
-  const sheet = $('accountSheet');
-  if (sheet) sheet.classList.remove('on');
-  syncBodyModalLock();
+  popOverlay('account');
 }
 
 export function refreshPushAccountInfo() {
@@ -513,8 +530,7 @@ export function initPushUI() {
     accBody.addEventListener('click', (e) => {
       if (e.target.closest('#accPushEnable')) enablePushNotifications();
       else if (e.target.closest('#accOpenOrdersBtn')) {
-        closeAccountModal();
-        state.hooks.openOrdersModal?.();
+        commitRoute((s) => ({ ...s, layers: ['orders'] }), { mode: 'push' });
       }
     });
   }
