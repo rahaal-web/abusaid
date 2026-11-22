@@ -100,7 +100,9 @@ function parseCookies(req) {
 function isHttpsRequest(req) {
   if (req.secure) return true;
   const proto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
-  return proto.split(',')[0].trim() === 'https';
+  if (proto.split(',')[0].trim() === 'https') return true;
+  const cfVisitor = String(req.headers['cf-visitor'] || '').toLowerCase();
+  return cfVisitor.includes('"https"');
 }
 
 function setSessionCookie(req, res, rawToken, maxAgeMs = SESSION_TTL_MS) {
@@ -240,6 +242,15 @@ function requireAdminApi(req, res, next) {
 }
 
 // ==================== PUBLIC AUTH ASSETS & PAGES ====================
+
+app.get('/favicon.ico', (_req, res) => {
+  res.status(204).end();
+});
+
+app.get('/api/health', (_req, res) => {
+  noStore(res);
+  res.json({ ok: true, service: 'abusaid' });
+});
 
 app.get('/styles/auth.css', (_req, res) => {
   res.sendFile(path.join(__dirname, 'styles', 'auth.css'));

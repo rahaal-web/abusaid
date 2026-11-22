@@ -130,12 +130,19 @@ export async function fetchAssetById(id) {
   if (!safeId || !/^[a-zA-Z0-9_-]{1,64}$/.test(safeId)) return null;
   if (imgCache.has(safeId)) return imgCache.get(safeId);
 
+  const localVal = getKv('img_' + safeId);
+  if (localVal) {
+    imgCache.set(safeId, localVal);
+    return localVal;
+  }
+
   try {
     const res = await fetch(`https://${FIREBASE_RTDB_HOST}/chips/img/${encodeURIComponent(safeId)}.json`);
     if (res.ok) {
       const val = await res.json();
       if (val) {
         imgCache.set(safeId, val);
+        setKv('img_' + safeId, val);
         return val;
       }
     }
@@ -222,6 +229,7 @@ export async function publishCatalog({ sessionRow, catalog, pendingImgs = {} }) 
         throw new Error(`RTDB_IMG_${r.status}: ${txt.slice(0, 120)}`);
       }
       imgCache.set(k, val);
+      setKv('img_' + k, val);
     }
 
     const rData = await fetch(`${base}data.json?auth=${encodeURIComponent(token)}`, {
@@ -254,7 +262,10 @@ export async function publishCatalog({ sessionRow, catalog, pendingImgs = {} }) 
     }
   } else {
     for (const [k, val] of Object.entries(pendingImgs || {})) {
-      if (used.has(k) && val) imgCache.set(k, val);
+      if (used.has(k) && val) {
+        imgCache.set(k, val);
+        setKv('img_' + k, val);
+      }
     }
   }
 
