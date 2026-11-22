@@ -51,6 +51,11 @@
           <span aria-hidden="true">✨</span>
           <span class="hdr-ai-txt">اطلب بالذكاء</span>
         </button>
+        <button id="hdrOrdersBtn" class="hdr-orders-btn" type="button" aria-label="سجل طلباتي">
+          <span aria-hidden="true">📦</span>
+          <span class="hdr-orders-txt">طلباتي</span>
+          <span class="hdr-orders-badge" id="hdrOrdersCount" hidden>٠</span>
+        </button>
         <button id="hdrCart" class="hdr-cart-btn" type="button" aria-label="سلة الطلبات">
           <span aria-hidden="true">🛒</span>
           <span class="hdr-cart-badge" id="hdrCartCount">٠</span>
@@ -62,19 +67,6 @@
   </header>
 
   <main id="top">
-    <div class="wrap push-optin-wrap" id="pushOptinBar" hidden>
-      <div class="push-optin-bar" role="region" aria-label="تفعيل الإشعارات الفورية">
-        <div class="push-optin-ico" aria-hidden="true">🔔</div>
-        <div class="push-optin-txt">
-          <strong>فعّل إشعارات أبو سعيد الفورية</strong>
-          <small>توصلك عروض الجملة وتحديثات الأسعار وحالة حسابك أولاً بأول حتى لو الموقع مغلق.</small>
-        </div>
-        <div class="push-optin-actions">
-          <button id="pushOptinAllow" class="push-allow-btn" type="button">تفعيل الإشعارات</button>
-          <button id="pushOptinDismiss" class="push-dismiss-btn" type="button" aria-label="لاحقاً">لاحقاً</button>
-        </div>
-      </div>
-    </div>
 
     <section class="top-banner-sec" id="topBannerSec">
       <div class="wrap">
@@ -299,6 +291,25 @@
       </div>
       <div id="accBody" class="acc-body"></div>
     </div>
+  </div>
+
+  <!-- Customer Orders History Modal -->
+  <div class="ov" id="ordersSheet" role="dialog" aria-modal="true" aria-labelledby="ordersTitle">
+    <div class="pn orders-pn">
+      <div class="pn-head">
+        <h2 id="ordersTitle">📦 سجل طلباتي عبر واتساب</h2>
+        <div class="pn-head-act">
+          <button id="ordersRefreshBtn" class="ord-refresh-btn" type="button" aria-label="تحديث الطلبات">🔄 تحديث</button>
+          <button id="ordersClose" class="x" type="button" aria-label="إغلاق">✕</button>
+        </div>
+      </div>
+      <div id="ordersBody" class="orders-body"></div>
+    </div>
+  </div>
+
+  <!-- Mandatory Centered Push Subscription Modal -->
+  <div class="ov push-mandatory-ov" id="pushMandatoryModal" role="dialog" aria-modal="true" aria-labelledby="pushMandatoryTitle">
+    <div class="pn push-mandatory-pn" id="pushMandatoryPanel"></div>
   </div>
 
   <!-- Toast Notification -->

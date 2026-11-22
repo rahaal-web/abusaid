@@ -28,6 +28,10 @@ import {
   resolveVapidEnv,
   validatePushSubscriptionInput,
 } from './lib/pushService.js';
+import {
+  buildAuthoritativeOrder,
+  VALID_ORDER_STATUSES,
+} from './lib/orderService.js';
 
 const USER_COOKIE = 'abu_session';
 const STATUS_COOKIE = 'abu_status_token';
@@ -50,6 +54,7 @@ const PROTECTED_STORE_PATHS = new Set([
   '/js/utils.js',
   '/js/firebase-client.js',
   '/js/push.js',
+  '/js/orders.js',
 ]);
 
 const PUBLIC_ASSET_PATHS = new Set([
@@ -845,6 +850,55 @@ export default {
       }
     }
 
+    // ==================== CUSTOMER ORDERS APIs ====================
+    if (method === 'GET' && pathname === '/api/orders') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      try {
+        const orders = await store.listUserOrders(check.user.id, 80);
+        return jsonResponse({ orders });
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'تعذر تحميل سجل الطلبات حالياً.' }, 502);
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/orders') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      const body = (await readJsonBody(req)) || {};
+      try {
+        const rawCatalog = await fetchRawCatalog({
+          dbHost,
+          force: false,
+          dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+          serviceAccountJson: getServiceAccountFromEnv(env),
+        });
+        const built = await buildAuthoritativeOrder({
+          body,
+          user: check.user,
+          catalogData: rawCatalog?.data,
+        });
+        if (built.error) {
+          return jsonResponse({ error: built.error }, built.status || 400);
+        }
+        const saved = await store.createOrder(built.order);
+        return jsonResponse(
+          {
+            ok: true,
+            order: saved.order,
+            deduplicated: Boolean(saved.deduplicated),
+          },
+          saved.deduplicated ? 200 : 201
+        );
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'تعذر حفظ الطلب في قاعدة البيانات.' }, 502);
+      }
+    }
+
     // ==================== CUSTOMER WEB PUSH APIs ====================
     if (method === 'GET' && pathname === '/api/push/config') {
       const check = await requireApprovedUser(req, url, store);
@@ -1178,6 +1232,52 @@ export default {
           const cfgErr = handleRtdbConfigError(err);
           if (cfgErr) return cfgErr;
           return jsonResponse({ error: 'تعذر حذف المستخدم' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/orders') {
+        try {
+          const orders = await store.listAllOrders(150, {
+            adminIdToken: admin.idToken,
+          });
+          const counts = {
+            all: orders.length,
+            sent_whatsapp: 0,
+            confirmed: 0,
+            completed: 0,
+            cancelled: 0,
+          };
+          orders.forEach((o) => {
+            if (counts[o.status] != null) counts[o.status] += 1;
+          });
+          return jsonResponse({ orders, counts }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر تحميل الطلبات.' }, 502, setCookies);
+        }
+      }
+
+      const orderStatusMatch = pathname.match(/^\/api\/admin\/orders\/([^/]+)\/status$/);
+      if (method === 'POST' && orderStatusMatch) {
+        const ordId = decodeURIComponent(orderStatusMatch[1]);
+        const body = (await readJsonBody(req)) || {};
+        const status = String(body.status || '').trim();
+        if (!VALID_ORDER_STATUSES.includes(status)) {
+          return jsonResponse({ error: 'حالة الطلب غير صالحة.' }, 400, setCookies);
+        }
+        try {
+          const updated = await store.updateOrderStatus(ordId, status, {
+            adminIdToken: admin.idToken,
+          });
+          if (!updated) {
+            return jsonResponse({ error: 'الطلب غير موجود.' }, 404, setCookies);
+          }
+          return jsonResponse({ ok: true, order: updated }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر تحديث حالة الطلب.' }, 502, setCookies);
         }
       }
 

@@ -15,6 +15,7 @@ import {
   initPushUI,
   refreshPushAccountInfo,
 } from './push.js';
+import { closeOrdersModal, initOrdersUI } from './orders.js';
 import {
   $,
   AN,
@@ -601,8 +602,13 @@ function bindGlobalEvents() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if ($('pushMandatoryModal')?.classList.contains('on')) {
+        return;
+      }
       if ($('accountSheet')?.classList.contains('on')) {
         closeAccountModal();
+      } else if ($('ordersSheet')?.classList.contains('on')) {
+        closeOrdersModal();
       } else if ($('fsheet')?.classList.contains('on')) {
         fClose();
       } else if ($('sheet')?.classList.contains('on')) {
@@ -671,6 +677,7 @@ function bootstrap() {
   checkSession();
   sync();
   initPushUI();
+  initOrdersUI();
   initFirebaseAnalytics();
 
   setTimeout(() => {

@@ -112,6 +112,16 @@ input[type=range]{padding:0;border:0;height:30px;background:transparent;accent-c
 .st-failed{background:#ffd1ce;color:#8a130b}
 .st-no_subscribers{background:#e2e8f0;color:#1e293b}
 .nlog-img{width:100%;max-height:150px;object-fit:cover;border:2px solid var(--ink);border-radius:10px;margin-top:8px;display:block}
+.st-sent_whatsapp{background:#e0f2fe;color:#075985}
+.st-confirmed{background:#c6f6d5;color:#0b5d34}
+.st-completed{background:#bbf7d0;color:#14532d}
+.st-cancelled{background:#ffd1ce;color:#8a130b}
+.ord-items-box{margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.55);border:2px solid var(--ink);border-radius:12px;display:flex;flex-direction:column;gap:6px}
+.ord-line{display:flex;flex-direction:column;gap:3px;font-size:13px;padding-bottom:5px;border-bottom:1.5px dashed rgba(0,0,0,.15)}
+.ord-line:last-child{padding-bottom:0;border-bottom:0}
+.ord-line-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ord-fl{display:flex;flex-wrap:wrap;gap:4px}
+.ord-fl span{background:var(--paper);border:1.5px solid var(--ink);border-radius:8px;padding:1px 7px;font-size:11.5px;font-weight:800}
 </style><!-- PWA: install support -->
 <script>
 (function(){
@@ -168,7 +178,7 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
 <form class="login" id="lf" method="post" action="/admin"><h3>🔧 لوحة التحكم</h3><div style="font-weight:800;color:var(--mu)">أبو سعيد</div><label>الإيميل</label><input id="lu" name="username" type="email" dir="ltr" autocomplete="username" required><label>كلمة السر</label><input id="lp" name="password" type="password" dir="ltr" autocomplete="current-password" required><label class="ck" style="margin-top:10px;font-size:13px;cursor:pointer"><input id="lrem" type="checkbox" checked><span>حفظ الجلسة وتذكر تسجيل الدخول</span></label><button class="pubb" id="lbtn" style="width:100%;margin-top:12px;padding:10px" type="submit">دخول</button><div class="err" id="le"></div><div class="cred">تصميم وتطوير <b>احمد رحال</b></div></form>
 <div id="app" hidden>
  <div class="top"><div class="trow"><b>🔧 أبو سعيد</b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
- <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="u">👥 طلبات الحسابات <span class="ubadge" id="uBadge" hidden>0</span></button><button data-t="n">🔔 الإشعارات</button><button data-t="s">⚙️ الإعدادات</button></nav>
+ <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="orders">📦 الطلبات <span class="ubadge" id="ordBadge" hidden>0</span></button><button data-t="u">👥 طلبات الحسابات <span class="ubadge" id="uBadge" hidden>0</span></button><button data-t="n">🔔 الإشعارات</button><button data-t="s">⚙️ الإعدادات</button></nav>
  <div id="qw" style="display:flex;gap:8px;align-items:center"><input id="q" placeholder="🔍 دوّر على صنف"><button class="pubb" id="smb" type="button" style="flex:none;padding:5px 12px;font-size:14px;font-family:inherit;letter-spacing:.3px;background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b">Rahal Ai</button></div></div>
  <div id="v"></div>
  <div class="cred">تصميم وتطوير <b>احمد رحال</b></div>

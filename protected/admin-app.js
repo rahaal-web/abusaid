@@ -32,6 +32,14 @@
   var usersBusyId = '';
   var usersSetupNotice = '';
 
+  var ordersData = [];
+  var orderCounts = { all: 0, sent_whatsapp: 0, confirmed: 0, completed: 0, cancelled: 0 };
+  var orderFilter = 'all';
+  var orderQuery = '';
+  var ordersLoading = false;
+  var ordersBusyId = '';
+  var ordersSetupNotice = '';
+
   var pushOverview = {
     configured: false,
     missingVars: [],
@@ -203,6 +211,18 @@
     }
   }
 
+  function updateOrdersBadge() {
+    var b = $('ordBadge');
+    if (!b) return;
+    var count = Number(orderCounts.sent_whatsapp || 0);
+    if (count > 0) {
+      b.textContent = String(count);
+      b.hidden = false;
+    } else {
+      b.hidden = true;
+    }
+  }
+
   function render() {
     var sb = $('smb');
     if (sb) sb.textContent = AN();
@@ -210,9 +230,22 @@
       b.classList.toggle('on', b.dataset.t == tab);
     });
     updateUsersBadge();
+    updateOrdersBadge();
     $('qw').hidden = tab != 'p';
     $('v').innerHTML =
-      tab == 'p' ? vp() : tab == 'c' ? vc() : tab == 'o' ? vo() : tab == 'u' ? vu() : tab == 'n' ? vn() : vs();
+      tab == 'p'
+        ? vp()
+        : tab == 'c'
+        ? vc()
+        : tab == 'o'
+        ? vo()
+        : tab == 'orders'
+        ? voOrders()
+        : tab == 'u'
+        ? vu()
+        : tab == 'n'
+        ? vn()
+        : vs();
   }
 
   function vp() {
@@ -822,6 +855,262 @@
     } finally {
       usersBusyId = '';
       if (tab === 'u') render();
+    }
+  }
+
+  // ===== إدارة الطلبات المسجلة (واتساب + Firebase) =====
+  function orderStatusMeta(st) {
+    if (st === 'confirmed') return { label: '✅ تم التأكيد', cls: 'st-confirmed' };
+    if (st === 'completed') return { label: '📦 تم التوصيل', cls: 'st-completed' };
+    if (st === 'cancelled') return { label: '❌ ملغي', cls: 'st-cancelled' };
+    return { label: '📲 أُرسل عبر واتساب', cls: 'st-sent_whatsapp' };
+  }
+
+  function renderOrderCardsHtml() {
+    var sq = orderQuery.toLowerCase();
+    var list = ordersData.filter(function (ord) {
+      if (orderFilter !== 'all' && ord.status !== orderFilter) return false;
+      if (!sq) return true;
+      var itemNames = Array.isArray(ord.items)
+        ? ord.items
+            .map(function (it) {
+              var fls = Array.isArray(it.flavors)
+                ? it.flavors.map(function (f) { return f.name; }).join(' ')
+                : '';
+              return (it.name || '') + ' ' + fls;
+            })
+            .join(' ')
+        : '';
+      var hay = [ord.id, ord.userName, ord.userPhone, ord.shopName, ord.address, itemNames]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.indexOf(sq) > -1;
+    });
+
+    if (ordersLoading && !ordersData.length) {
+      return '<p class="emp">⏳ جاري تحميل سجل الطلبات...</p>';
+    }
+    if (!list.length) {
+      return (
+        '<p class="emp">' +
+        (orderQuery || orderFilter !== 'all'
+          ? 'لا توجد طلبات مطابقة للبحث أو الفلتر المحدد.'
+          : 'لا توجد طلبات مسجلة من العملاء حتى الآن.') +
+        '</p>'
+      );
+    }
+
+    return list
+      .map(function (ord) {
+        var meta = orderStatusMeta(ord.status);
+        var busy = ordersBusyId === String(ord.id);
+        var dis = busy ? ' disabled' : '';
+        var shortId = String(ord.id || '').replace(/^ord_/, '#').slice(0, 14);
+        var isOffer = ord.orderType === 'offer';
+        var itemsHtml = (Array.isArray(ord.items) ? ord.items : [])
+          .map(function (it) {
+            var fls = Array.isArray(it.flavors) ? it.flavors : [];
+            var flHtml = fls.length
+              ? '<div class="ord-fl">' +
+                fls
+                  .map(function (f) {
+                    return '<span>' + esc(f.name) + ': ' + Number(f.qty || 0) + '</span>';
+                  })
+                  .join('') +
+                '</div>'
+              : '';
+            return (
+              '<div class="ord-line">' +
+              '<div class="ord-line-top"><b>' +
+              esc(it.name) +
+              '</b><span>× ' +
+              Number(it.qty || 0) +
+              (isOffer ? '' : ' ' + esc(ord.unit || 'كرتونة')) +
+              ' — <b>' +
+              (isOffer && ord.offerPriceLabel && !Number(it.subtotal)
+                ? esc(ord.offerPriceLabel)
+                : Number(it.subtotal || 0) + ' ج') +
+              '</b></span></div>' +
+              flHtml +
+              '</div>'
+            );
+          })
+          .join('');
+
+        var acts = '';
+        if (ord.status !== 'confirmed') {
+          acts +=
+            '<button class="uact uact-ok" type="button" data-os="confirmed" data-oid="' +
+            esc(ord.id) +
+            '"' +
+            dis +
+            '>✅ تأكيد الطلب</button>';
+        }
+        if (ord.status !== 'completed') {
+          acts +=
+            '<button class="uact uact-ok" style="background:var(--blue)" type="button" data-os="completed" data-oid="' +
+            esc(ord.id) +
+            '"' +
+            dis +
+            '>📦 تم التوصيل</button>';
+        }
+        if (ord.status !== 'cancelled') {
+          acts +=
+            '<button class="uact uact-del" type="button" data-os="cancelled" data-oid="' +
+            esc(ord.id) +
+            '"' +
+            dis +
+            '>❌ إلغاء</button>';
+        }
+
+        return (
+          '<article class="ucard">' +
+          '<div class="uhead"><div><b class="uname">' +
+          esc(shortId) +
+          ' — ' +
+          esc(ord.userName || 'تاجر') +
+          '</b><div class="umeta">' +
+          '<span dir="ltr">📞 ' +
+          esc(ord.userPhone || '—') +
+          '</span>' +
+          (ord.shopName ? '<span>🏪 ' + esc(ord.shopName) + '</span>' : '') +
+          (ord.address ? '<span>📍 ' + esc(ord.address) + '</span>' : '') +
+          '<span>🕒 ' +
+          esc(formatDateAr(ord.createdAt)) +
+          '</span>' +
+          '</div></div><span class="stpill ' +
+          meta.cls +
+          '">' +
+          meta.label +
+          '</span></div>' +
+          '<div class="ord-items-box">' +
+          itemsHtml +
+          '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;font-weight:800;font-size:14px">' +
+          '<span>' +
+          (isOffer ? 'طلب عرض خاص' : 'الإجمالي (' + Number(ord.totalQty || 0) + ' ' + esc(ord.unit || 'كرتونة') + ')') +
+          '</span><span style="color:var(--red);font-size:16px">' +
+          (isOffer && ord.offerPriceLabel && !Number(ord.totalPrice)
+            ? esc(ord.offerPriceLabel)
+            : Number(ord.totalPrice || 0) + ' جنيه') +
+          '</span></div></div>' +
+          '<div class="uacts">' +
+          acts +
+          '</div></article>'
+        );
+      })
+      .join('');
+  }
+
+  function voOrders() {
+    var filters = [
+      ['all', 'الكل', orderCounts.all || ordersData.length],
+      ['sent_whatsapp', 'جديد (واتساب)', orderCounts.sent_whatsapp || 0],
+      ['confirmed', 'مؤكد', orderCounts.confirmed || 0],
+      ['completed', 'مُوصّل', orderCounts.completed || 0],
+      ['cancelled', 'ملغي', orderCounts.cancelled || 0],
+    ];
+    return (
+      '<div class="sh" style="margin-top:14px"><b>📦 طلبات العملاء عبر واتساب</b><small>' +
+      (orderCounts.all || ordersData.length) +
+      ' طلب</small><button class="mini" type="button" id="oRefresh">🔄 تحديث</button></div>' +
+      '<p class="hint">يُحفظ هنا كل طلب أرسله العملاء عبر واتساب بتفاصيل الأصناف والنكهات والتاريخ والوقت.</p>' +
+      (ordersSetupNotice
+        ? '<div class="card2" style="border-color:var(--red);background:#fff3cd;color:#5c3d00"><b>⚠️ تنبيه قاعدة البيانات</b><p style="margin:6px 0 0;font-size:13px">' +
+          esc(ordersSetupNotice) +
+          '</p></div>'
+        : '') +
+      '<div class="ufil">' +
+      filters
+        .map(function (f) {
+          return (
+            '<button type="button" class="fbtn' +
+            (orderFilter === f[0] ? ' on' : '') +
+            '" data-of="' +
+            f[0] +
+            '">' +
+            f[1] +
+            ' (' +
+            f[2] +
+            ')</button>'
+          );
+        })
+        .join('') +
+      '</div>' +
+      '<input id="oq" type="search" placeholder="🔍 ابحث برقم الطلب أو اسم التاجر أو الصنف..." value="' +
+      esc(orderQuery) +
+      '" style="margin:8px 0 12px">' +
+      '<div id="oList">' +
+      renderOrderCardsHtml() +
+      '</div>'
+    );
+  }
+
+  async function loadOrders(silent) {
+    ordersLoading = true;
+    try {
+      var res = await fetch('/api/admin/orders', { credentials: 'same-origin' });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return;
+      }
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        if (data && data.needsRtdbSetup) {
+          ordersSetupNotice = data.error || '';
+          if (tab === 'orders') render();
+          return;
+        }
+        throw new Error(data.error || 'تعذر تحميل الطلبات');
+      }
+      ordersSetupNotice = '';
+      ordersData = Array.isArray(data.orders) ? data.orders : [];
+      orderCounts = data.counts || {
+        all: ordersData.length,
+        sent_whatsapp: 0,
+        confirmed: 0,
+        completed: 0,
+        cancelled: 0,
+      };
+      updateOrdersBadge();
+      if (tab === 'orders') render();
+    } catch (e) {
+      if (!silent) toast(e && e.message ? e.message : 'تعذر تحميل الطلبات');
+    } finally {
+      ordersLoading = false;
+    }
+  }
+
+  async function updateOrderStatusAdmin(ordId, nextStatus) {
+    ordersBusyId = String(ordId);
+    if (tab === 'orders') {
+      var listEl = $('oList');
+      if (listEl) listEl.innerHTML = renderOrderCardsHtml();
+    }
+    try {
+      var res = await fetch('/api/admin/orders/' + encodeURIComponent(ordId) + '/status', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return;
+      }
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) throw new Error(data.error || 'تعذر تحديث حالة الطلب');
+      await loadOrders(true);
+      toast('تم تحديث حالة الطلب ✅');
+    } catch (err) {
+      toast(err && err.message ? err.message : 'تعذر تحديث حالة الطلب');
+    } finally {
+      ordersBusyId = '';
+      if (tab === 'orders') render();
     }
   }
 
@@ -1441,8 +1730,22 @@
     if ((b = t.closest('[data-t]'))) {
       tab = b.dataset.t;
       render();
+      if (tab === 'orders') loadOrders(true);
       if (tab === 'u') loadUsers(true);
       if (tab === 'n') loadPushOverview(true);
+      return;
+    }
+    if (t.id === 'oRefresh') {
+      loadOrders(false);
+      return;
+    }
+    if ((b = t.closest('[data-of]'))) {
+      orderFilter = b.dataset.of;
+      render();
+      return;
+    }
+    if ((b = t.closest('[data-os]'))) {
+      updateOrderStatusAdmin(b.dataset.oid, b.dataset.os);
       return;
     }
     if (t.id === 'uRefresh') {
@@ -1615,6 +1918,12 @@
       userQuery = t.value.trim();
       var ul = $('uList');
       if (ul) ul.innerHTML = renderUserCardsHtml();
+      return;
+    }
+    if (t.id === 'oq') {
+      orderQuery = t.value.trim();
+      var ol = $('oList');
+      if (ol) ol.innerHTML = renderOrderCardsHtml();
       return;
     }
     if (t.id === 'pushTitle') {
@@ -3839,7 +4148,7 @@
     $('lf').hidden = true;
     $('app').hidden = false;
     try {
-      await Promise.all([loadAll(), loadUsers(true), loadPushOverview(true)]);
+      await Promise.all([loadAll(), loadUsers(true), loadOrders(true), loadPushOverview(true)]);
       render();
     } catch (e) {
       toast((e && e.message) || 'تعذر تحميل لوحة التحكم');

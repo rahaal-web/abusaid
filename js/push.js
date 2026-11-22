@@ -1,9 +1,7 @@
 import { $, showToast, state } from './state.js';
 import { esc, numAr } from './utils.js';
 
-const DISMISS_KEY = 'abu_push_dismiss';
 const MUTED_KEY = 'abu_push_muted';
-const DISMISS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const pushState = {
   supported: false,
@@ -14,6 +12,7 @@ const pushState = {
   serverEndpoints: [],
   deviceCount: 0,
   busy: false,
+  configLoaded: false,
   initialized: false,
 };
 
@@ -46,40 +45,12 @@ function isPushSupported() {
   );
 }
 
-function isMutedByUser() {
+function clearMutedFlag() {
   try {
-    return localStorage.getItem(MUTED_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function setMutedByUser(val) {
-  try {
-    if (val) localStorage.setItem(MUTED_KEY, '1');
-    else localStorage.removeItem(MUTED_KEY);
+    localStorage.removeItem(MUTED_KEY);
   } catch {
     // ignore storage errors
   }
-}
-
-function isBannerDismissed() {
-  try {
-    const ts = Number(localStorage.getItem(DISMISS_KEY) || 0);
-    return ts > 0 && Date.now() - ts < DISMISS_TTL_MS;
-  } catch {
-    return false;
-  }
-}
-
-function dismissOptinBanner() {
-  try {
-    localStorage.setItem(DISMISS_KEY, String(Date.now()));
-  } catch {
-    // ignore
-  }
-  const bar = $('pushOptinBar');
-  if (bar) bar.hidden = true;
 }
 
 async function getSwRegistration() {
@@ -95,11 +66,19 @@ async function getSwRegistration() {
   return ready || reg;
 }
 
-function hasActiveSubscriptionOnThisDevice() {
+export function hasActiveSubscriptionOnThisDevice() {
   if (!pushState.browserSub) return false;
   if (pushState.permission !== 'granted') return false;
   const ep = pushState.browserSub.endpoint;
   return pushState.serverEndpoints.includes(ep);
+}
+
+function isInsideIframe() {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
 }
 
 function renderHeaderIndicator() {
@@ -125,18 +104,100 @@ function renderHeaderIndicator() {
   }
 }
 
-function renderOptinBanner() {
-  const bar = $('pushOptinBar');
-  if (!bar) return;
+function syncBodyModalLock() {
+  const anyOpen = Boolean(
+    $('pushMandatoryModal')?.classList.contains('on') ||
+      $('sheet')?.classList.contains('on') ||
+      $('fsheet')?.classList.contains('on') ||
+      $('rsheet')?.classList.contains('on') ||
+      $('ordersSheet')?.classList.contains('on') ||
+      $('accountSheet')?.classList.contains('on')
+  );
+  document.body.classList.toggle('modal-open', anyOpen);
+}
 
-  const shouldShow =
-    pushState.supported &&
-    pushState.configured &&
-    !hasActiveSubscriptionOnThisDevice() &&
-    pushState.permission === 'default' &&
-    !isBannerDismissed();
+function renderMandatoryModalContent() {
+  const panel = $('pushMandatoryPanel');
+  if (!panel) return;
 
-  bar.hidden = !shouldShow;
+  const userName = state.user?.fullName ? `أهلاً بك يا ${state.user.fullName}` : 'أهلاً بك في متجر أبو سعيد';
+  const perm = pushState.permission;
+  const inFrame = isInsideIframe();
+
+  let actionBlock = '';
+  if (!pushState.supported) {
+    actionBlock = `
+      <div class="pm-warn-box">
+        <strong>المتصفح الحالي لا يدعم إشعارات الويب الفورية</strong>
+        <p>لمتابعة كل جديد والعروض والاشتراك الإجباري، افتح المتجر عبر متصفح Chrome أو Edge أو ثبّت التطبيق على الشاشة الرئيسية.</p>
+      </div>
+      <button id="pushMandRetryBtn" class="pm-cta-btn secondary" type="button" ${pushState.busy ? 'disabled' : ''}>
+        🔄 إعادة الفحص والتحقق
+      </button>`;
+  } else if (!pushState.configured) {
+    actionBlock = `
+      <div class="pm-warn-box">
+        <strong>خدمة الإشعارات قيد التجهيز على الخادم</strong>
+        <p>اضغط على زر إعادة المحاولة خلال لحظات لإتمام التفعيل.</p>
+      </div>
+      <button id="pushMandRetryBtn" class="pm-cta-btn" type="button" ${pushState.busy ? 'disabled' : ''}>
+        🔄 إعادة المحاولة الآن
+      </button>`;
+  } else if (perm === 'denied') {
+    actionBlock = `
+      <div class="pm-warn-box">
+        <strong>⚠️ تم حظر إذن الإشعارات في المتصفح</strong>
+        <p>الاشتراك في الإشعارات إجباري للدخول ومتابعة العروض. اضغط على أيقونة الإعدادات 🔒 بجانب رابط الموقع بالأعلى، ثم اختر <b>الإشعارات (Notifications)</b> وبدّلها إلى <b>السماح (Allow)</b> وبعدها اضغط الزر بالأسفل.</p>
+      </div>
+      <button id="pushMandRetryBtn" class="pm-cta-btn" type="button" ${pushState.busy ? 'disabled' : ''}>
+        ${pushState.busy ? '⏳ جاري التحقق...' : '🔄 تم السماح — تحقق واشترك الآن'}
+      </button>
+      ${
+        inFrame
+          ? `<a class="pm-ext-link" href="${esc(window.location.href)}" target="_blank" rel="noopener noreferrer">↗ فتح المتجر في نافذة مستقلة لتفعيل الإشعارات</a>`
+          : ''
+      }`;
+  } else {
+    actionBlock = `
+      <button id="pushMandAllowBtn" class="pm-cta-btn" type="button" ${pushState.busy ? 'disabled' : ''}>
+        ${pushState.busy ? '⏳ جاري تفعيل الإشعارات...' : '🔔 اشترك في الإشعارات الآن'}
+      </button>`;
+  }
+
+  panel.innerHTML = `
+    <div class="pm-hero-icon" aria-hidden="true">🔔</div>
+    <span class="pm-greeting">${esc(userName)}</span>
+    <h2 id="pushMandatoryTitle" class="pm-title">اشترك في الإشعارات لمتابعة كل جديد والعروض</h2>
+    <p class="pm-desc">
+      فعّل الإشعارات الآن لتصلك عروض الجملة الحصرية، الأصناف الجديدة، وتحديثات الأسعار أولاً بأول فور نزولها. الاشتراك إلزامي للمتابعة.
+    </p>
+    <div class="pm-perks">
+      <span>🔥 عروض وتخفيضات اليوم فور نزولها</span>
+      <span>📦 إشعار فوري عند توفر أصناف جديدة</span>
+      <span>⚡ يعمل على الموبايل والكمبيوتر حتى عند إغلاق الموقع</span>
+    </div>
+    <div class="pm-actions">
+      ${actionBlock}
+    </div>
+  `;
+}
+
+function updateMandatoryPushModal() {
+  const modal = $('pushMandatoryModal');
+  if (!modal) return;
+
+  if (!pushState.configLoaded) return;
+
+  const active = hasActiveSubscriptionOnThisDevice();
+  if (active) {
+    modal.classList.remove('on');
+    syncBodyModalLock();
+    return;
+  }
+
+  renderMandatoryModalContent();
+  modal.classList.add('on');
+  syncBodyModalLock();
 }
 
 function renderAccountModalContent() {
@@ -153,7 +214,7 @@ function renderAccountModalContent() {
     statusText = 'المتصفح الحالي لا يدعم إشعارات الويب';
   } else if (!pushState.configured) {
     statusClass = 'warn';
-    statusText = 'خدمة الإشعارات قيد التجهيز من الإدارة';
+    statusText = 'خدمة الإشعارات قيد التجهيز';
   } else if (pushState.permission === 'denied') {
     statusClass = 'denied';
     statusText = 'محظورة من إعدادات المتصفح';
@@ -168,24 +229,25 @@ function renderAccountModalContent() {
       controlsHtml = `
         <div class="acc-help-box">
           <strong>تم حظر إذن الإشعارات في هذا المتصفح</strong>
-          <p>لتفعيلها مجدداً في Chrome أو Edge: اضغط على أيقونة الإعدادات 🔒 بجانب رابط الموقع بالأعلى، اختر <b>الإشعارات (Notifications)</b> ثم بدّلها إلى <b>السماح (Allow)</b> وأعد تحميل الصفحة.</p>
+          <p>لتفعيلها مجدداً: اضغط على أيقونة 🔒 بجانب رابط الموقع، اختر <b>الإشعارات</b> ثم بدّلها إلى <b>السماح</b> وأعد المحاولة.</p>
         </div>`;
     } else if (active) {
       controlsHtml = `
-        <button id="accPushDisable" class="acc-toggle-btn off" type="button" ${pushState.busy ? 'disabled' : ''}>
-          ${pushState.busy ? 'جاري الإيقاف...' : '🔕 إيقاف الإشعارات على هذا الجهاز'}
-        </button>`;
+        <div class="acc-help-box">
+          <strong>اشتراك الإشعارات الفوري نشط ومفعل ✅</strong>
+          <p>الاشتراك في الإشعارات إلزامي لمتابعة أحدث العروض والأصناف وتحديثات الأسعار أولاً بأول.</p>
+        </div>`;
     } else {
       controlsHtml = `
         <button id="accPushEnable" class="acc-toggle-btn on" type="button" ${pushState.busy ? 'disabled' : ''}>
-          ${pushState.busy ? 'جاري التفعيل...' : '🔔 تفعيل الإشعارات الفورية'}
+          ${pushState.busy ? 'جاري التفعيل...' : '🔔 اشترك في الإشعارات الآن'}
         </button>`;
     }
   } else if (!pushState.supported) {
     controlsHtml = `
       <div class="acc-help-box">
         <strong>متصفح غير داعم</strong>
-        <p>يُفضّل فتح المتجر عبر متصفح Chrome أو Edge أو تثبيت التطبيق على جهاز Android للحصول على الإشعارات الفورية.</p>
+        <p>يُفضّل فتح المتجر عبر Chrome أو Edge أو تثبيت التطبيق للحصول على الإشعارات الفورية.</p>
       </div>`;
   }
 
@@ -229,6 +291,7 @@ function renderAccountModalContent() {
         ${controlsHtml}
       </div>
     </div>
+    <button id="accOpenOrdersBtn" class="acc-orders-shortcut" type="button">📦 عرض سجل طلباتي عبر واتساب</button>
   `;
 }
 
@@ -246,6 +309,7 @@ async function syncServerSubscription(sub) {
 }
 
 export async function refreshPushState({ silentSync = true } = {}) {
+  clearMutedFlag();
   pushState.supported = isPushSupported();
   pushState.permission =
     typeof Notification !== 'undefined' ? Notification.permission : 'denied';
@@ -260,6 +324,7 @@ export async function refreshPushState({ silentSync = true } = {}) {
         ? cfg.subscribedEndpoints
         : [];
       pushState.deviceCount = Number(cfg.deviceCount || 0);
+      pushState.configLoaded = true;
     }
   } catch {
     // ignore transient network errors
@@ -274,8 +339,7 @@ export async function refreshPushState({ silentSync = true } = {}) {
         silentSync &&
         pushState.browserSub &&
         pushState.permission === 'granted' &&
-        pushState.configured &&
-        !isMutedByUser()
+        pushState.configured
       ) {
         const subAppKey = pushState.browserSub.options?.applicationServerKey;
         let sameKey = true;
@@ -298,7 +362,10 @@ export async function refreshPushState({ silentSync = true } = {}) {
           pushState.serverEndpoints = Array.from(
             new Set([...pushState.serverEndpoints, pushState.browserSub.endpoint])
           );
-          pushState.deviceCount = Math.max(pushState.deviceCount, pushState.serverEndpoints.length);
+          pushState.deviceCount = Math.max(
+            pushState.deviceCount,
+            pushState.serverEndpoints.length
+          );
         }
       }
     } catch {
@@ -307,7 +374,7 @@ export async function refreshPushState({ silentSync = true } = {}) {
   }
 
   renderHeaderIndicator();
-  renderOptinBanner();
+  updateMandatoryPushModal();
   if ($('accountSheet')?.classList.contains('on')) {
     renderAccountModalContent();
   }
@@ -315,38 +382,50 @@ export async function refreshPushState({ silentSync = true } = {}) {
 
 export async function enablePushNotifications() {
   if (pushState.busy) return;
-  if (!isPushSupported()) {
+  clearMutedFlag();
+  pushState.supported = isPushSupported();
+  pushState.permission =
+    typeof Notification !== 'undefined' ? Notification.permission : 'denied';
+
+  if (!pushState.supported) {
+    updateMandatoryPushModal();
     showToast('المتصفح الحالي لا يدعم إشعارات الويب', 'warn');
     return;
   }
+
   if (!pushState.configured || !pushState.publicKey) {
-    showToast('خدمة الإشعارات غير مهيأة بعد على الخادم', 'warn');
-    return;
+    await refreshPushState({ silentSync: false });
+    if (!pushState.configured || !pushState.publicKey) {
+      showToast('خدمة الإشعارات قيد التجهيز على الخادم', 'warn');
+      return;
+    }
   }
+
   if (Notification.permission === 'denied') {
-    openAccountModal();
-    showToast('الإشعارات محظورة — افتح إعدادات المتصفح للسماح بها', 'warn');
+    updateMandatoryPushModal();
+    showToast('الإشعارات محظورة — اسمح بالإشعارات من إعدادات المتصفح أولاً', 'warn');
     return;
   }
 
   pushState.busy = true;
+  updateMandatoryPushModal();
   if ($('accountSheet')?.classList.contains('on')) renderAccountModalContent();
-  const allowBtn = $('pushOptinAllow');
-  if (allowBtn) allowBtn.disabled = true;
 
   try {
-    setMutedByUser(false);
-    const perm = await Notification.requestPermission();
+    const perm =
+      Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
     pushState.permission = perm;
 
     if (perm !== 'granted') {
       renderHeaderIndicator();
-      renderOptinBanner();
+      updateMandatoryPushModal();
       if ($('accountSheet')?.classList.contains('on')) renderAccountModalContent();
       showToast(
         perm === 'denied'
-          ? 'تم رفض إذن الإشعارات، يمكنك السماح لاحقاً من إعدادات المتصفح'
-          : 'لم يتم تفعيل الإشعارات بعد',
+          ? 'تم رفض إذن الإشعارات — يرجى السماح بها من إعدادات المتصفح للمتابعة'
+          : 'الاشتراك في الإشعارات مطلوب للدخول، اضغط السماح بالمتصفح',
         'warn'
       );
       return;
@@ -375,47 +454,13 @@ export async function enablePushNotifications() {
     await syncServerSubscription(sub);
     pushState.browserSub = sub;
     await refreshPushState({ silentSync: false });
-    showToast('تم تفعيل الإشعارات الفورية بنجاح 🔔');
+    showToast('تم اشتراكك في الإشعارات بنجاح 🔔 أهلاً بك في أبو سعيد!');
   } catch (err) {
-    showToast(err?.message || 'تعذر تفعيل الإشعارات', 'warn');
-  } finally {
-    pushState.busy = false;
-    if (allowBtn) allowBtn.disabled = false;
-    renderHeaderIndicator();
-    renderOptinBanner();
-    if ($('accountSheet')?.classList.contains('on')) renderAccountModalContent();
-  }
-}
-
-export async function disablePushNotifications() {
-  if (pushState.busy) return;
-  pushState.busy = true;
-  if ($('accountSheet')?.classList.contains('on')) renderAccountModalContent();
-
-  try {
-    setMutedByUser(true);
-    const reg = await getSwRegistration().catch(() => null);
-    const sub = pushState.browserSub || (reg ? await reg.pushManager.getSubscription() : null);
-
-    if (sub) {
-      await fetch('/api/push/unsubscribe', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: sub.endpoint }),
-      }).catch(() => {});
-      await sub.unsubscribe().catch(() => {});
-    }
-
-    pushState.browserSub = null;
-    await refreshPushState({ silentSync: false });
-    showToast('تم إيقاف الإشعارات على هذا الجهاز');
-  } catch (err) {
-    showToast(err?.message || 'تعذر إيقاف الإشعارات', 'warn');
+    showToast(err?.message || 'تعذر تفعيل الإشعارات، حاول مرة أخرى', 'warn');
   } finally {
     pushState.busy = false;
     renderHeaderIndicator();
-    renderOptinBanner();
+    updateMandatoryPushModal();
     if ($('accountSheet')?.classList.contains('on')) renderAccountModalContent();
   }
 }
@@ -425,17 +470,22 @@ export function openAccountModal() {
   if (!sheet) return;
   renderAccountModalContent();
   sheet.classList.add('on');
+  syncBodyModalLock();
   refreshPushState({ silentSync: false });
 }
 
 export function closeAccountModal() {
   const sheet = $('accountSheet');
   if (sheet) sheet.classList.remove('on');
+  syncBodyModalLock();
 }
 
 export function refreshPushAccountInfo() {
   if ($('accountSheet')?.classList.contains('on')) {
     renderAccountModalContent();
+  }
+  if ($('pushMandatoryModal')?.classList.contains('on')) {
+    renderMandatoryModalContent();
   }
 }
 
@@ -447,9 +497,8 @@ export function initPushUI() {
   const hdrPushBtn = $('hdrPushBtn');
   const accClose = $('accClose');
   const accountSheet = $('accountSheet');
-  const optAllow = $('pushOptinAllow');
-  const optDismiss = $('pushOptinDismiss');
   const accBody = $('accBody');
+  const mandPanel = $('pushMandatoryPanel');
 
   if (badgeWrap) badgeWrap.addEventListener('click', openAccountModal);
   if (hdrPushBtn) hdrPushBtn.addEventListener('click', openAccountModal);
@@ -459,18 +508,33 @@ export function initPushUI() {
       if (e.target === accountSheet) closeAccountModal();
     });
   }
-  if (optAllow) optAllow.addEventListener('click', enablePushNotifications);
-  if (optDismiss) optDismiss.addEventListener('click', dismissOptinBanner);
 
   if (accBody) {
     accBody.addEventListener('click', (e) => {
       if (e.target.closest('#accPushEnable')) enablePushNotifications();
-      else if (e.target.closest('#accPushDisable')) disablePushNotifications();
+      else if (e.target.closest('#accOpenOrdersBtn')) {
+        closeAccountModal();
+        state.hooks.openOrdersModal?.();
+      }
     });
   }
 
-  // Delay slightly so first-paint catalog rendering stays snappy
-  setTimeout(() => {
-    refreshPushState({ silentSync: true });
-  }, 900);
+  if (mandPanel) {
+    mandPanel.addEventListener('click', (e) => {
+      if (e.target.closest('#pushMandAllowBtn')) {
+        enablePushNotifications();
+      } else if (e.target.closest('#pushMandRetryBtn')) {
+        enablePushNotifications();
+      }
+    });
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !hasActiveSubscriptionOnThisDevice()) {
+      refreshPushState({ silentSync: true });
+    }
+  });
+
+  // Immediately inspect push subscription right after login so mandatory modal appears centered
+  refreshPushState({ silentSync: true });
 }

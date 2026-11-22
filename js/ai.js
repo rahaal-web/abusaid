@@ -2190,7 +2190,13 @@ export function aiHide() {
   if (rs) rs.classList.remove('on');
   vStop(false);
   ovf();
-  if (!$('sheet')?.classList.contains('on') && !$('fsheet')?.classList.contains('on')) {
+  if (
+    !$('sheet')?.classList.contains('on') &&
+    !$('fsheet')?.classList.contains('on') &&
+    !$('ordersSheet')?.classList.contains('on') &&
+    !$('accountSheet')?.classList.contains('on') &&
+    !$('pushMandatoryModal')?.classList.contains('on')
+  ) {
     document.body.classList.remove('modal-open');
   }
 }

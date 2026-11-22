@@ -20,6 +20,10 @@ import {
   resolveVapidEnv,
   validatePushSubscriptionInput,
 } from './lib/pushService.js';
+import {
+  buildAuthoritativeOrder,
+  VALID_ORDER_STATUSES,
+} from './lib/orderService.js';
 
 const rtdbStore = createRtdbAuthStore(process.env);
 const userStore = rtdbStore.hasServerDbCredentials() ? rtdbStore : sqliteStore;
@@ -30,10 +34,20 @@ const {
   getAdminSession,
   isValidEmail,
   isValidPhone,
+  loadOrGenerateVapidKeys,
   normalizeEmail,
   normalizePhone,
   revokeAdminSession,
 } = sqliteStore;
+
+const localVapidFallback = loadOrGenerateVapidKeys();
+function getEffectivePushEnv() {
+  return {
+    ...process.env,
+    VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || localVapidFallback.publicKey,
+    VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || localVapidFallback.privateKey,
+  };
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -590,6 +604,7 @@ app.get('/js/state.js', requireApprovedUser, sendProtectedFile('js/state.js'));
 app.get('/js/utils.js', requireApprovedUser, sendProtectedFile('js/utils.js'));
 app.get('/js/firebase-client.js', requireApprovedUser, sendProtectedFile('js/firebase-client.js'));
 app.get('/js/push.js', requireApprovedUser, sendProtectedFile('js/push.js'));
+app.get('/js/orders.js', requireApprovedUser, sendProtectedFile('js/orders.js'));
 
 app.get('/api/firebase-config', requireApprovedUser, (_req, res) => {
   return res.json({ config: resolveFirebaseWebConfig(process.env) });
@@ -635,9 +650,45 @@ app.post('/api/ai/generate', requireApprovedUser, async (req, res) => {
   }
 });
 
+// ==================== CUSTOMER ORDERS APIs ====================
+app.get('/api/orders', requireApprovedUser, async (req, res) => {
+  try {
+    const orders = await userStore.listUserOrders(req.user.id, 80);
+    return res.json({ orders });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر تحميل سجل الطلبات حالياً.' });
+  }
+});
+
+app.post('/api/orders', requireApprovedUser, checkRateLimit, async (req, res) => {
+  try {
+    const rawCatalog = await fetchRawCatalog(false);
+    const built = await buildAuthoritativeOrder({
+      body: req.body || {},
+      user: req.user,
+      catalogData: rawCatalog?.data,
+    });
+    if (built.error) {
+      return res.status(built.status || 400).json({ error: built.error });
+    }
+    const saved = await userStore.createOrder(built.order);
+    return res.status(saved.deduplicated ? 200 : 201).json({
+      ok: true,
+      order: saved.order,
+      deduplicated: Boolean(saved.deduplicated),
+    });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر حفظ الطلب في قاعدة البيانات.' });
+  }
+});
+
 // ==================== CUSTOMER WEB PUSH APIs ====================
 app.get('/api/push/config', requireApprovedUser, async (req, res) => {
-  const vapid = resolveVapidEnv(process.env);
+  const vapid = resolveVapidEnv(getEffectivePushEnv());
   try {
     const userSubs = await userStore.listUserPushSubscriptions(req.user.id);
     return res.json({
@@ -906,8 +957,52 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// ==================== ADMIN ORDERS APIs ====================
+app.get('/api/admin/orders', requireAdmin, async (req, res) => {
+  try {
+    const orders = await userStore.listAllOrders(150, {
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    const counts = {
+      all: orders.length,
+      sent_whatsapp: 0,
+      confirmed: 0,
+      completed: 0,
+      cancelled: 0,
+    };
+    orders.forEach((o) => {
+      if (counts[o.status] != null) counts[o.status] += 1;
+    });
+    return res.json({ orders, counts });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر تحميل الطلبات.' });
+  }
+});
+
+app.post('/api/admin/orders/:id/status', requireAdmin, async (req, res) => {
+  const status = String(req.body?.status || '').trim();
+  if (!VALID_ORDER_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'حالة الطلب غير صالحة.' });
+  }
+  try {
+    const updated = await userStore.updateOrderStatus(req.params.id, status, {
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    if (!updated) {
+      return res.status(404).json({ error: 'الطلب غير موجود.' });
+    }
+    return res.json({ ok: true, order: updated });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر تحديث حالة الطلب.' });
+  }
+});
+
 app.get('/api/admin/push/overview', requireAdmin, async (req, res) => {
-  const vapid = resolveVapidEnv(process.env);
+  const vapid = resolveVapidEnv(getEffectivePushEnv());
   try {
     const overview = await computePushOverview({
       store: userStore,
@@ -923,7 +1018,7 @@ app.get('/api/admin/push/overview', requireAdmin, async (req, res) => {
 });
 
 app.post('/api/admin/push/send', requireAdmin, checkRateLimit, async (req, res) => {
-  const vapid = resolveVapidEnv(process.env);
+  const vapid = resolveVapidEnv(getEffectivePushEnv());
   const origin = `${req.protocol}://${req.get('host')}`;
   try {
     const result = await executeAdminPushBroadcast({

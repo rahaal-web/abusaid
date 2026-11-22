@@ -10,6 +10,7 @@ import {
   totals,
 } from './state.js';
 import { bag, esc, FL, money, numAr, pk, rn } from './utils.js';
+import { recordWhatsAppOrder } from './orders.js';
 
 let fi = -1;
 let FM = false;
@@ -260,7 +261,13 @@ export function closeCartSheet() {
   if (sheet) {
     sheet.classList.remove('on');
     resetClearConfirm();
-    if (!$('fsheet')?.classList.contains('on') && !$('rsheet')?.classList.contains('on')) {
+    if (
+      !$('fsheet')?.classList.contains('on') &&
+      !$('rsheet')?.classList.contains('on') &&
+      !$('ordersSheet')?.classList.contains('on') &&
+      !$('accountSheet')?.classList.contains('on') &&
+      !$('pushMandatoryModal')?.classList.contains('on')
+    ) {
       document.body.classList.remove('modal-open');
     }
   }
@@ -386,7 +393,13 @@ export function fClose() {
     aiApplyCallback = null;
     if (cb) cb(fi, FD);
   }
-  if (!$('sheet')?.classList.contains('on') && !$('rsheet')?.classList.contains('on')) {
+  if (
+    !$('sheet')?.classList.contains('on') &&
+    !$('rsheet')?.classList.contains('on') &&
+    !$('ordersSheet')?.classList.contains('on') &&
+    !$('accountSheet')?.classList.contains('on') &&
+    !$('pushMandatoryModal')?.classList.contains('on')
+  ) {
     document.body.classList.remove('modal-open');
   }
 }
@@ -476,6 +489,7 @@ export function bindCartEvents() {
         return;
       }
       wa();
+      recordWhatsAppOrder({ orderType: 'cart' });
     });
   }
 

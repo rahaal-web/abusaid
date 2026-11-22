@@ -1,5 +1,6 @@
 import { $, state } from './state.js';
 import { esc, lum } from './utils.js';
+import { recordWhatsAppOrder } from './orders.js';
 
 export function oset(i) {
   state.OI = i;
@@ -24,7 +25,9 @@ export function ogo(i, behavior) {
 }
 
 export function renderOffers() {
-  const L = (state.D.offers || []).filter((o) => !o.x && o.t);
+  const L = (state.D.offers || [])
+    .map((o, idx) => ({ o, idx }))
+    .filter(({ o }) => !o.x && o.t);
   const s = $('offers');
   const navOffer = $('navOffers');
   clearInterval(state.OT);
@@ -47,7 +50,7 @@ export function renderOffers() {
   if (nextBtn) nextBtn.hidden = L.length <= 1;
 
   if (track) {
-    track.innerHTML = L.map((o) => {
+    track.innerHTML = L.map(({ o, idx }) => {
       const c = o.c || '#ffd23f';
       const fg = lum(c) > 150 ? '#18160d' : '#ffffff';
       const im = o.i && state.IMGS[o.i];
@@ -71,7 +74,11 @@ export function renderOffers() {
         (o.d ? '<p>' + esc(o.d) + '</p>' : '') +
         '<div class="sfoot">' +
         (o.pr ? '<span class="spr">' + esc(o.pr) + '</span>' : '') +
-        '<a class="sbtn" target="_blank" rel="noopener noreferrer" href="' +
+        '<a class="sbtn" target="_blank" rel="noopener noreferrer" data-offer-idx="' +
+        idx +
+        '" data-offer-title="' +
+        esc(o.t) +
+        '" href="' +
         waHref +
         '">اطلب العرض 📲</a>' +
         '</div>' +
@@ -153,6 +160,16 @@ export function bindOfferEvents() {
         },
         { passive: true }
       );
+    });
+
+    tr.addEventListener('click', (e) => {
+      const sbtn = e.target.closest('.sbtn');
+      if (!sbtn) return;
+      recordWhatsAppOrder({
+        orderType: 'offer',
+        offerIndex: Number(sbtn.dataset.offerIdx),
+        offerTitle: sbtn.dataset.offerTitle || '',
+      });
     });
   }
 
