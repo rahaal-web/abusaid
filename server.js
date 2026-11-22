@@ -202,9 +202,30 @@ async function requireApprovedUser(req, res, next) {
     req.user = session.user;
     req.userToken = token;
     return next();
-  } catch {
+  } catch (err) {
     return res.status(503).json({ error: 'تعذر التحقق من الجلسة حالياً.' });
   }
+}
+
+function handleRtdbConfigError(err, res) {
+  const code = err?.code || '';
+  if (
+    code === 'RTDB_NOT_CONFIGURED' ||
+    code === 'RTDB_PERMISSION_DENIED' ||
+    code === 'RTDB_HOST_NOT_FOUND' ||
+    code === 'RTDB_UNREACHABLE'
+  ) {
+    const error =
+      code === 'RTDB_HOST_NOT_FOUND'
+        ? 'رابط قاعدة بيانات Firebase غير موجود. راجع قيمة FIREBASE_DB_HOST.'
+        : code === 'RTDB_UNREACHABLE'
+        ? 'تعذر الاتصال بخادم Firebase Realtime Database، حاول مرة أخرى.'
+        : code === 'RTDB_PERMISSION_DENIED'
+        ? 'تعذر الوصول لمسار /abu_auth في Firebase Realtime Database. تأكد من صلاحية FIREBASE_SERVICE_ACCOUNT أو FIREBASE_DB_SECRET.'
+        : 'يرجى التأكد من تفعيل FIREBASE_SERVICE_ACCOUNT أو FIREBASE_DB_SECRET لربط Firebase Realtime Database.';
+    return res.status(503).json({ needsRtdbSetup: true, error });
+  }
+  return null;
 }
 
 function requireAdmin(req, res, next) {
@@ -353,6 +374,8 @@ app.post('/api/auth/register', checkRateLimit, async (req, res) => {
       user: userStore.sanitizeUser(created),
     });
   } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
     if (
       String(err?.message || '').includes('UNIQUE') ||
       err?.code === 'DUPLICATE_PHONE' ||
@@ -418,7 +441,9 @@ app.post('/api/auth/login', checkRateLimit, async (req, res) => {
           : 'تم تعليق حسابك من قِبل الإدارة.',
       user: userStore.sanitizeUser(user),
     });
-  } catch {
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
     return res.status(500).json({ error: 'حدث خطأ أثناء تسجيل الدخول.' });
   }
 });

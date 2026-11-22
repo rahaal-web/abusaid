@@ -12,7 +12,9 @@ import {
   fetchImageAsset,
   fetchRawCatalog,
   firebaseSignIn,
+  getServiceAccountFromEnv,
   getStoreGeminiKey,
+  lookupFirebaseIdToken,
   publishCatalogToFirebase,
   refreshFirebaseToken,
   resolveFirebaseWebConfig,
@@ -177,6 +179,29 @@ function decodeAdminCookieToken(raw) {
   }
 }
 
+async function verifyAdminIdTokenAny(idToken, fbCfg) {
+  try {
+    const verified = await verifyFirebaseIdToken(idToken, fbCfg.projectId);
+    if (verified && !verified.expired) {
+      return { valid: true, email: verified.email, uid: verified.uid };
+    }
+    if (verified && verified.expired) {
+      return { valid: false, expired: true };
+    }
+  } catch {
+    // fall through to Firebase Auth lookup fallback
+  }
+
+  const lookedUp = await lookupFirebaseIdToken({
+    apiKey: fbCfg.apiKey,
+    idToken,
+  });
+  if (lookedUp && lookedUp.uid) {
+    return { valid: true, email: lookedUp.email, uid: lookedUp.uid };
+  }
+  return { valid: false, expired: false };
+}
+
 async function resolveAdminSession(req, url, env, fbCfg) {
   const cookies = parseCookies(req);
   const raw = cookies[ADMIN_COOKIE];
@@ -190,12 +215,12 @@ async function resolveAdminSession(req, url, env, fbCfg) {
     };
   }
 
-  let verified = await verifyFirebaseIdToken(parsed.idToken, fbCfg.projectId);
-  if (verified && !verified.expired) {
+  const check = await verifyAdminIdTokenAny(parsed.idToken, fbCfg);
+  if (check.valid) {
     return {
       admin: {
-        email: verified.email,
-        uid: verified.uid,
+        email: check.email,
+        uid: check.uid,
         idToken: parsed.idToken,
         refreshToken: parsed.refreshToken || '',
       },
@@ -209,11 +234,8 @@ async function resolveAdminSession(req, url, env, fbCfg) {
         apiKey: fbCfg.apiKey,
         refreshToken: parsed.refreshToken,
       });
-      const reVerified = await verifyFirebaseIdToken(
-        refreshed.idToken,
-        fbCfg.projectId
-      );
-      if (reVerified && !reVerified.expired) {
+      const reCheck = await verifyAdminIdTokenAny(refreshed.idToken, fbCfg);
+      if (reCheck.valid) {
         const nextCookie = buildCookieString(
           req,
           url,
@@ -223,8 +245,8 @@ async function resolveAdminSession(req, url, env, fbCfg) {
         );
         return {
           admin: {
-            email: reVerified.email,
-            uid: reVerified.uid,
+            email: reCheck.email,
+            uid: reCheck.uid,
             idToken: refreshed.idToken,
             refreshToken: refreshed.refreshToken,
           },
@@ -313,14 +335,25 @@ async function requireApprovedUser(req, url, store) {
 }
 
 function handleRtdbConfigError(err) {
-  if (err?.code === 'RTDB_NOT_CONFIGURED' || err?.code === 'RTDB_PERMISSION_DENIED') {
+  const code = err?.code || '';
+  if (
+    code === 'RTDB_NOT_CONFIGURED' ||
+    code === 'RTDB_PERMISSION_DENIED' ||
+    code === 'RTDB_HOST_NOT_FOUND' ||
+    code === 'RTDB_UNREACHABLE'
+  ) {
+    const error =
+      code === 'RTDB_HOST_NOT_FOUND'
+        ? 'رابط قاعدة بيانات Firebase غير موجود. راجع قيمة FIREBASE_DB_HOST في Cloudflare Workers (مثل abu-saied-a6b74-default-rtdb.firebaseio.com).'
+        : code === 'RTDB_UNREACHABLE'
+        ? 'تعذر الاتصال بخادم Firebase Realtime Database، حاول مرة أخرى.'
+        : code === 'RTDB_PERMISSION_DENIED'
+        ? 'تعذر الوصول لمسار /abu_auth في Firebase Realtime Database باستخدام بيانات الاعتماد الحالية. تأكد من صلاحية FIREBASE_SERVICE_ACCOUNT أو FIREBASE_DB_SECRET في Cloudflare Workers.'
+        : 'يرجى التأكد من تفعيل FIREBASE_SERVICE_ACCOUNT أو FIREBASE_DB_SECRET في إعدادات Cloudflare Workers لربط Firebase Realtime Database.';
     return jsonResponse(
       {
         needsRtdbSetup: true,
-        error:
-          err.code === 'RTDB_PERMISSION_DENIED'
-            ? 'قاعدة بيانات Firebase Realtime Database رفضت الوصول لمسار /abu_auth. أضف FIREBASE_DB_SECRET أو FIREBASE_SERVICE_ACCOUNT_JSON في متغيرات Cloudflare Workers.'
-            : 'يرجى إضافة FIREBASE_DB_SECRET أو FIREBASE_SERVICE_ACCOUNT_JSON في إعدادات Cloudflare Workers لتفعيل حفظ ومراجعة الحسابات عبر Firebase Realtime Database.',
+        error,
       },
       503
     );
@@ -478,6 +511,7 @@ export default {
           ]
         );
       } catch (err) {
+        console.error('Register error:', err?.code || err?.message || err);
         const cfgErr = handleRtdbConfigError(err);
         if (cfgErr) return cfgErr;
         if (err?.code === 'DUPLICATE_PHONE') {
@@ -573,6 +607,7 @@ export default {
           ]
         );
       } catch (err) {
+        console.error('Login error:', err?.code || err?.message || err);
         const cfgErr = handleRtdbConfigError(err);
         if (cfgErr) return cfgErr;
         return jsonResponse({ error: 'حدث خطأ أثناء تسجيل الدخول.' }, 500);
@@ -677,8 +712,8 @@ export default {
         const raw = await fetchRawCatalog({
           dbHost,
           force: false,
-          dbSecret: env.FIREBASE_DB_SECRET || '',
-          serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+          dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+          serviceAccountJson: getServiceAccountFromEnv(env),
         });
         return jsonResponse(
           sanitizeCatalogForCustomer(raw, env.GEMINI_API_KEY || '')
@@ -695,8 +730,8 @@ export default {
       const val = await fetchImageAsset({
         dbHost,
         id,
-        dbSecret: env.FIREBASE_DB_SECRET || '',
-        serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+        dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+        serviceAccountJson: getServiceAccountFromEnv(env),
       });
       return jsonResponse(val);
     }
@@ -721,8 +756,8 @@ export default {
         const apiKey = await getStoreGeminiKey({
           dbHost,
           envGeminiKey: env.GEMINI_API_KEY || '',
-          dbSecret: env.FIREBASE_DB_SECRET || '',
-          serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+          dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+          serviceAccountJson: getServiceAccountFromEnv(env),
         });
         if (!apiKey) return jsonResponse({ error: 'KEY' }, 503);
         const result = await callGemini({
@@ -820,8 +855,8 @@ export default {
           const raw = await fetchRawCatalog({
             dbHost,
             force: true,
-            dbSecret: env.FIREBASE_DB_SECRET || '',
-            serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
           });
           const data = JSON.parse(JSON.stringify(raw.data || {}));
           data.offers = data.offers || [];
@@ -842,8 +877,8 @@ export default {
               const v = await fetchImageAsset({
                 dbHost,
                 id: k,
-                dbSecret: env.FIREBASE_DB_SECRET || '',
-                serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+                dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+                serviceAccountJson: getServiceAccountFromEnv(env),
               });
               if (v) images[k] = v;
             })
@@ -907,6 +942,8 @@ export default {
             (await getStoreGeminiKey({
               dbHost,
               envGeminiKey: env.GEMINI_API_KEY || '',
+              dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+              serviceAccountJson: getServiceAccountFromEnv(env),
             }));
           if (!apiKey) return jsonResponse({ error: 'KEY' }, 400, setCookies);
           const result = await callGemini({

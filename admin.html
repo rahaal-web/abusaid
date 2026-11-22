@@ -179,11 +179,26 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
   function loadAdminScript() {
     if (loaded) return;
     loaded = true;
+    var srcUrl = '/admin-app.js?v=' + Date.now();
     var s = document.createElement('script');
-    s.src = '/admin-app.js?v=' + Date.now();
-    s.onerror = function () {
+    s.src = srcUrl;
+    s.onerror = async function () {
       loaded = false;
-      le.textContent = 'تعذر تحميل ملفات لوحة التحكم، حاول مرة أخرى.';
+      var msg = 'تعذر تحميل ملفات لوحة التحكم، حاول مرة أخرى.';
+      try {
+        var diagRes = await fetch('/admin-app.js?v=' + Date.now(), {
+          credentials: 'same-origin',
+        });
+        if (!diagRes.ok) {
+          var diagData = await diagRes.json().catch(function () { return {}; });
+          if (diagData && diagData.error) {
+            msg = diagData.error + ' (' + diagRes.status + ')';
+          } else {
+            msg = 'تعذر تحميل ملفات لوحة التحكم (' + diagRes.status + ')، حاول مرة أخرى.';
+          }
+        }
+      } catch (z) {}
+      le.textContent = msg;
       lf.hidden = false;
     };
     document.body.appendChild(s);
