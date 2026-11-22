@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <title>إنشاء حساب جديد – أبو سعيد</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Cairo:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/auth.css">
+</head>
+<body>
+  <header class="auth-top">
+    <a class="brand-pill" href="/login">
+      <span class="brand-mark"><img id="brandLogo" alt="شعار أبو سعيد"></span>
+      <span class="brand-txt">
+        <strong id="brandName">أبو سعيد</strong>
+        <small id="brandSub">جملة الشيبسي والسناكس</small>
+      </span>
+    </a>
+    <button id="themeToggle" class="icon-btn" type="button" aria-label="تبديل المظهر">🌙</button>
+  </header>
+
+  <main class="auth-main">
+    <section class="auth-card" id="registerCard">
+      <span class="auth-badge blue">📦 حساب تاجر جملة جديد</span>
+      <h1 class="auth-title">إنشاء حساب جديد</h1>
+      <p class="auth-sub">سجّل بياناتك الآن بدون بريد إلكتروني إجباري. بعد التسجيل ستراجع الإدارة طلبك لتفعيل الحساب.</p>
+
+      <div class="alert" id="alertBox" hidden></div>
+
+      <form id="registerForm" novalidate>
+        <div class="field">
+          <label for="fullName">الاسم بالكامل *</label>
+          <input id="fullName" name="fullName" type="text" autocomplete="name" placeholder="مثال: محمد أحمد علي" required>
+        </div>
+
+        <div class="field">
+          <label for="phone">رقم الهاتف *</label>
+          <input id="phone" name="phone" type="tel" dir="ltr" inputmode="tel" autocomplete="tel" placeholder="01012345678" required>
+        </div>
+
+        <div class="field-grid">
+          <div class="field">
+            <label for="password">كلمة المرور *</label>
+            <div class="input-wrap">
+              <input id="password" name="password" type="password" dir="ltr" autocomplete="new-password" placeholder="٦ أحرف على الأقل" data-pw required>
+              <button type="button" class="pw-toggle" data-target="password" aria-label="إظهار كلمة المرور">👁️</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="confirmPassword">تأكيد كلمة المرور *</label>
+            <div class="input-wrap">
+              <input id="confirmPassword" name="confirmPassword" type="password" dir="ltr" autocomplete="new-password" placeholder="أعد كتابة كلمة المرور" data-pw required>
+              <button type="button" class="pw-toggle" data-target="confirmPassword" aria-label="إظهار تأكيد كلمة المرور">👁️</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-grid">
+          <div class="field">
+            <label for="businessName">اسم المحل / النشاط <span class="opt-tag">(اختياري)</span></label>
+            <input id="businessName" name="businessName" type="text" placeholder="مثال: سوبر ماركت النور">
+          </div>
+
+          <div class="field">
+            <label for="cityAddress">المحافظة / المنطقة <span class="opt-tag">(اختياري)</span></label>
+            <input id="cityAddress" name="cityAddress" type="text" placeholder="مثال: القاهرة - شبرا">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="email">البريد الإلكتروني <span class="opt-tag">(اختياري — يمكنك التسجيل بدونه)</span></label>
+          <input id="email" name="email" type="email" dir="ltr" autocomplete="email" placeholder="اختياري: اتركه فارغاً للتسجيل برقم الهاتف فقط">
+        </div>
+
+        <button class="btn-submit" id="submitBtn" type="submit">إرسال طلب إنشاء الحساب ✅</button>
+      </form>
+
+      <div class="auth-divider">لديك حساب بالفعل؟</div>
+      <a class="btn-secondary" href="/login">العودة لتسجيل الدخول</a>
+    </section>
+
+    <section class="auth-card" id="pendingCard" hidden>
+      <div class="status-box">
+        <div class="status-ico">⏳</div>
+        <div class="status-pill">Pending · في انتظار موافقة الإدارة</div>
+        <h2>تم استلام طلبك بنجاح</h2>
+        <p id="pendingMessage">تم إرسال طلب إنشاء حسابك بنجاح، وهو الآن قيد مراجعة الإدارة.</p>
+        <div class="note-box">
+          لا يمكن الدخول إلى المتجر أو مشاهدة المنتجات والأسعار قبل موافقة الإدارة وتغيير حالة الحساب إلى <b>Approved</b>.
+        </div>
+        <a class="btn-submit" href="/login">الانتقال إلى صفحة تسجيل الدخول</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+
+      function applyTheme(theme) {
+        if (theme === 'dark' || theme === 'light') {
+          document.documentElement.setAttribute('data-theme', theme);
+        } else {
+          document.documentElement.removeAttribute('data-theme');
+        }
+        const isDark =
+          theme === 'dark' ||
+          (!theme && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        $('themeToggle').textContent = isDark ? '☀️' : '🌙';
+      }
+
+      try { applyTheme(localStorage.getItem('abu_theme') || ''); } catch (e) { applyTheme(''); }
+
+      $('themeToggle').addEventListener('click', () => {
+        const cur = document.documentElement.getAttribute('data-theme');
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const next = cur === 'dark' || (!cur && prefersDark) ? 'light' : 'dark';
+        try { localStorage.setItem('abu_theme', next); } catch (e) {}
+        applyTheme(next);
+      });
+
+      fetch('/api/brand')
+        .then((r) => r.json())
+        .then((b) => {
+          if (b.brandName) $('brandName').textContent = b.brandName;
+          if (b.brandSub) $('brandSub').textContent = b.brandSub;
+          if (b.logoData) $('brandLogo').src = b.logoData;
+        })
+        .catch(() => {});
+
+      document.querySelectorAll('.pw-toggle').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const inp = $(btn.dataset.target);
+          if (!inp) return;
+          const show = inp.type === 'password';
+          inp.type = show ? 'text' : 'password';
+          btn.textContent = show ? '🙈' : '👁️';
+        });
+      });
+
+      function showAlert(msg) {
+        const box = $('alertBox');
+        box.textContent = msg;
+        box.className = 'alert error';
+        box.hidden = false;
+      }
+
+      $('registerForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        $('alertBox').hidden = true;
+
+        const fullName = $('fullName').value.trim();
+        const phone = $('phone').value.trim();
+        const password = $('password').value;
+        const confirmPassword = $('confirmPassword').value;
+        const businessName = $('businessName').value.trim();
+        const cityAddress = $('cityAddress').value.trim();
+        const email = $('email').value.trim();
+
+        if (fullName.length < 3) {
+          showAlert('يرجى إدخال الاسم بالكامل (٣ أحرف على الأقل).');
+          return;
+        }
+        if (!phone) {
+          showAlert('يرجى إدخال رقم الهاتف.');
+          return;
+        }
+        if (password.length < 6) {
+          showAlert('كلمة المرور يجب أن تكون ٦ أحرف على الأقل.');
+          return;
+        }
+        if (password !== confirmPassword) {
+          showAlert('كلمتا المرور غير متطابقتين.');
+          return;
+        }
+
+        const btn = $('submitBtn');
+        btn.disabled = true;
+        btn.textContent = 'جاري إرسال الطلب...';
+
+        try {
+          const res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fullName,
+              phone,
+              password,
+              confirmPassword,
+              businessName,
+              cityAddress,
+              email,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (res.ok && data.ok) {
+            $('registerCard').hidden = true;
+            $('pendingMessage').textContent =
+              data.message || 'تم إرسال طلب إنشاء حسابك بنجاح، وهو الآن قيد مراجعة الإدارة.';
+            $('pendingCard').hidden = false;
+            history.replaceState(null, '', '/pending');
+            return;
+          }
+
+          showAlert(data.message || 'تعذر إرسال الطلب، يرجى مراجعة البيانات.');
+        } catch (err) {
+          showAlert('تعذر الاتصال بالخادم، يرجى المحاولة مرة أخرى.');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'إرسال طلب إنشاء الحساب ✅';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

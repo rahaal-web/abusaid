@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <title>دخول الإدارة – أبو سعيد</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Cairo:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/auth.css">
+</head>
+<body>
+  <header class="auth-top">
+    <a class="brand-pill" href="/login">
+      <span class="brand-mark"><img id="brandLogo" alt="شعار أبو سعيد"></span>
+      <span class="brand-txt">
+        <strong id="brandName">أبو سعيد</strong>
+        <small>إدارة المتجر</small>
+      </span>
+    </a>
+    <button id="themeToggle" class="icon-btn" type="button" aria-label="تبديل المظهر">🌙</button>
+  </header>
+
+  <main class="auth-main">
+    <section class="auth-card">
+      <span class="auth-badge">🔧 لوحة تحكم الإدارة</span>
+      <h1 class="auth-title">تسجيل دخول الإدارة</h1>
+      <p class="auth-sub">مخصص لمسؤولي المتجر فقط. تتم المصادقة والتحقق من الصلاحيات من جهة الخادم.</p>
+
+      <div class="alert" id="alertBox" hidden></div>
+
+      <form id="adminLoginForm" novalidate>
+        <div class="field">
+          <label for="email">البريد الإلكتروني للإدارة</label>
+          <input id="email" name="email" type="email" dir="ltr" autocomplete="username" placeholder="admin@example.com" required>
+        </div>
+
+        <div class="field">
+          <label for="password">كلمة المرور</label>
+          <div class="input-wrap">
+            <input id="password" name="password" type="password" dir="ltr" autocomplete="current-password" placeholder="••••••••" data-pw required>
+            <button type="button" class="pw-toggle" id="pwToggle" aria-label="إظهار كلمة المرور">👁️</button>
+          </div>
+        </div>
+
+        <button class="btn-submit" id="submitBtn" type="submit">دخول لوحة الإدارة 🔐</button>
+      </form>
+
+      <div class="auth-foot">
+        <a href="/login">العودة لدخول العملاء 🛍️</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      function applyTheme(theme) {
+        if (theme === 'dark' || theme === 'light') {
+          document.documentElement.setAttribute('data-theme', theme);
+        } else {
+          document.documentElement.removeAttribute('data-theme');
+        }
+        const isDark =
+          theme === 'dark' ||
+          (!theme && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        $('themeToggle').textContent = isDark ? '☀️' : '🌙';
+      }
+      try { applyTheme(localStorage.getItem('abu_theme') || ''); } catch (e) { applyTheme(''); }
+      $('themeToggle').addEventListener('click', () => {
+        const cur = document.documentElement.getAttribute('data-theme');
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const next = cur === 'dark' || (!cur && prefersDark) ? 'light' : 'dark';
+        try { localStorage.setItem('abu_theme', next); } catch (e) {}
+        applyTheme(next);
+      });
+      fetch('/api/brand')
+        .then((r) => r.json())
+        .then((b) => {
+          if (b.brandName) $('brandName').textContent = b.brandName;
+          if (b.logoData) $('brandLogo').src = b.logoData;
+        })
+        .catch(() => {});
+      $('pwToggle').addEventListener('click', () => {
+        const pw = $('password');
+        const show = pw.type === 'password';
+        pw.type = show ? 'text' : 'password';
+        $('pwToggle').textContent = show ? '🙈' : '👁️';
+      });
+      $('adminLoginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        $('alertBox').hidden = true;
+        const email = $('email').value.trim();
+        const password = $('password').value;
+        if (!email || !password) {
+          $('alertBox').textContent = 'يرجى إدخال البريد الإلكتروني وكلمة المرور.';
+          $('alertBox').className = 'alert error';
+          $('alertBox').hidden = false;
+          return;
+        }
+        const btn = $('submitBtn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التحقق...';
+        try {
+          const res = await fetch('/api/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ email, password }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.ok) {
+            location.replace('/admin');
+            return;
+          }
+          $('alertBox').textContent = data.message || 'بيانات الإدارة غير صحيحة.';
+          $('alertBox').className = 'alert error';
+          $('alertBox').hidden = false;
+        } catch (err) {
+          $('alertBox').textContent = 'تعذر الاتصال بالخادم، يرجى المحاولة مرة أخرى.';
+          $('alertBox').className = 'alert error';
+          $('alertBox').hidden = false;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'دخول لوحة الإدارة 🔐';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
