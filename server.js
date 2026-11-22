@@ -1,28 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  cleanupExpiredSessions,
-  createAdminSession,
-  createUser,
-  createUserSession,
-  deleteUserById,
-  findUserByEmail,
-  findUserByIdentifier,
-  findUserByPhone,
-  getAdminSession,
-  getSessionWithUser,
-  isValidEmail,
-  isValidPhone,
-  listUsers,
-  normalizeEmail,
-  normalizePhone,
-  revokeAdminSession,
-  revokeSessionToken,
-  sanitizeUser,
-  updateUserStatus,
-  verifyPassword,
-} from './lib/db.js';
+import * as sqliteStore from './lib/db.js';
 import {
   callGemini,
   fetchImageAsset,
@@ -30,8 +9,24 @@ import {
   firebaseSignIn,
   getStoreGeminiKey,
   publishCatalogToFirebase,
+  resolveFirebaseWebConfig,
   sanitizeCatalogForCustomer,
 } from './lib/firebaseProxy.js';
+import { createRtdbAuthStore } from './lib/rtdbAuthStore.js';
+
+const rtdbStore = createRtdbAuthStore(process.env);
+const userStore = rtdbStore.hasServerDbCredentials() ? rtdbStore : sqliteStore;
+
+const {
+  cleanupExpiredSessions,
+  createAdminSession,
+  getAdminSession,
+  isValidEmail,
+  isValidPhone,
+  normalizeEmail,
+  normalizePhone,
+  revokeAdminSession,
+} = sqliteStore;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -153,53 +148,63 @@ function wantsHtml(req) {
   return accept.includes('text/html') || req.path === '/' || req.path === '/index.html';
 }
 
-function requireApprovedUser(req, res, next) {
+async function requireApprovedUser(req, res, next) {
   setNoStore(res);
-  const cookies = parseCookies(req);
-  const token = cookies[USER_COOKIE];
-  const session = getSessionWithUser(token, 'auth');
+  try {
+    const cookies = parseCookies(req);
+    const token = cookies[USER_COOKIE];
+    const session = await userStore.getSessionWithUser(token, 'auth');
 
-  if (!session) {
-    if (token) clearSessionCookie(res, req, USER_COOKIE);
-    const statusToken = cookies[STATUS_COOKIE];
-    const statusSess = statusToken ? getSessionWithUser(statusToken, 'status') : null;
-    if (wantsHtml(req)) {
-      if (statusSess && statusSess.user && statusSess.user.status !== 'Approved') {
+    if (!session) {
+      if (token) clearSessionCookie(res, req, USER_COOKIE);
+      const statusToken = cookies[STATUS_COOKIE];
+      const statusSess = statusToken
+        ? await userStore.getSessionWithUser(statusToken, 'status')
+        : null;
+      if (wantsHtml(req)) {
+        if (statusSess && statusSess.user && statusSess.user.status !== 'Approved') {
+          return res.redirect('/account-status');
+        }
+        return res.redirect('/login');
+      }
+      return res.status(401).json({
+        error: 'يجب تسجيل الدخول للوصول إلى هذا المحتوى.',
+        code: 'UNAUTHENTICATED',
+      });
+    }
+
+    if (session.user.status !== 'Approved') {
+      await userStore.revokeSessionToken(token);
+      clearSessionCookie(res, req, USER_COOKIE);
+      const st = await userStore.createUserSession(
+        session.user.id,
+        'status',
+        24 * 60 * 60 * 1000
+      );
+      setSessionCookie(res, req, STATUS_COOKIE, st.rawToken, 24 * 60 * 60);
+
+      if (wantsHtml(req)) {
         return res.redirect('/account-status');
       }
-      return res.redirect('/login');
+      return res.status(403).json({
+        error:
+          session.user.status === 'Suspended'
+            ? 'تم تعليق حسابك من قِبل الإدارة.'
+            : session.user.status === 'Rejected'
+            ? 'لم تتم الموافقة على حسابك.'
+            : 'حسابك في انتظار موافقة الإدارة.',
+        code: `ACCOUNT_${session.user.status.toUpperCase()}`,
+        status: session.user.status,
+        rejectionReason: session.user.rejectionReason || '',
+      });
     }
-    return res.status(401).json({
-      error: 'يجب تسجيل الدخول للوصول إلى هذا المحتوى.',
-      code: 'UNAUTHENTICATED',
-    });
+
+    req.user = session.user;
+    req.userToken = token;
+    return next();
+  } catch {
+    return res.status(503).json({ error: 'تعذر التحقق من الجلسة حالياً.' });
   }
-
-  if (session.user.status !== 'Approved') {
-    revokeSessionToken(token);
-    clearSessionCookie(res, req, USER_COOKIE);
-    const st = createUserSession(session.user.id, 'status', 24 * 60 * 60 * 1000);
-    setSessionCookie(res, req, STATUS_COOKIE, st.rawToken, 24 * 60 * 60);
-
-    if (wantsHtml(req)) {
-      return res.redirect('/account-status');
-    }
-    return res.status(403).json({
-      error:
-        session.user.status === 'Suspended'
-          ? 'تم تعليق حسابك من قِبل الإدارة.'
-          : session.user.status === 'Rejected'
-          ? 'لم تتم الموافقة على حسابك.'
-          : 'حسابك في انتظار موافقة الإدارة.',
-      code: `ACCOUNT_${session.user.status.toUpperCase()}`,
-      status: session.user.status,
-      rejectionReason: session.user.rejectionReason || '',
-    });
-  }
-
-  req.user = session.user;
-  req.userToken = token;
-  return next();
 }
 
 function requireAdmin(req, res, next) {
@@ -243,42 +248,54 @@ app.get('/js/pwa.js', (_req, res) => {
   res.sendFile(path.join(__dirname, 'js', 'pwa.js'));
 });
 
-app.get(['/login', '/login.html'], (req, res) => {
+app.get(['/login', '/login.html'], async (req, res) => {
   setNoStore(res);
-  const cookies = parseCookies(req);
-  const sess = getSessionWithUser(cookies[USER_COOKIE], 'auth');
-  if (sess && sess.user.status === 'Approved') {
-    return res.redirect('/');
+  try {
+    const cookies = parseCookies(req);
+    const sess = await userStore.getSessionWithUser(cookies[USER_COOKIE], 'auth');
+    if (sess && sess.user.status === 'Approved') {
+      return res.redirect('/');
+    }
+  } catch {
+    // show login page
   }
   return res.sendFile(path.join(__dirname, 'public', 'auth', 'login.html'));
 });
 
-app.get(['/register', '/register.html'], (req, res) => {
+app.get(['/register', '/register.html'], async (req, res) => {
   setNoStore(res);
-  const cookies = parseCookies(req);
-  const sess = getSessionWithUser(cookies[USER_COOKIE], 'auth');
-  if (sess && sess.user.status === 'Approved') {
-    return res.redirect('/');
+  try {
+    const cookies = parseCookies(req);
+    const sess = await userStore.getSessionWithUser(cookies[USER_COOKIE], 'auth');
+    if (sess && sess.user.status === 'Approved') {
+      return res.redirect('/');
+    }
+  } catch {
+    // show register page
   }
   return res.sendFile(path.join(__dirname, 'public', 'auth', 'register.html'));
 });
 
-app.get(['/account-status', '/status'], (req, res) => {
+app.get(['/account-status', '/status'], async (req, res) => {
   setNoStore(res);
-  const cookies = parseCookies(req);
-  const authSess = getSessionWithUser(cookies[USER_COOKIE], 'auth');
-  if (authSess && authSess.user.status === 'Approved') {
-    return res.redirect('/');
-  }
-  const statusSess = getSessionWithUser(cookies[STATUS_COOKIE], 'status');
-  if (!statusSess && !authSess) {
+  try {
+    const cookies = parseCookies(req);
+    const authSess = await userStore.getSessionWithUser(cookies[USER_COOKIE], 'auth');
+    if (authSess && authSess.user.status === 'Approved') {
+      return res.redirect('/');
+    }
+    const statusSess = await userStore.getSessionWithUser(cookies[STATUS_COOKIE], 'status');
+    if (!statusSess && !authSess) {
+      return res.redirect('/login');
+    }
+  } catch {
     return res.redirect('/login');
   }
   return res.sendFile(path.join(__dirname, 'public', 'auth', 'status.html'));
 });
 
 // ==================== CUSTOMER AUTH APIs ====================
-app.post('/api/auth/register', checkRateLimit, (req, res) => {
+app.post('/api/auth/register', checkRateLimit, async (req, res) => {
   setNoStore(res);
   const body = req.body || {};
   const fullName = String(body.fullName || '').trim();
@@ -305,15 +322,15 @@ app.post('/api/auth/register', checkRateLimit, (req, res) => {
     return res.status(400).json({ error: 'كلمتا المرور غير متطابقتين.' });
   }
 
-  if (findUserByPhone(phone)) {
-    return res.status(409).json({ error: 'رقم الهاتف مسجل بالفعل في النظام.' });
-  }
-  if (email && findUserByEmail(email)) {
-    return res.status(409).json({ error: 'البريد الإلكتروني مستخدم بالفعل.' });
-  }
-
   try {
-    const created = createUser({
+    if (await userStore.findUserByPhone(phone)) {
+      return res.status(409).json({ error: 'رقم الهاتف مسجل بالفعل في النظام.' });
+    }
+    if (email && (await userStore.findUserByEmail(email))) {
+      return res.status(409).json({ error: 'البريد الإلكتروني مستخدم بالفعل.' });
+    }
+
+    const created = await userStore.createUser({
       fullName,
       phone,
       email,
@@ -322,24 +339,32 @@ app.post('/api/auth/register', checkRateLimit, (req, res) => {
       password,
     });
 
-    const statusSess = createUserSession(created.id, 'status', 24 * 60 * 60 * 1000);
+    const statusSess = await userStore.createUserSession(
+      created.id,
+      'status',
+      24 * 60 * 60 * 1000
+    );
     clearSessionCookie(res, req, USER_COOKIE);
     setSessionCookie(res, req, STATUS_COOKIE, statusSess.rawToken, 24 * 60 * 60);
 
     return res.status(201).json({
       ok: true,
       message: 'تم إرسال طلب إنشاء حسابك بنجاح، وهو الآن قيد مراجعة الإدارة.',
-      user: sanitizeUser(created),
+      user: userStore.sanitizeUser(created),
     });
   } catch (err) {
-    if (String(err?.message || '').includes('UNIQUE')) {
+    if (
+      String(err?.message || '').includes('UNIQUE') ||
+      err?.code === 'DUPLICATE_PHONE' ||
+      err?.code === 'DUPLICATE_EMAIL'
+    ) {
       return res.status(409).json({ error: 'رقم الهاتف أو البريد الإلكتروني مسجل بالفعل.' });
     }
     return res.status(500).json({ error: 'حدث خطأ أثناء إنشاء الحساب، حاول مرة أخرى.' });
   }
 });
 
-app.post('/api/auth/login', checkRateLimit, (req, res) => {
+app.post('/api/auth/login', checkRateLimit, async (req, res) => {
   setNoStore(res);
   const body = req.body || {};
   const identifier = String(body.identifier || body.phone || body.email || '').trim();
@@ -349,87 +374,111 @@ app.post('/api/auth/login', checkRateLimit, (req, res) => {
     return res.status(400).json({ error: 'يرجى إدخال رقم الهاتف وكلمة المرور.' });
   }
 
-  const user = findUserByIdentifier(identifier);
-  if (!user || !verifyPassword(password, user.password_hash)) {
-    return res.status(401).json({ error: 'بيانات الدخول غير صحيحة، تأكد من رقم الهاتف وكلمة المرور.' });
-  }
+  try {
+    const user = await userStore.findUserByIdentifier(identifier);
+    const storedHash = user ? user.password_hash ?? user.passwordHash : '';
+    if (!user || !(await userStore.verifyPassword(password, storedHash))) {
+      return res
+        .status(401)
+        .json({ error: 'بيانات الدخول غير صحيحة، تأكد من رقم الهاتف وكلمة المرور.' });
+    }
 
-  if (user.status === 'Approved') {
-    const sess = createUserSession(user.id, 'auth', 7 * 24 * 60 * 60 * 1000);
-    clearSessionCookie(res, req, STATUS_COOKIE);
-    setSessionCookie(res, req, USER_COOKIE, sess.rawToken, 7 * 24 * 60 * 60);
+    if (user.status === 'Approved') {
+      const sess = await userStore.createUserSession(
+        user.id,
+        'auth',
+        7 * 24 * 60 * 60 * 1000,
+        user.tokenVersion || 1
+      );
+      clearSessionCookie(res, req, STATUS_COOKIE);
+      setSessionCookie(res, req, USER_COOKIE, sess.rawToken, 7 * 24 * 60 * 60);
+      return res.json({
+        ok: true,
+        status: 'Approved',
+        user: userStore.sanitizeUser(user),
+      });
+    }
+
+    const statusSess = await userStore.createUserSession(
+      user.id,
+      'status',
+      24 * 60 * 60 * 1000
+    );
+    clearSessionCookie(res, req, USER_COOKIE);
+    setSessionCookie(res, req, STATUS_COOKIE, statusSess.rawToken, 24 * 60 * 60);
+
     return res.json({
       ok: true,
-      status: 'Approved',
-      user: sanitizeUser(user),
+      status: user.status,
+      message:
+        user.status === 'Pending'
+          ? 'طلب إنشاء حسابك لا يزال قيد مراجعة الإدارة.'
+          : user.status === 'Rejected'
+          ? 'لم تتم الموافقة على طلب حسابك من قِبل الإدارة.'
+          : 'تم تعليق حسابك من قِبل الإدارة.',
+      user: userStore.sanitizeUser(user),
     });
+  } catch {
+    return res.status(500).json({ error: 'حدث خطأ أثناء تسجيل الدخول.' });
   }
-
-  const statusSess = createUserSession(user.id, 'status', 24 * 60 * 60 * 1000);
-  clearSessionCookie(res, req, USER_COOKIE);
-  setSessionCookie(res, req, STATUS_COOKIE, statusSess.rawToken, 24 * 60 * 60);
-
-  return res.json({
-    ok: true,
-    status: user.status,
-    message:
-      user.status === 'Pending'
-        ? 'طلب إنشاء حسابك لا يزال قيد مراجعة الإدارة.'
-        : user.status === 'Rejected'
-        ? 'لم تتم الموافقة على طلب حسابك من قِبل الإدارة.'
-        : 'تم تعليق حسابك من قِبل الإدارة.',
-    user: sanitizeUser(user),
-  });
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', async (req, res) => {
   setNoStore(res);
   const cookies = parseCookies(req);
-  if (cookies[USER_COOKIE]) revokeSessionToken(cookies[USER_COOKIE]);
-  if (cookies[STATUS_COOKIE]) revokeSessionToken(cookies[STATUS_COOKIE]);
+  if (cookies[USER_COOKIE]) await userStore.revokeSessionToken(cookies[USER_COOKIE]);
+  if (cookies[STATUS_COOKIE]) await userStore.revokeSessionToken(cookies[STATUS_COOKIE]);
   clearSessionCookie(res, req, USER_COOKIE);
   clearSessionCookie(res, req, STATUS_COOKIE);
   return res.json({ ok: true });
 });
 
-app.get('/api/auth/status', (req, res) => {
+app.get('/api/auth/status', async (req, res) => {
   setNoStore(res);
-  const cookies = parseCookies(req);
-  const authToken = cookies[USER_COOKIE];
-  if (authToken) {
-    const authSess = getSessionWithUser(authToken, 'auth');
-    if (authSess) {
-      if (authSess.user.status === 'Approved') {
+  try {
+    const cookies = parseCookies(req);
+    const authToken = cookies[USER_COOKIE];
+    if (authToken) {
+      const authSess = await userStore.getSessionWithUser(authToken, 'auth');
+      if (authSess) {
+        if (authSess.user.status === 'Approved') {
+          return res.json({
+            authenticated: true,
+            canEnterStore: true,
+            user: authSess.user,
+          });
+        }
+        await userStore.revokeSessionToken(authToken);
+        clearSessionCookie(res, req, USER_COOKIE);
+        const st = await userStore.createUserSession(
+          authSess.user.id,
+          'status',
+          24 * 60 * 60 * 1000
+        );
+        setSessionCookie(res, req, STATUS_COOKIE, st.rawToken, 24 * 60 * 60);
         return res.json({
-          authenticated: true,
-          canEnterStore: true,
+          authenticated: false,
+          canEnterStore: false,
           user: authSess.user,
         });
       }
-      revokeSessionToken(authToken);
       clearSessionCookie(res, req, USER_COOKIE);
-      const st = createUserSession(authSess.user.id, 'status', 24 * 60 * 60 * 1000);
-      setSessionCookie(res, req, STATUS_COOKIE, st.rawToken, 24 * 60 * 60);
-      return res.json({
-        authenticated: false,
-        canEnterStore: false,
-        user: authSess.user,
-      });
     }
-    clearSessionCookie(res, req, USER_COOKIE);
-  }
 
-  const statusToken = cookies[STATUS_COOKIE];
-  if (statusToken) {
-    const statusSess = getSessionWithUser(statusToken, 'status');
-    if (statusSess) {
-      return res.json({
-        authenticated: false,
-        canEnterStore: false,
-        user: statusSess.user,
-      });
+    const statusToken = cookies[STATUS_COOKIE];
+    if (statusToken) {
+      const statusSess = await userStore.getSessionWithUser(statusToken, 'status');
+      if (statusSess) {
+        return res.json({
+          authenticated: false,
+          canEnterStore: false,
+          user: statusSess.user,
+        });
+      }
+      clearSessionCookie(res, req, STATUS_COOKIE);
     }
-    clearSessionCookie(res, req, STATUS_COOKIE);
+  } catch {
+    // ignore and return 401
   }
 
   return res.status(401).json({ error: 'لا توجد جلسة نشطة.' });
@@ -453,6 +502,11 @@ app.get('/js/ai.js', requireApprovedUser, sendProtectedFile('js/ai.js'));
 app.get('/js/data.js', requireApprovedUser, sendProtectedFile('js/data.js'));
 app.get('/js/state.js', requireApprovedUser, sendProtectedFile('js/state.js'));
 app.get('/js/utils.js', requireApprovedUser, sendProtectedFile('js/utils.js'));
+app.get('/js/firebase-client.js', requireApprovedUser, sendProtectedFile('js/firebase-client.js'));
+
+app.get('/api/firebase-config', requireApprovedUser, (_req, res) => {
+  return res.json({ config: resolveFirebaseWebConfig(process.env) });
+});
 
 app.get('/api/catalog', requireApprovedUser, async (_req, res) => {
   try {
@@ -621,59 +675,83 @@ app.post('/api/admin/ai/generate', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/admin/users', requireAdmin, (_req, res) => {
-  const users = listUsers();
-  const counts = {
-    all: users.length,
-    Pending: 0,
-    Approved: 0,
-    Rejected: 0,
-    Suspended: 0,
-  };
-  users.forEach((u) => {
-    if (counts[u.status] != null) counts[u.status] += 1;
-  });
-  return res.json({ users, counts });
+app.get('/api/admin/users', requireAdmin, async (_req, res) => {
+  try {
+    const users = await userStore.listUsers();
+    const counts = {
+      all: users.length,
+      Pending: 0,
+      Approved: 0,
+      Rejected: 0,
+      Suspended: 0,
+    };
+    users.forEach((u) => {
+      if (counts[u.status] != null) counts[u.status] += 1;
+    });
+    return res.json({ users, counts });
+  } catch {
+    return res.status(502).json({ error: 'تعذر تحميل الحسابات' });
+  }
 });
 
-app.post('/api/admin/users/:id/approve', requireAdmin, (req, res) => {
-  const updated = updateUserStatus(req.params.id, 'Approved', {
-    reviewedBy: req.adminSession.email,
-  });
-  if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
-  return res.json({ ok: true, user: sanitizeUser(updated) });
+app.post('/api/admin/users/:id/approve', requireAdmin, async (req, res) => {
+  try {
+    const updated = await userStore.updateUserStatus(req.params.id, 'Approved', {
+      reviewedBy: req.adminSession.email,
+    });
+    if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    return res.json({ ok: true, user: userStore.sanitizeUser(updated) });
+  } catch {
+    return res.status(502).json({ error: 'تعذر تنفيذ العملية' });
+  }
 });
 
-app.post('/api/admin/users/:id/activate', requireAdmin, (req, res) => {
-  const updated = updateUserStatus(req.params.id, 'Approved', {
-    reviewedBy: req.adminSession.email,
-  });
-  if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
-  return res.json({ ok: true, user: sanitizeUser(updated) });
+app.post('/api/admin/users/:id/activate', requireAdmin, async (req, res) => {
+  try {
+    const updated = await userStore.updateUserStatus(req.params.id, 'Approved', {
+      reviewedBy: req.adminSession.email,
+    });
+    if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    return res.json({ ok: true, user: userStore.sanitizeUser(updated) });
+  } catch {
+    return res.status(502).json({ error: 'تعذر تنفيذ العملية' });
+  }
 });
 
-app.post('/api/admin/users/:id/reject', requireAdmin, (req, res) => {
+app.post('/api/admin/users/:id/reject', requireAdmin, async (req, res) => {
   const reason = String(req.body?.reason || '').trim().slice(0, 300);
-  const updated = updateUserStatus(req.params.id, 'Rejected', {
-    rejectionReason: reason || null,
-    reviewedBy: req.adminSession.email,
-  });
-  if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
-  return res.json({ ok: true, user: sanitizeUser(updated) });
+  try {
+    const updated = await userStore.updateUserStatus(req.params.id, 'Rejected', {
+      rejectionReason: reason || null,
+      reviewedBy: req.adminSession.email,
+    });
+    if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    return res.json({ ok: true, user: userStore.sanitizeUser(updated) });
+  } catch {
+    return res.status(502).json({ error: 'تعذر تنفيذ العملية' });
+  }
 });
 
-app.post('/api/admin/users/:id/suspend', requireAdmin, (req, res) => {
-  const updated = updateUserStatus(req.params.id, 'Suspended', {
-    reviewedBy: req.adminSession.email,
-  });
-  if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
-  return res.json({ ok: true, user: sanitizeUser(updated) });
+app.post('/api/admin/users/:id/suspend', requireAdmin, async (req, res) => {
+  try {
+    const updated = await userStore.updateUserStatus(req.params.id, 'Suspended', {
+      reviewedBy: req.adminSession.email,
+    });
+    if (!updated) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    return res.json({ ok: true, user: userStore.sanitizeUser(updated) });
+  } catch {
+    return res.status(502).json({ error: 'تعذر تنفيذ العملية' });
+  }
 });
 
-app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
-  const ok = deleteUserById(req.params.id);
-  if (!ok) return res.status(404).json({ error: 'المستخدم غير موجود.' });
-  return res.json({ ok: true });
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const ok = await userStore.deleteUserById(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'المستخدم غير موجود.' });
+    return res.json({ ok: true });
+  } catch {
+    return res.status(502).json({ error: 'تعذر حذف المستخدم' });
+  }
 });
 
 // ==================== FALLBACK / CATCH-ALL PROTECTION ====================

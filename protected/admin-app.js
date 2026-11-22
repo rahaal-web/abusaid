@@ -25,11 +25,12 @@
   var fls = [];
 
   var usersData = [];
-  var userCounts = { all: 0, Pending: 0, Rejected: 0, Suspended: 0 };
+  var userCounts = { all: 0, Pending: 0, Approved: 0, Rejected: 0, Suspended: 0 };
   var userFilter = 'all';
   var userQuery = '';
   var usersLoading = false;
   var usersBusyId = '';
+  var usersSetupNotice = '';
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -664,6 +665,11 @@
       (userCounts.all || usersData.length) +
       ' حساب</small><button class="mini" type="button" id="uRefresh">🔄 تحديث</button></div>' +
       '<p class="hint">راجع طلبات تسجيل التجار الجدد. لا يمكن لأي مستخدم دخول المتجر إلا بعد الموافقة على حسابه.</p>' +
+      (usersSetupNotice
+        ? '<div class="card2" style="border-color:var(--red);background:#fff3cd;color:#5c3d00"><b>⚠️ مطلوب استكمال ربط قاعدة بيانات الحسابات</b><p style="margin:6px 0 0;font-size:13px;line-height:1.7">' +
+          esc(usersSetupNotice) +
+          '</p></div>'
+        : '') +
       '<div class="ufil">' +
       filters
         .map(function (f) {
@@ -698,8 +704,22 @@
         handleAdminUnauthorized();
         return;
       }
-      var data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'تعذر تحميل الحسابات');
+      var raw = await res.text();
+      var data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (z) {
+        data = {};
+      }
+      if (!res.ok) {
+        if (data && data.needsRtdbSetup) {
+          usersSetupNotice = data.error || '';
+          if (tab === 'u') render();
+          return;
+        }
+        throw new Error(data.error || 'تعذر تحميل الحسابات');
+      }
+      usersSetupNotice = '';
       usersData = Array.isArray(data.users) ? data.users : [];
       userCounts = data.counts || { all: usersData.length, Pending: 0, Approved: 0, Rejected: 0, Suspended: 0 };
       updateUsersBadge();

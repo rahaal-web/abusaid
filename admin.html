@@ -204,9 +204,19 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
           password: lp.value,
         }),
       });
-      var data = await res.json();
+      var rawText = await res.text();
+      var data = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch (parseErr) {
+        data = {};
+      }
       if (!res.ok) {
-        le.textContent = data.error || 'الإيميل أو كلمة السر غلط';
+        if (res.status === 404 || res.status === 405) {
+          le.textContent = 'خادم API غير متصل (/api/admin/login 404). تأكد من تشغيل الخادم أو نشر worker.js.';
+        } else {
+          le.textContent = data.error || 'الإيميل أو كلمة السر غلط';
+        }
         return;
       }
       try {
@@ -228,6 +238,7 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
     } catch (z) {}
     try {
       var res = await fetch('/api/admin/me', { credentials: 'same-origin' });
+      if (!res.ok) return;
       var data = await res.json();
       if (data && data.authenticated) {
         loadAdminScript();

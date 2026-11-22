@@ -1,0 +1,17 @@
+node_modules
+data
+lib
+server.js
+worker.js
+wrangler.jsonc
+wrangler.toml
+package.json
+package-lock.json
+bun.lock
+database.rules.json
+README.md
+.env
+.env.*
+.git
+.github
+public/assets/aistudio

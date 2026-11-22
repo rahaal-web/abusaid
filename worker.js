@@ -1,0 +1,1017 @@
+import {
+  base64UrlToBytes,
+  bytesToBase64Url,
+  isValidEmail,
+  isValidPhone,
+  normalizeEmail,
+  normalizePhone,
+  verifyFirebaseIdToken,
+} from './lib/cryptoWeb.js';
+import {
+  callGemini,
+  fetchImageAsset,
+  fetchRawCatalog,
+  firebaseSignIn,
+  getStoreGeminiKey,
+  publishCatalogToFirebase,
+  refreshFirebaseToken,
+  resolveFirebaseWebConfig,
+  sanitizeCatalogForCustomer,
+} from './lib/firebaseCatalogCore.js';
+import { createRtdbAuthStore } from './lib/rtdbAuthStore.js';
+
+const USER_COOKIE = 'abu_session';
+const STATUS_COOKIE = 'abu_status_token';
+const ADMIN_COOKIE = 'abu_admin_session';
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+const PROTECTED_STORE_PATHS = new Set([
+  '/',
+  '/index.html',
+  '/styles/store.css',
+  '/js/main.js',
+  '/js/store.js',
+  '/js/cart.js',
+  '/js/offers.js',
+  '/js/ai.js',
+  '/js/data.js',
+  '/js/state.js',
+  '/js/utils.js',
+  '/js/firebase-client.js',
+]);
+
+const PUBLIC_ASSET_PATHS = new Set([
+  '/styles/auth.css',
+  '/js/auth.js',
+  '/js/logo-data.js',
+  '/js/pwa.js',
+]);
+
+const BLOCKED_PREFIXES = ['/lib/', '/data/', '/protected/', '/public/', '/.'];
+const BLOCKED_EXACT = new Set([
+  '/server.js',
+  '/worker.js',
+  '/wrangler.jsonc',
+  '/wrangler.toml',
+  '/package.json',
+  '/package-lock.json',
+  '/bun.lock',
+  '/database.rules.json',
+  '/README.md',
+]);
+
+function parseCookies(req) {
+  const header = req.headers.get('cookie') || '';
+  const cookies = {};
+  if (!header) return cookies;
+  header.split(';').forEach((part) => {
+    const idx = part.indexOf('=');
+    if (idx < 0) return;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (!k) return;
+    try {
+      cookies[k] = decodeURIComponent(v);
+    } catch {
+      cookies[k] = v;
+    }
+  });
+  return cookies;
+}
+
+function isHttpsRequest(req, url) {
+  if (url.protocol === 'https:') return true;
+  const proto = String(req.headers.get('x-forwarded-proto') || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  return proto === 'https';
+}
+
+function buildCookieString(req, url, name, value, maxAgeSec) {
+  const secure = isHttpsRequest(req, url);
+  const parts = [
+    `${name}=${encodeURIComponent(value)}`,
+    'Path=/',
+    'HttpOnly',
+    `Max-Age=${Math.max(0, Math.floor(maxAgeSec))}`,
+    secure ? 'SameSite=None' : 'SameSite=Lax',
+  ];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function noStoreHeaders(extra = {}) {
+  return {
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    Pragma: 'no-cache',
+    ...extra,
+  };
+}
+
+function jsonResponse(data, status = 200, setCookies = []) {
+  const headers = new Headers(
+    noStoreHeaders({ 'Content-Type': 'application/json; charset=utf-8' })
+  );
+  setCookies.forEach((c) => headers.append('Set-Cookie', c));
+  return new Response(JSON.stringify(data), { status, headers });
+}
+
+function redirectResponse(location, setCookies = []) {
+  const headers = new Headers(noStoreHeaders({ Location: location }));
+  setCookies.forEach((c) => headers.append('Set-Cookie', c));
+  return new Response(null, { status: 302, headers });
+}
+
+function wantsHtml(req, pathname) {
+  if (pathname.startsWith('/api/')) return false;
+  if (/\.(js|css|json|png|jpg|jpeg|webp|svg|ico|woff2?|ttf|otf)$/i.test(pathname)) {
+    return false;
+  }
+  const accept = String(req.headers.get('accept') || '');
+  return accept.includes('text/html') || pathname === '/' || pathname === '/index.html';
+}
+
+async function readJsonBody(req) {
+  try {
+    return await req.json();
+  } catch {
+    return null;
+  }
+}
+
+async function serveAsset(env, req, assetPath, { noStore = false, setCookies = [] } = {}) {
+  const assetUrl = new URL(assetPath, req.url);
+  const assetRes = await env.ASSETS.fetch(new Request(assetUrl.toString(), { method: 'GET' }));
+  if (!assetRes || assetRes.status === 404) {
+    return new Response('Not found', { status: 404 });
+  }
+  const headers = new Headers(assetRes.headers);
+  if (noStore) {
+    headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    headers.set('Pragma', 'no-cache');
+  }
+  setCookies.forEach((c) => headers.append('Set-Cookie', c));
+  return new Response(assetRes.body, {
+    status: assetRes.status,
+    headers,
+  });
+}
+
+function encodeAdminCookieToken(idToken, refreshToken) {
+  return bytesToBase64Url(
+    encoder.encode(JSON.stringify({ idToken, refreshToken }))
+  );
+}
+
+function decodeAdminCookieToken(raw) {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(decoder.decode(base64UrlToBytes(raw)));
+    if (!obj || typeof obj.idToken !== 'string') return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveAdminSession(req, url, env, fbCfg) {
+  const cookies = parseCookies(req);
+  const raw = cookies[ADMIN_COOKIE];
+  if (!raw) return { admin: null, setCookies: [] };
+
+  const parsed = decodeAdminCookieToken(raw);
+  if (!parsed) {
+    return {
+      admin: null,
+      setCookies: [buildCookieString(req, url, ADMIN_COOKIE, '', 0)],
+    };
+  }
+
+  let verified = await verifyFirebaseIdToken(parsed.idToken, fbCfg.projectId);
+  if (verified && !verified.expired) {
+    return {
+      admin: {
+        email: verified.email,
+        uid: verified.uid,
+        idToken: parsed.idToken,
+        refreshToken: parsed.refreshToken || '',
+      },
+      setCookies: [],
+    };
+  }
+
+  if (parsed.refreshToken) {
+    try {
+      const refreshed = await refreshFirebaseToken({
+        apiKey: fbCfg.apiKey,
+        refreshToken: parsed.refreshToken,
+      });
+      const reVerified = await verifyFirebaseIdToken(
+        refreshed.idToken,
+        fbCfg.projectId
+      );
+      if (reVerified && !reVerified.expired) {
+        const nextCookie = buildCookieString(
+          req,
+          url,
+          ADMIN_COOKIE,
+          encodeAdminCookieToken(refreshed.idToken, refreshed.refreshToken),
+          7 * 24 * 60 * 60
+        );
+        return {
+          admin: {
+            email: reVerified.email,
+            uid: reVerified.uid,
+            idToken: refreshed.idToken,
+            refreshToken: refreshed.refreshToken,
+          },
+          setCookies: [nextCookie],
+        };
+      }
+    } catch {
+      // fall through to clear cookie
+    }
+  }
+
+  return {
+    admin: null,
+    setCookies: [buildCookieString(req, url, ADMIN_COOKIE, '', 0)],
+  };
+}
+
+async function requireApprovedUser(req, url, store) {
+  const cookies = parseCookies(req);
+  const token = cookies[USER_COOKIE];
+  const session = token ? await store.getSessionWithUser(token, 'auth') : null;
+
+  if (!session) {
+    const clearAuth = token ? [buildCookieString(req, url, USER_COOKIE, '', 0)] : [];
+    const statusToken = cookies[STATUS_COOKIE];
+    const statusSess = statusToken
+      ? await store.getSessionWithUser(statusToken, 'status')
+      : null;
+
+    if (wantsHtml(req, url.pathname)) {
+      if (statusSess && statusSess.user && statusSess.user.status !== 'Approved') {
+        return { ok: false, response: redirectResponse('/account-status', clearAuth) };
+      }
+      return { ok: false, response: redirectResponse('/login', clearAuth) };
+    }
+    return {
+      ok: false,
+      response: jsonResponse(
+        {
+          error: 'يجب تسجيل الدخول للوصول إلى هذا المحتوى.',
+          code: 'UNAUTHENTICATED',
+        },
+        401,
+        clearAuth
+      ),
+    };
+  }
+
+  if (session.user.status !== 'Approved') {
+    await store.revokeSessionToken(token);
+    const st = await store.createUserSession(
+      session.user.id,
+      'status',
+      24 * 60 * 60 * 1000,
+      1
+    );
+    const cookiesOut = [
+      buildCookieString(req, url, USER_COOKIE, '', 0),
+      buildCookieString(req, url, STATUS_COOKIE, st.rawToken, 24 * 60 * 60),
+    ];
+
+    if (wantsHtml(req, url.pathname)) {
+      return { ok: false, response: redirectResponse('/account-status', cookiesOut) };
+    }
+    return {
+      ok: false,
+      response: jsonResponse(
+        {
+          error:
+            session.user.status === 'Suspended'
+              ? 'تم تعليق حسابك من قِبل الإدارة.'
+              : session.user.status === 'Rejected'
+              ? 'لم تتم الموافقة على حسابك.'
+              : 'حسابك في انتظار موافقة الإدارة.',
+          code: `ACCOUNT_${session.user.status.toUpperCase()}`,
+          status: session.user.status,
+          rejectionReason: session.user.rejectionReason || '',
+        },
+        403,
+        cookiesOut
+      ),
+    };
+  }
+
+  return { ok: true, user: session.user, token };
+}
+
+function handleRtdbConfigError(err) {
+  if (err?.code === 'RTDB_NOT_CONFIGURED' || err?.code === 'RTDB_PERMISSION_DENIED') {
+    return jsonResponse(
+      {
+        needsRtdbSetup: true,
+        error:
+          err.code === 'RTDB_PERMISSION_DENIED'
+            ? 'قاعدة بيانات Firebase Realtime Database رفضت الوصول لمسار /abu_auth. أضف FIREBASE_DB_SECRET أو FIREBASE_SERVICE_ACCOUNT_JSON في متغيرات Cloudflare Workers.'
+            : 'يرجى إضافة FIREBASE_DB_SECRET أو FIREBASE_SERVICE_ACCOUNT_JSON في إعدادات Cloudflare Workers لتفعيل حفظ ومراجعة الحسابات عبر Firebase Realtime Database.',
+      },
+      503
+    );
+  }
+  return null;
+}
+
+export default {
+  async fetch(req, env) {
+    const url = new URL(req.url);
+    const pathname = url.pathname;
+    const method = req.method.toUpperCase();
+
+    if (
+      BLOCKED_EXACT.has(pathname) ||
+      BLOCKED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+    ) {
+      return new Response('Not found', { status: 404 });
+    }
+
+    const fbCfg = resolveFirebaseWebConfig(env);
+    const dbHost = fbCfg.databaseURL.replace(/^https?:\/\//, '');
+    const store = createRtdbAuthStore({
+      ...env,
+      FIREBASE_DB_HOST: dbHost,
+    });
+
+    // ==================== PUBLIC AUTH ASSETS & PAGES ====================
+    if (method === 'GET' && PUBLIC_ASSET_PATHS.has(pathname)) {
+      return serveAsset(env, req, pathname);
+    }
+
+    if (method === 'GET' && (pathname === '/login' || pathname === '/login.html')) {
+      try {
+        const cookies = parseCookies(req);
+        const sess = cookies[USER_COOKIE]
+          ? await store.getSessionWithUser(cookies[USER_COOKIE], 'auth')
+          : null;
+        if (sess && sess.user.status === 'Approved') {
+          return redirectResponse('/');
+        }
+      } catch {
+        // show login page if store isn't configured yet
+      }
+      return serveAsset(env, req, '/public/auth/login.html', { noStore: true });
+    }
+
+    if (method === 'GET' && (pathname === '/register' || pathname === '/register.html')) {
+      try {
+        const cookies = parseCookies(req);
+        const sess = cookies[USER_COOKIE]
+          ? await store.getSessionWithUser(cookies[USER_COOKIE], 'auth')
+          : null;
+        if (sess && sess.user.status === 'Approved') {
+          return redirectResponse('/');
+        }
+      } catch {
+        // show register page
+      }
+      return serveAsset(env, req, '/public/auth/register.html', { noStore: true });
+    }
+
+    if (method === 'GET' && (pathname === '/account-status' || pathname === '/status')) {
+      const cookies = parseCookies(req);
+      let authSess = null;
+      let statusSess = null;
+      try {
+        if (cookies[USER_COOKIE]) {
+          authSess = await store.getSessionWithUser(cookies[USER_COOKIE], 'auth');
+        }
+        if (authSess && authSess.user.status === 'Approved') {
+          return redirectResponse('/');
+        }
+        if (cookies[STATUS_COOKIE]) {
+          statusSess = await store.getSessionWithUser(cookies[STATUS_COOKIE], 'status');
+        }
+      } catch {
+        return redirectResponse('/login');
+      }
+      if (!statusSess && !authSess) {
+        return redirectResponse('/login');
+      }
+      return serveAsset(env, req, '/public/auth/status.html', { noStore: true });
+    }
+
+    // ==================== CUSTOMER AUTH APIs ====================
+    if (method === 'POST' && pathname === '/api/auth/register') {
+      const body = (await readJsonBody(req)) || {};
+      const fullName = String(body.fullName || '').trim();
+      const phone = normalizePhone(body.phone);
+      const email = normalizeEmail(body.email);
+      const password = String(body.password || '');
+      const confirmPassword = String(body.confirmPassword || '');
+      const shopName = String(body.shopName || '').trim();
+      const address = String(body.address || '').trim();
+
+      if (fullName.length < 3 || fullName.length > 100) {
+        return jsonResponse({ error: 'يرجى إدخال الاسم بالكامل (من ٣ إلى ١٠٠ حرف).' }, 400);
+      }
+      if (!isValidPhone(phone)) {
+        return jsonResponse({ error: 'يرجى إدخال رقم هاتف صحيح (من ١٠ إلى ١٥ رقم).' }, 400);
+      }
+      if (email && !isValidEmail(email)) {
+        return jsonResponse({ error: 'صيغة البريد الإلكتروني غير صحيحة.' }, 400);
+      }
+      if (password.length < 6 || password.length > 128) {
+        return jsonResponse(
+          { error: 'كلمة المرور يجب أن تكون ٦ أحرف أو أرقام على الأقل.' },
+          400
+        );
+      }
+      if (password !== confirmPassword) {
+        return jsonResponse({ error: 'كلمتا المرور غير متطابقتين.' }, 400);
+      }
+
+      try {
+        if (await store.findUserByPhone(phone)) {
+          return jsonResponse({ error: 'رقم الهاتف مسجل بالفعل في النظام.' }, 409);
+        }
+        if (email && (await store.findUserByEmail(email))) {
+          return jsonResponse({ error: 'البريد الإلكتروني مستخدم بالفعل.' }, 409);
+        }
+
+        const created = await store.createUser({
+          fullName,
+          phone,
+          email,
+          shopName,
+          address,
+          password,
+        });
+        const statusSess = await store.createUserSession(
+          created.id,
+          'status',
+          24 * 60 * 60 * 1000,
+          1
+        );
+
+        return jsonResponse(
+          {
+            ok: true,
+            message: 'تم إرسال طلب إنشاء حسابك بنجاح، وهو الآن قيد مراجعة الإدارة.',
+            user: store.sanitizeUser(created),
+          },
+          201,
+          [
+            buildCookieString(req, url, USER_COOKIE, '', 0),
+            buildCookieString(
+              req,
+              url,
+              STATUS_COOKIE,
+              statusSess.rawToken,
+              24 * 60 * 60
+            ),
+          ]
+        );
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        if (err?.code === 'DUPLICATE_PHONE') {
+          return jsonResponse({ error: 'رقم الهاتف مسجل بالفعل في النظام.' }, 409);
+        }
+        if (err?.code === 'DUPLICATE_EMAIL') {
+          return jsonResponse({ error: 'البريد الإلكتروني مستخدم بالفعل.' }, 409);
+        }
+        return jsonResponse(
+          { error: 'حدث خطأ أثناء إنشاء الحساب، حاول مرة أخرى.' },
+          500
+        );
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/auth/login') {
+      const body = (await readJsonBody(req)) || {};
+      const identifier = String(
+        body.identifier || body.phone || body.email || ''
+      ).trim();
+      const password = String(body.password || '');
+
+      if (!identifier || !password) {
+        return jsonResponse({ error: 'يرجى إدخال رقم الهاتف وكلمة المرور.' }, 400);
+      }
+
+      try {
+        const user = await store.findUserByIdentifier(identifier);
+        if (!user || !(await store.verifyPassword(password, user.passwordHash))) {
+          return jsonResponse(
+            {
+              error: 'بيانات الدخول غير صحيحة، تأكد من رقم الهاتف وكلمة المرور.',
+            },
+            401
+          );
+        }
+
+        if (user.status === 'Approved') {
+          const sess = await store.createUserSession(
+            user.id,
+            'auth',
+            7 * 24 * 60 * 60 * 1000,
+            user.tokenVersion || 1
+          );
+          return jsonResponse(
+            {
+              ok: true,
+              status: 'Approved',
+              user: store.sanitizeUser(user),
+            },
+            200,
+            [
+              buildCookieString(req, url, STATUS_COOKIE, '', 0),
+              buildCookieString(
+                req,
+                url,
+                USER_COOKIE,
+                sess.rawToken,
+                7 * 24 * 60 * 60
+              ),
+            ]
+          );
+        }
+
+        const statusSess = await store.createUserSession(
+          user.id,
+          'status',
+          24 * 60 * 60 * 1000,
+          1
+        );
+        return jsonResponse(
+          {
+            ok: true,
+            status: user.status,
+            message:
+              user.status === 'Pending'
+                ? 'طلب إنشاء حسابك لا يزال قيد مراجعة الإدارة.'
+                : user.status === 'Rejected'
+                ? 'لم تتم الموافقة على طلب حسابك من قِبل الإدارة.'
+                : 'تم تعليق حسابك من قِبل الإدارة.',
+            user: store.sanitizeUser(user),
+          },
+          200,
+          [
+            buildCookieString(req, url, USER_COOKIE, '', 0),
+            buildCookieString(
+              req,
+              url,
+              STATUS_COOKIE,
+              statusSess.rawToken,
+              24 * 60 * 60
+            ),
+          ]
+        );
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'حدث خطأ أثناء تسجيل الدخول.' }, 500);
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/auth/logout') {
+      const cookies = parseCookies(req);
+      if (cookies[USER_COOKIE]) await store.revokeSessionToken(cookies[USER_COOKIE]);
+      if (cookies[STATUS_COOKIE]) await store.revokeSessionToken(cookies[STATUS_COOKIE]);
+      return jsonResponse({ ok: true }, 200, [
+        buildCookieString(req, url, USER_COOKIE, '', 0),
+        buildCookieString(req, url, STATUS_COOKIE, '', 0),
+      ]);
+    }
+
+    if (method === 'GET' && pathname === '/api/auth/status') {
+      try {
+        const cookies = parseCookies(req);
+        const authToken = cookies[USER_COOKIE];
+        if (authToken) {
+          const authSess = await store.getSessionWithUser(authToken, 'auth');
+          if (authSess) {
+            if (authSess.user.status === 'Approved') {
+              return jsonResponse({
+                authenticated: true,
+                canEnterStore: true,
+                user: authSess.user,
+              });
+            }
+            await store.revokeSessionToken(authToken);
+            const st = await store.createUserSession(
+              authSess.user.id,
+              'status',
+              24 * 60 * 60 * 1000,
+              1
+            );
+            return jsonResponse(
+              {
+                authenticated: false,
+                canEnterStore: false,
+                user: authSess.user,
+              },
+              200,
+              [
+                buildCookieString(req, url, USER_COOKIE, '', 0),
+                buildCookieString(
+                  req,
+                  url,
+                  STATUS_COOKIE,
+                  st.rawToken,
+                  24 * 60 * 60
+                ),
+              ]
+            );
+          }
+        }
+
+        const statusToken = cookies[STATUS_COOKIE];
+        if (statusToken) {
+          const statusSess = await store.getSessionWithUser(statusToken, 'status');
+          if (statusSess) {
+            return jsonResponse({
+              authenticated: false,
+              canEnterStore: false,
+              user: statusSess.user,
+            });
+          }
+        }
+        return jsonResponse({ error: 'لا توجد جلسة نشطة.' }, 401);
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'لا توجد جلسة نشطة.' }, 401);
+      }
+    }
+
+    if (method === 'GET' && pathname === '/api/auth/me') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      return jsonResponse({ authenticated: true, user: check.user });
+    }
+
+    // ==================== PROTECTED STOREFRONT ASSETS & APIs ====================
+    if (method === 'GET' && PROTECTED_STORE_PATHS.has(pathname)) {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      const target = pathname === '/' ? '/index.html' : pathname;
+      return serveAsset(env, req, target, { noStore: true });
+    }
+
+    if (method === 'GET' && pathname === '/api/firebase-config') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      return jsonResponse({ config: fbCfg });
+    }
+
+    if (method === 'GET' && pathname === '/api/catalog') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      try {
+        const raw = await fetchRawCatalog({
+          dbHost,
+          force: false,
+          dbSecret: env.FIREBASE_DB_SECRET || '',
+          serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+        });
+        return jsonResponse(
+          sanitizeCatalogForCustomer(raw, env.GEMINI_API_KEY || '')
+        );
+      } catch {
+        return jsonResponse({ error: 'تعذر تحميل بيانات الكتالوج حالياً.' }, 502);
+      }
+    }
+
+    if (method === 'GET' && pathname.startsWith('/api/img/')) {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      const id = decodeURIComponent(pathname.slice('/api/img/'.length));
+      const val = await fetchImageAsset({
+        dbHost,
+        id,
+        dbSecret: env.FIREBASE_DB_SECRET || '',
+        serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+      });
+      return jsonResponse(val);
+    }
+
+    if (method === 'POST' && pathname === '/api/ai/generate') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+
+      const body = (await readJsonBody(req)) || {};
+      const prompt = String(body.prompt || '').trim();
+      const audioBase64 = body.audioBase64 ? String(body.audioBase64) : null;
+      const preferredModel = body.preferredModel ? String(body.preferredModel) : '';
+
+      if (!prompt || prompt.length > 80000) {
+        return jsonResponse({ error: 'Invalid prompt' }, 400);
+      }
+      if (audioBase64 && audioBase64.length > 10 * 1024 * 1024) {
+        return jsonResponse({ error: 'Audio payload too large' }, 400);
+      }
+
+      try {
+        const apiKey = await getStoreGeminiKey({
+          dbHost,
+          envGeminiKey: env.GEMINI_API_KEY || '',
+          dbSecret: env.FIREBASE_DB_SECRET || '',
+          serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+        });
+        if (!apiKey) return jsonResponse({ error: 'KEY' }, 503);
+        const result = await callGemini({
+          apiKey,
+          prompt,
+          audioBase64,
+          preferredModel,
+        });
+        return jsonResponse(result);
+      } catch (err) {
+        const code = err?.message || 'AI_ERROR';
+        const status = code === 'LIMIT' ? 429 : code === 'KEY' ? 403 : 502;
+        return jsonResponse({ error: code }, status);
+      }
+    }
+
+    // ==================== ADMIN AUTH, ASSETS & MANAGEMENT APIs ====================
+    if (method === 'GET' && (pathname === '/admin' || pathname === '/admin.html')) {
+      return serveAsset(env, req, '/admin.html', { noStore: true });
+    }
+
+    if (method === 'POST' && pathname === '/api/admin/login') {
+      const body = (await readJsonBody(req)) || {};
+      const email = String(body.email || '').trim();
+      const password = String(body.password || '');
+
+      if (!email || !password) {
+        return jsonResponse({ error: 'يرجى إدخال الإيميل وكلمة السر.' }, 400);
+      }
+
+      try {
+        const fb = await firebaseSignIn({
+          apiKey: fbCfg.apiKey,
+          email,
+          password,
+        });
+        const cookieVal = encodeAdminCookieToken(fb.idToken, fb.refreshToken);
+        return jsonResponse(
+          { ok: true, email: fb.email },
+          200,
+          [
+            buildCookieString(
+              req,
+              url,
+              ADMIN_COOKIE,
+              cookieVal,
+              7 * 24 * 60 * 60
+            ),
+          ]
+        );
+      } catch {
+        return jsonResponse({ error: 'الإيميل أو كلمة السر غلط' }, 401);
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/admin/logout') {
+      return jsonResponse({ ok: true }, 200, [
+        buildCookieString(req, url, ADMIN_COOKIE, '', 0),
+      ]);
+    }
+
+    if (method === 'GET' && pathname === '/api/admin/me') {
+      const { admin, setCookies } = await resolveAdminSession(req, url, env, fbCfg);
+      if (!admin) {
+        return jsonResponse({ authenticated: false }, 200, setCookies);
+      }
+      return jsonResponse({ authenticated: true, email: admin.email }, 200, setCookies);
+    }
+
+    if (
+      pathname === '/admin-app.js' ||
+      pathname.startsWith('/api/admin/')
+    ) {
+      const { admin, setCookies } = await resolveAdminSession(req, url, env, fbCfg);
+      if (!admin) {
+        return jsonResponse(
+          {
+            error: 'يجب تسجيل الدخول كمسؤول لإتمام هذه العملية.',
+            code: 'ADMIN_UNAUTHENTICATED',
+          },
+          401,
+          setCookies
+        );
+      }
+
+      if (method === 'GET' && pathname === '/admin-app.js') {
+        return serveAsset(env, req, '/protected/admin-app.js', {
+          noStore: true,
+          setCookies,
+        });
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/bootstrap') {
+        try {
+          const raw = await fetchRawCatalog({
+            dbHost,
+            force: true,
+            dbSecret: env.FIREBASE_DB_SECRET || '',
+            serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+          });
+          const data = JSON.parse(JSON.stringify(raw.data || {}));
+          data.offers = data.offers || [];
+          const keys = new Set();
+          (data.p || []).forEach((p) => {
+            if (p[8]) keys.add(p[8]);
+          });
+          (data.offers || []).forEach((o) => {
+            if (o.i) keys.add(o.i);
+          });
+          if (data.cfg?.logo) keys.add(data.cfg.logo);
+          if (data.cfg?.fontBodyId) keys.add(data.cfg.fontBodyId);
+          if (data.cfg?.fontHeadId) keys.add(data.cfg.fontHeadId);
+
+          const images = {};
+          await Promise.all(
+            [...keys].map(async (k) => {
+              const v = await fetchImageAsset({
+                dbHost,
+                id: k,
+                dbSecret: env.FIREBASE_DB_SECRET || '',
+                serviceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+              });
+              if (v) images[k] = v;
+            })
+          );
+
+          return jsonResponse({ ts: raw.ts, data, images }, 200, setCookies);
+        } catch {
+          return jsonResponse(
+            { error: 'تعذر جلب بيانات المتجر من الخادم.' },
+            502,
+            setCookies
+          );
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/publish') {
+        const body = (await readJsonBody(req)) || {};
+        const data = body.data;
+        const pendingImages = body.pendingImages || {};
+        if (!data || typeof data !== 'object' || !Array.isArray(data.p)) {
+          return jsonResponse({ error: 'بيانات المتجر غير صالحة.' }, 400, setCookies);
+        }
+        try {
+          const ts = await publishCatalogToFirebase({
+            dbHost,
+            idToken: admin.idToken,
+            dataObj: data,
+            pendingImages,
+          });
+          return jsonResponse({ ok: true, ts }, 200, setCookies);
+        } catch (err) {
+          if (err?.status === 401) {
+            return jsonResponse(
+              { error: 'انتهت صلاحية جلسة الإدارة، سجل دخول مرة أخرى.' },
+              401,
+              [buildCookieString(req, url, ADMIN_COOKIE, '', 0)]
+            );
+          }
+          return jsonResponse(
+            { error: err?.message || 'تعذر النشر' },
+            502,
+            setCookies
+          );
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/ai/generate') {
+        const body = (await readJsonBody(req)) || {};
+        const prompt = String(body.prompt || '').trim();
+        const audioBase64 = body.audioBase64 ? String(body.audioBase64) : null;
+        const preferredModel = body.preferredModel ? String(body.preferredModel) : '';
+        const overrideKey = body.apiKey ? String(body.apiKey).trim() : '';
+
+        if (!prompt || prompt.length > 160000) {
+          return jsonResponse({ error: 'Invalid prompt' }, 400, setCookies);
+        }
+
+        try {
+          const apiKey =
+            overrideKey ||
+            (await getStoreGeminiKey({
+              dbHost,
+              envGeminiKey: env.GEMINI_API_KEY || '',
+            }));
+          if (!apiKey) return jsonResponse({ error: 'KEY' }, 400, setCookies);
+          const result = await callGemini({
+            apiKey,
+            prompt,
+            audioBase64,
+            preferredModel,
+          });
+          return jsonResponse(result, 200, setCookies);
+        } catch (err) {
+          const code = err?.message || 'AI_ERROR';
+          const status = code === 'LIMIT' ? 429 : code === 'KEY' ? 403 : 502;
+          return jsonResponse({ error: code }, status, setCookies);
+        }
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/users') {
+        try {
+          const users = await store.listUsers({ adminIdToken: admin.idToken });
+          const counts = {
+            all: users.length,
+            Pending: 0,
+            Approved: 0,
+            Rejected: 0,
+            Suspended: 0,
+          };
+          users.forEach((u) => {
+            if (counts[u.status] != null) counts[u.status] += 1;
+          });
+          return jsonResponse({ users, counts }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر تحميل الحسابات' }, 502, setCookies);
+        }
+      }
+
+      const userActionMatch = pathname.match(
+        /^\/api\/admin\/users\/([^/]+)\/(approve|activate|reject|suspend)$/
+      );
+      if (method === 'POST' && userActionMatch) {
+        const uid = decodeURIComponent(userActionMatch[1]);
+        const action = userActionMatch[2];
+        const statusMap = {
+          approve: 'Approved',
+          activate: 'Approved',
+          reject: 'Rejected',
+          suspend: 'Suspended',
+        };
+        const body = action === 'reject' ? (await readJsonBody(req)) || {} : {};
+        const reason = String(body.reason || '').trim().slice(0, 300);
+
+        try {
+          const updated = await store.updateUserStatus(
+            uid,
+            statusMap[action],
+            {
+              rejectionReason: reason || null,
+              reviewedBy: admin.email,
+            },
+            { adminIdToken: admin.idToken }
+          );
+          if (!updated) {
+            return jsonResponse({ error: 'المستخدم غير موجود.' }, 404, setCookies);
+          }
+          return jsonResponse(
+            { ok: true, user: store.sanitizeUser(updated) },
+            200,
+            setCookies
+          );
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر تنفيذ العملية' }, 502, setCookies);
+        }
+      }
+
+      const userDeleteMatch = pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+      if (method === 'DELETE' && userDeleteMatch) {
+        const uid = decodeURIComponent(userDeleteMatch[1]);
+        try {
+          const ok = await store.deleteUserById(uid, {
+            adminIdToken: admin.idToken,
+          });
+          if (!ok) {
+            return jsonResponse({ error: 'المستخدم غير موجود.' }, 404, setCookies);
+          }
+          return jsonResponse({ ok: true }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر حذف المستخدم' }, 502, setCookies);
+        }
+      }
+
+      return jsonResponse({ error: 'Not found' }, 404, setCookies);
+    }
+
+    // ==================== FALLBACK / CATCH-ALL PROTECTION ====================
+    if (pathname.startsWith('/api/')) {
+      return jsonResponse({ error: 'Not found' }, 404);
+    }
+
+    const check = await requireApprovedUser(req, url, store);
+    if (!check.ok) return check.response;
+    return serveAsset(env, req, '/index.html', { noStore: true });
+  },
+};

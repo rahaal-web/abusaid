@@ -1,0 +1,14 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "abu_auth": {
+      ".read": false,
+      ".write": false
+    },
+    "chips": {
+      ".read": false,
+      ".write": "auth != null"
+    }
+  }
+}

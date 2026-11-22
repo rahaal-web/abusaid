@@ -8,6 +8,7 @@ import {
   updCartSummary,
 } from './cart.js';
 import { clearCachedData, LOGO_FALLBACK, saveCachedData } from './data.js';
+import { initFirebaseAnalytics } from './firebase-client.js';
 import { bindOfferEvents, renderOffers } from './offers.js';
 import {
   $,
@@ -661,6 +662,7 @@ function bootstrap() {
   ref();
   checkSession();
   sync();
+  initFirebaseAnalytics();
 
   setTimeout(() => {
     if (state.syncing) {

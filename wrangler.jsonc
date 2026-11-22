@@ -1,0 +1,22 @@
+{
+  "$schema": "https://developers.google.com/schemas/config/wrangler-config.schema.json",
+  "name": "abusaid",
+  "main": "worker.js",
+  "compatibility_date": "2025-04-01",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "vars": {
+    "FIREBASE_PROJECT_ID": "abu-saied-a6b74",
+    "FIREBASE_DB_HOST": "abu-saied-a6b74-default-rtdb.firebaseio.com",
+    "FIREBASE_AUTH_DOMAIN": "abu-saied-a6b74.firebaseapp.com",
+    "FIREBASE_STORAGE_BUCKET": "abu-saied-a6b74.firebasestorage.app",
+    "FIREBASE_MESSAGING_SENDER_ID": "300635263769",
+    "FIREBASE_APP_ID": "1:300635263769:web:3190483c3ee276fa0cab88",
+    "FIREBASE_MEASUREMENT_ID": "G-CWD4LZGQE7"
+  }
+}
