@@ -950,17 +950,30 @@ export default {
       if (!check.ok) return check.response;
       const body = (await readJsonBody(req)) || {};
       try {
-        const rawCatalog = await fetchRawCatalog({
+        let rawCatalog = await fetchRawCatalog({
           dbHost,
           force: false,
           dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
           serviceAccountJson: getServiceAccountFromEnv(env),
         });
-        const built = await buildAuthoritativeOrder({
+        let built = await buildAuthoritativeOrder({
           body,
           user: check.user,
           catalogData: rawCatalog?.data,
         });
+        if (built.error) {
+          rawCatalog = await fetchRawCatalog({
+            dbHost,
+            force: true,
+            dbSecret: String(env.FIREBASE_DB_SECRET || '').trim(),
+            serviceAccountJson: getServiceAccountFromEnv(env),
+          });
+          built = await buildAuthoritativeOrder({
+            body,
+            user: check.user,
+            catalogData: rawCatalog?.data,
+          });
+        }
         if (built.error) {
           return jsonResponse({ error: built.error }, built.status || 400);
         }
@@ -1519,6 +1532,61 @@ export default {
           const cfgErr = handleRtdbConfigError(err);
           if (cfgErr) return cfgErr;
           return jsonResponse({ error: 'تعذر إزالة الجهاز.' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'DELETE' && pathname === '/api/admin/push/logs') {
+        try {
+          await store.clearPushLogs({
+            adminIdToken: admin.idToken,
+          });
+          safeAuditLog(
+            store,
+            {
+              action: 'push_logs_clear',
+              actorEmail: admin.email,
+              entityType: 'push',
+              entityId: 'all',
+              entityLabel: 'سجل الإشعارات',
+              details: 'مسح جميع سجلات الإشعارات من مركز الإشعارات',
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر مسح سجل الإشعارات.' }, 502, setCookies);
+        }
+      }
+
+      const pushLogDelMatch = pathname.match(/^\/api\/admin\/push\/logs\/([^/]+)$/);
+      if (method === 'DELETE' && pushLogDelMatch) {
+        const logId = decodeURIComponent(pushLogDelMatch[1]);
+        try {
+          const ok = await store.deletePushLogById(logId, {
+            adminIdToken: admin.idToken,
+          });
+          if (!ok) {
+            return jsonResponse({ error: 'سجل الإشعار غير موجود.' }, 404, setCookies);
+          }
+          safeAuditLog(
+            store,
+            {
+              action: 'push_log_delete',
+              actorEmail: admin.email,
+              entityType: 'push',
+              entityId: logId,
+              entityLabel: `سجل #${logId}`,
+              details: 'حذف سجل إشعار من مركز الإشعارات',
+            },
+            admin.idToken
+          );
+          return jsonResponse({ ok: true }, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر حذف سجل الإشعار.' }, 502, setCookies);
         }
       }
 

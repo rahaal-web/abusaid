@@ -880,7 +880,7 @@
       '<div class="toolbar-search"><input id="prodSearch" type="search" placeholder="ابحث باسم الصنف، العبوة، الحجم أو النكهة..." value="' +
       esc(q) +
       '"></div>' +
-      '<div style="min-width:155px"><select id="prodCatSel"><option value="all">كل الأقسام (' +
+      '<div class="toolbar-ctrl"><select id="prodCatSel"><option value="all">كل الأقسام (' +
       D.cats.length +
       ')</option>' +
       D.cats
@@ -889,14 +889,14 @@
         })
         .join('') +
       '</select></div>' +
-      '<div style="min-width:145px"><select id="prodStatusSel">' +
+      '<div class="toolbar-ctrl"><select id="prodStatusSel">' +
       '<option value="all"' + (prodStatusFilter === 'all' ? ' selected' : '') + '>كل الحالات</option>' +
       '<option value="active"' + (prodStatusFilter === 'active' ? ' selected' : '') + '>المتوفرة فقط</option>' +
       '<option value="hidden"' + (prodStatusFilter === 'hidden' ? ' selected' : '') + '>المخفية فقط</option>' +
       '<option value="discount"' + (prodStatusFilter === 'discount' ? ' selected' : '') + '>بها خصم</option>' +
       '<option value="noimg"' + (prodStatusFilter === 'noimg' ? ' selected' : '') + '>بدون صورة</option>' +
       '</select></div>' +
-      '<div style="min-width:150px"><select id="prodSortSel">' +
+      '<div class="toolbar-ctrl"><select id="prodSortSel">' +
       '<option value="order"' + (prodSort === 'order' ? ' selected' : '') + '>الترتيب الافتراضي</option>' +
       '<option value="price_asc"' + (prodSort === 'price_asc' ? ' selected' : '') + '>السعر: الأقل للأعلى</option>' +
       '<option value="price_desc"' + (prodSort === 'price_desc' ? ' selected' : '') + '>السعر: الأعلى للأقل</option>' +
@@ -1105,7 +1105,7 @@
           '<div class="row-thumb">' +
           (imgUrl ? '<img src="' + imgUrl + '" alt="">' : '🗂') +
           '</div>' +
-          '<div style="flex:1;min-width:140px"><input data-rn="' +
+          '<div class="cat-name-wrap"><input data-rn="' +
           i +
           '" value="' +
           esc(c) +
@@ -2000,7 +2000,7 @@
               var flTxt = Array.isArray(it.flavors)
                 ? it.flavors.map(function (f) { return f.name; }).join(' ')
                 : '';
-              return (it.name || '') + ' ' + flTxt;
+              return (it.name || '') + ' ' + (it.variant || '') + ' ' + flTxt;
             })
             .join(' ')
         : '';
@@ -2046,7 +2046,7 @@
               return (
                 '<div class="ord-line">' +
                 '<div class="ord-line-top"><b>' +
-                esc(it.name) +
+                esc(it.name + (it.variant ? ' · ' + it.variant : '')) +
                 '</b><span class="num">× ' +
                 Number(it.qty || 0) +
                 (isOffer ? '' : ' ' + esc(ord.unit || 'كرتونة')) +
@@ -2304,12 +2304,16 @@
         hdr +
         '<div class="toolbar"><div class="toolbar-search"><input id="pushLogQ" type="search" placeholder="ابحث في سجل الإشعارات..." value="' +
         esc(pushLogQuery) +
-        '"></div><div style="min-width:150px"><select id="pushLogSt">' +
+        '"></div><div class="toolbar-ctrl"><select id="pushLogSt">' +
         '<option value="all"' + (pushLogFilter === 'all' ? ' selected' : '') + '>كل الحالات</option>' +
         '<option value="sent"' + (pushLogFilter === 'sent' ? ' selected' : '') + '>تم الإرسال</option>' +
         '<option value="partial"' + (pushLogFilter === 'partial' ? ' selected' : '') + '>إرسال جزئي</option>' +
         '<option value="failed"' + (pushLogFilter === 'failed' ? ' selected' : '') + '>فشل</option>' +
-        '</select></div></div>' +
+        '</select></div>' +
+        (logsList.length
+          ? '<button class="btn btn-danger btn-sm" type="button" id="pushClearLogs">🗑 مسح كل السجل</button>'
+          : '') +
+        '</div>' +
         (!fLogs.length
           ? '<div class="emp">لا توجد إشعارات مطابقة في السجل.</div>'
           : '<div class="cards-grid">' +
@@ -2342,7 +2346,13 @@
                   (reasons.length
                     ? '<div class="alert alert-danger" style="margin:6px 0 0"><span>أسباب الفشل: ' + esc(reasons.join(' | ')) + '</span></div>'
                     : '') +
-                  '</article>'
+                  '<div class="uacts">' +
+                  '<button class="btn btn-danger btn-sm" type="button" data-del-plog="' +
+                  esc(lg.id) +
+                  '" data-plog-title="' +
+                  esc(lg.title || '') +
+                  '">🗑 حذف الإشعار</button>' +
+                  '</div></article>'
                 );
               })
               .join('') +
@@ -2490,6 +2500,69 @@
       render();
     } catch (e) {
       toast((e && e.message) || 'تعذر إزالة الجهاز');
+    }
+  }
+
+  async function deletePushLog(id, title) {
+    if (!id) return;
+    var ok = await askConfirm(
+      'هل تريد حذف هذا السجل من سجل الإشعارات' + (title ? ' («' + title + '»)' : '') + '؟',
+      '🗑 حذف السجل'
+    );
+    if (!ok) return;
+    try {
+      var res = await fetch('/api/admin/push/logs/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return;
+      }
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) throw new Error(data.error || 'تعذر حذف سجل الإشعار');
+      pushOverview.logs = (pushOverview.logs || []).filter(function (lg) {
+        return String(lg.id) !== String(id);
+      });
+      toast('تم حذف الإشعار من السجل ✅');
+      render();
+      loadPushOverview(true);
+      loadAuditLogs(true);
+    } catch (e) {
+      toast((e && e.message) || 'تعذر حذف سجل الإشعار');
+    }
+  }
+
+  async function clearAllPushLogs() {
+    var total = Array.isArray(pushOverview.logs) ? pushOverview.logs.length : 0;
+    if (!total) return;
+    var ok = await askConfirm(
+      'هل أنت متأكد من مسح جميع سجلات الإشعارات (' + total + ' سجل) نهائياً؟',
+      '🗑 مسح كل السجل'
+    );
+    if (!ok) return;
+    try {
+      var res = await fetch('/api/admin/push/logs', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return;
+      }
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) throw new Error(data.error || 'تعذر مسح سجل الإشعارات');
+      pushOverview.logs = [];
+      toast('تم مسح سجل الإشعارات بالكامل ✅');
+      render();
+      loadPushOverview(true);
+      loadAuditLogs(true);
+    } catch (e) {
+      toast((e && e.message) || 'تعذر مسح سجل الإشعارات');
     }
   }
 
@@ -3092,13 +3165,15 @@
     var aiLbl = AN();
     if ($('smbTxt')) $('smbTxt').textContent = aiLbl;
     if ($('sbAiLbl')) $('sbAiLbl').textContent = aiLbl;
-    if ($('sbStoreName')) $('sbStoreName').textContent = (D.cfg && D.cfg.brandName) || 'أبو سعيد';
+    var rawBrand = D.cfg && D.cfg.brandName != null ? String(D.cfg.brandName).trim() : '';
+    var displayBrand = !rawBrand || /^[\s._\-]+$/.test(rawBrand) ? 'أبو سعيد' : rawBrand;
+    if ($('sbStoreName')) $('sbStoreName').textContent = displayBrand;
     var sbl = $('sbLogo');
     if (sbl) {
       if (D.cfg && D.cfg.logo && IMG[D.cfg.logo]) {
         sbl.innerHTML = '<img src="' + esc(IMG[D.cfg.logo]) + '" alt="">';
       } else {
-        sbl.textContent = ((D.cfg && D.cfg.brandName) || 'أ').trim().charAt(0) || 'أ';
+        sbl.textContent = displayBrand.charAt(0) || 'أ';
       }
     }
 
@@ -4007,7 +4082,7 @@
       $('sbBackdrop').classList.add('on');
       return;
     }
-    if (t.id === 'sbBackdrop') { closeMobileDrawer(); return; }
+    if (t.id === 'sbBackdrop' || t.id === 'sbMobileClose') { closeMobileDrawer(); return; }
     if (t.id === 'sbCollapseBtn') {
       $('app').classList.toggle('sb-collapsed');
       try { localStorage.setItem('abu_sb_collapsed', $('app').classList.contains('sb-collapsed') ? '1' : '0'); } catch (z) {}
@@ -4120,6 +4195,8 @@
     if ((b = t.closest('[data-ptarget]'))) { pushForm.targetType = b.dataset.ptarget; render(); return; }
     if (t.id === 'pushImgRm') { pushForm.imageDataUrl = ''; render(); return; }
     if (t.id === 'pushSendBtn') { sendAdminPushNotification(); return; }
+    if (t.id === 'pushClearLogs') { clearAllPushLogs(); return; }
+    if ((b = t.closest('[data-del-plog]'))) { deletePushLog(b.dataset.delPlog, b.dataset.plogTitle); return; }
     if ((b = t.closest('[data-rm-dev]'))) { removePushDevice(b.dataset.rmDev); return; }
 
     // Media, Audit, Backups, Analytics, Settings, AI

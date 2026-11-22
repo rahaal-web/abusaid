@@ -45,6 +45,8 @@ function buildOrderItemsFromCart() {
     const p = state.P[g.i];
     const fl = FL(p);
     const n = pq(g.i);
+    const baseName = String(p?.[0] || '').trim();
+    const variant = String(p?.[10] || '').trim();
     const flavors = fl.length
       ? g.ks
           .map((k) => {
@@ -62,7 +64,8 @@ function buildOrderItemsFromCart() {
       : [];
     return {
       productIndex: g.i,
-      productName: pname(g.i),
+      productName: baseName || pname(g.i),
+      variant,
       qty: n,
       flavors,
     };
@@ -132,11 +135,14 @@ function renderOrdersBody() {
                 )
                 .join('')}</div>`
             : '';
+          const displayName = it.variant
+            ? `${it.name} · ${it.variant}`
+            : it.name;
 
           return `
             <div class="ord-item">
               <div class="ord-item-row">
-                <span class="ord-item-name">${esc(it.name)}</span>
+                <span class="ord-item-name">${esc(displayName)}</span>
                 <span class="ord-item-qty">× ${numAr(it.qty)} ${esc(
             isOffer ? '' : ord.unit || 'كرتونة'
           )}</span>
@@ -295,7 +301,11 @@ export async function recordWhatsAppOrder(options = {}) {
       return null;
     }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.order) return null;
+    if (!res.ok || !data.order) {
+      ordersState.lastPostKey = '';
+      showToast(data.error || 'تعذر حفظ الطلب في سجل طلباتك', 'warn');
+      return null;
+    }
 
     const exists = ordersState.orders.some((o) => o.id === data.order.id);
     if (!exists) {
@@ -309,8 +319,36 @@ export async function recordWhatsAppOrder(options = {}) {
     }
     return data.order;
   } catch {
+    ordersState.lastPostKey = '';
+    showToast('تعذر الاتصال بالخادم لتسجيل الطلب', 'warn');
     return null;
   }
+}
+
+function findProductForReorder(it) {
+  const wantedName = String(it?.name || '').trim();
+  const wantedVar = String(it?.variant || '').trim();
+  const idxNum = Number(it?.productIndex);
+  const cand = Number.isInteger(idxNum) ? state.P[idxNum] : null;
+  if (cand && String(cand[0] || '').trim() === wantedName) {
+    if (!wantedVar || String(cand[10] || '').trim() === wantedVar) {
+      return { pIdx: idxNum, prod: cand };
+    }
+  }
+  if (wantedVar) {
+    const vIdx = state.P.findIndex(
+      (p) =>
+        p &&
+        String(p[0] || '').trim() === wantedName &&
+        String(p[10] || '').trim() === wantedVar
+    );
+    if (vIdx >= 0) return { pIdx: vIdx, prod: state.P[vIdx] };
+  }
+  const fIdx = state.P.findIndex(
+    (p) => p && String(p[0] || '').trim() === wantedName
+  );
+  if (fIdx >= 0) return { pIdx: fIdx, prod: state.P[fIdx] };
+  return { pIdx: -1, prod: null };
 }
 
 function reorderIntoCart(orderId) {
@@ -321,14 +359,7 @@ function reorderIntoCart(orderId) {
   let skippedCount = 0;
 
   ord.items.forEach((it) => {
-    let pIdx = Number(it.productIndex);
-    let prod = state.P[pIdx];
-    if (!prod || String(prod[0] || '').trim() !== String(it.name || '').trim()) {
-      pIdx = state.P.findIndex(
-        (p) => p && String(p[0] || '').trim() === String(it.name || '').trim()
-      );
-      prod = pIdx >= 0 ? state.P[pIdx] : null;
-    }
+    const { pIdx, prod } = findProductForReorder(it);
     if (!prod || prod[7]) {
       skippedCount += 1;
       return;

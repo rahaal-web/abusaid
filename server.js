@@ -769,12 +769,20 @@ app.get('/api/orders', requireApprovedUser, async (req, res) => {
 
 app.post('/api/orders', requireApprovedUser, checkRateLimit, async (req, res) => {
   try {
-    const rawCatalog = await fetchRawCatalog(false);
-    const built = await buildAuthoritativeOrder({
+    let rawCatalog = await fetchRawCatalog(false);
+    let built = await buildAuthoritativeOrder({
       body: req.body || {},
       user: req.user,
       catalogData: rawCatalog?.data,
     });
+    if (built.error) {
+      rawCatalog = await fetchRawCatalog(true);
+      built = await buildAuthoritativeOrder({
+        body: req.body || {},
+        user: req.user,
+        catalogData: rawCatalog?.data,
+      });
+    }
     if (built.error) {
       return res.status(built.status || 400).json({ error: built.error });
     }
@@ -1271,6 +1279,57 @@ app.delete('/api/admin/push/devices/:id', requireAdmin, async (req, res) => {
     const cfgErr = handleRtdbConfigError(err, res);
     if (cfgErr) return cfgErr;
     return res.status(502).json({ error: 'تعذر إزالة الجهاز.' });
+  }
+});
+
+app.delete('/api/admin/push/logs', requireAdmin, async (req, res) => {
+  try {
+    await userStore.clearPushLogs({
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    safeAuditLog(
+      {
+        action: 'push_logs_clear',
+        actorEmail: req.adminSession.email,
+        entityType: 'push',
+        entityId: 'all',
+        entityLabel: 'سجل الإشعارات',
+        details: 'مسح جميع سجلات الإشعارات من مركز الإشعارات',
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر مسح سجل الإشعارات.' });
+  }
+});
+
+app.delete('/api/admin/push/logs/:id', requireAdmin, async (req, res) => {
+  try {
+    const ok = await userStore.deletePushLogById(req.params.id, {
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    if (!ok) {
+      return res.status(404).json({ error: 'سجل الإشعار غير موجود.' });
+    }
+    safeAuditLog(
+      {
+        action: 'push_log_delete',
+        actorEmail: req.adminSession.email,
+        entityType: 'push',
+        entityId: String(req.params.id),
+        entityLabel: `سجل #${req.params.id}`,
+        details: 'حذف سجل إشعار من مركز الإشعارات',
+      },
+      req.adminSession
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر حذف سجل الإشعار.' });
   }
 });
 
