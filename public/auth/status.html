@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>حالة الحساب – أبو سعيد لتجارة الجملة</title>
+  <meta name="description" content="متابعة حالة طلب تسجيل الحساب في متجر أبو سعيد.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Cairo:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="/js/pwa.js"></script>
+  <link rel="stylesheet" href="/styles/auth.css">
+</head>
+<body>
+  <header class="auth-topbar">
+    <div class="brand-chip">
+      <span class="brand-chip-logo">
+        <img id="brandLogo" alt="شعار أبو سعيد">
+      </span>
+      <span class="brand-chip-txt">
+        <strong>أبو سعيد</strong>
+        <small>جملة الشيبسي والسناكس</small>
+      </span>
+    </div>
+    <button id="themeToggle" class="theme-btn" type="button" aria-label="تبديل المظهر" aria-pressed="false">🌙</button>
+  </header>
+
+  <main class="auth-main">
+    <section class="auth-card status-box" id="statusBox" aria-live="polite">
+      <div id="statusIco" class="status-ico pending">⏳</div>
+      <span id="statusPill" class="status-pill pending">جاري التحقق من حالة الحساب...</span>
+      <h1 id="statusTitle" style="font-family:Lalezar,Cairo,sans-serif;font-weight:400;font-size:30px;margin:0 0 8px">
+        يرجى الانتظار
+      </h1>
+      <p id="statusDesc" style="margin:0;color:var(--mu);font-size:14.5px">
+        جاري التحقق من حالة حسابك لدى الإدارة...
+      </p>
+
+      <div id="rejectionBox" class="alert alert-err" style="margin-top:14px;text-align:start" hidden></div>
+
+      <div id="statusMeta" class="status-meta" hidden>
+        <div><span>الاسم</span><b id="stName">—</b></div>
+        <div><span>رقم الهاتف</span><b id="stPhone" dir="ltr">—</b></div>
+        <div id="stShopRow" hidden><span>اسم المحل</span><b id="stShop">—</b></div>
+      </div>
+
+      <div class="status-actions">
+        <a id="enterStoreBtn" href="/" class="btn btn-primary" hidden>دخول إلى المتجر 🛒</a>
+        <button id="refreshStatusBtn" type="button" class="btn btn-blue" hidden>🔄 تحديث حالة الطلب</button>
+        <button id="switchAccountBtn" type="button" class="btn btn-secondary">تسجيل الدخول بحساب آخر</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="auth-footer-credit">
+    تصميم وتطوير <a href="https://wa.me/201060354779" target="_blank" rel="noopener noreferrer">احمد رحال</a>
+  </footer>
+
+  <script type="module" src="/js/auth.js"></script>
+</body>
+</html>

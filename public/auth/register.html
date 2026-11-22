@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>إنشاء حساب جديد – أبو سعيد لتجارة الجملة</title>
+  <meta name="description" content="تقديم طلب فتح حساب عميل جملة في متجر أبو سعيد.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Cairo:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="/js/pwa.js"></script>
+  <link rel="stylesheet" href="/styles/auth.css">
+</head>
+<body>
+  <header class="auth-topbar">
+    <a class="brand-chip" href="/login" aria-label="العودة لتسجيل الدخول">
+      <span class="brand-chip-logo">
+        <img id="brandLogo" alt="شعار أبو سعيد">
+      </span>
+      <span class="brand-chip-txt">
+        <strong>أبو سعيد</strong>
+        <small>جملة الشيبسي والسناكس</small>
+      </span>
+    </a>
+    <button id="themeToggle" class="theme-btn" type="button" aria-label="تبديل المظهر" aria-pressed="false">🌙</button>
+  </header>
+
+  <main class="auth-main">
+    <section class="auth-card" aria-labelledby="regTitle">
+      <div class="auth-head">
+        <span class="auth-badge">📝 طلب فتح حساب جملة</span>
+        <h1 id="regTitle">إنشاء حساب جديد</h1>
+        <p>سجّل بياناتك برقم الهاتف فقط بدون الحاجة لبريد إلكتروني</p>
+      </div>
+
+      <div id="regAlert" class="alert" role="alert" hidden></div>
+
+      <form id="registerForm" novalidate>
+        <div class="field">
+          <label for="fullName">الاسم بالكامل *</label>
+          <input
+            id="fullName"
+            name="fullName"
+            type="text"
+            autocomplete="name"
+            placeholder="مثال: محمد محمود عبد الله"
+            required
+          >
+        </div>
+
+        <div class="field">
+          <label for="phone">رقم الهاتف *</label>
+          <input
+            id="phone"
+            name="phone"
+            type="tel"
+            dir="ltr"
+            inputmode="tel"
+            autocomplete="tel"
+            placeholder="01012345678"
+            required
+          >
+          <div class="field-hint">يُستخدم رقم الهاتف لتسجيل الدخول والتواصل بخصوص طلبات الجملة.</div>
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label for="password">كلمة المرور *</label>
+            <div class="input-wrap">
+              <input
+                id="password"
+                name="password"
+                type="password"
+                dir="ltr"
+                class="has-eye"
+                autocomplete="new-password"
+                placeholder="٦ أحرف على الأقل"
+                required
+              >
+              <button type="button" class="eye-btn" data-eye="password" aria-label="إظهار أو إخفاء كلمة المرور">👁️</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="confirmPassword">تأكيد كلمة المرور *</label>
+            <div class="input-wrap">
+              <input
+                id="confirmPassword"
+                name="confirmPassword"
+                type="password"
+                dir="ltr"
+                class="has-eye"
+                autocomplete="new-password"
+                placeholder="أعد كتابة كلمة المرور"
+                required
+              >
+              <button type="button" class="eye-btn" data-eye="confirmPassword" aria-label="إظهار أو إخفاء تأكيد كلمة المرور">👁️</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="opt-section">
+          <p class="opt-section-title">🏪 بيانات إضافية لنشاط الجملة (اختياري بالكامل)</p>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="shopName">اسم المحل / السوبر ماركت <span class="opt">(اختياري)</span></label>
+              <input id="shopName" name="shopName" type="text" placeholder="مثال: ماركت البركة">
+            </div>
+            <div class="field">
+              <label for="address">المنطقة / العنوان <span class="opt">(اختياري)</span></label>
+              <input id="address" name="address" type="text" placeholder="مثال: شبرا - القاهرة">
+            </div>
+          </div>
+
+          <div class="field" style="margin-bottom:0">
+            <label for="email">البريد الإلكتروني <span class="opt">(اختياري — ليس مطلوباً)</span></label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              dir="ltr"
+              autocomplete="email"
+              placeholder="name@example.com (اختياري)"
+            >
+          </div>
+        </div>
+
+        <div class="info-note">
+          ⏳ <strong>ملاحظة:</strong> يتم إنشاء الحساب بحالة <b>قيد المراجعة (Pending)</b> ولن يتم تفعيله إلا بعد موافقة الإدارة.
+        </div>
+
+        <button id="regBtn" type="submit" class="btn btn-blue">
+          إرسال طلب إنشاء الحساب ✅
+        </button>
+      </form>
+
+      <div class="auth-foot">
+        لديك حساب بالفعل؟
+        <a href="/login">تسجيل الدخول</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="auth-footer-credit">
+    تصميم وتطوير <a href="https://wa.me/201060354779" target="_blank" rel="noopener noreferrer">احمد رحال</a>
+  </footer>
+
+  <script type="module" src="/js/auth.js"></script>
+</body>
+</html>

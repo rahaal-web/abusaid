@@ -358,6 +358,39 @@ img {
   color: var(--green-dark);
 }
 
+.hdr-user-pill {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  max-width: 140px;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 800;
+  box-shadow: var(--shadow-sm);
+}
+
+.hdr-user-pill span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 900px) {
+  .hdr-user-pill {
+    display: inline-flex;
+  }
+}
+
+.hdr-logout-btn:hover {
+  background: var(--red);
+  color: #fff;
+}
+
 @keyframes bumpAnim {
   0% { transform: scale(1); }
   40% { transform: scale(1.08); }

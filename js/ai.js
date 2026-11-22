@@ -395,90 +395,52 @@ function rlocal(text) {
   return { items, unk, soldOutHits };
 }
 
-async function rGem(key, prompt) {
-  const B = 'https://generativelanguage.googleapis.com/v1beta/';
-  const H = { 'Content-Type': 'application/json', 'x-goog-api-key': key };
-  const tried = {};
-
-  async function one(m) {
-    tried[m] = 1;
-    const ac = new AbortController();
-    const tm = setTimeout(() => ac.abort(), 18000);
+function handleAiAuthCheck(status, data) {
+  if (status === 401 || data?.code === 'UNAUTHENTICATED') {
     try {
-      const r = await fetch(B + 'models/' + m + ':generateContent', {
-        method: 'POST',
-        headers: H,
-        signal: ac.signal,
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.15, responseMimeType: 'application/json' },
-        }),
-      });
-      if (r.ok) {
-        const d = await r.json();
-        const c = d.candidates && d.candidates[0];
-        const t =
-          c && c.content && c.content.parts
-            ? c.content.parts.map((p) => p.text || '').join('')
-            : '';
-        if (t) {
-          try {
-            localStorage.setItem('rai_m', m);
-          } catch (z) {}
-          return t;
-        }
-        return null;
-      }
-      if (r.status === 429 || r.status === 403) throw new Error('STOP');
-      let b = '';
-      try {
-        b = await r.text();
-      } catch (z) {}
-      if (/API key|API_KEY/i.test(b)) throw new Error('STOP');
-      return null;
-    } finally {
-      clearTimeout(tm);
-    }
+      localStorage.removeItem('abu_catalog_cache_v1');
+    } catch {}
+    window.location.replace('/login?reason=expired');
+    throw new Error('AUTH');
   }
+  if (status === 403 && data?.code && String(data.code).startsWith('ACCOUNT_')) {
+    try {
+      localStorage.removeItem('abu_catalog_cache_v1');
+    } catch {}
+    window.location.replace('/account-status');
+    throw new Error('AUTH');
+  }
+}
 
-  const first = [];
+async function rGem(prompt) {
+  let preferredModel = '';
   try {
-    const sv = localStorage.getItem('rai_m');
-    if (sv) first.push(sv);
-  } catch (z) {}
-  first.push(
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-flash-latest',
-    'gemini-flash-lite-latest'
-  );
-
-  for (let i = 0; i < first.length; i++) {
-    if (tried[first[i]]) continue;
-    const t = await one(first[i]);
-    if (t) return t;
-  }
-
-  const lr = await fetch(B + 'models?pageSize=200', { headers: H });
-  if (lr.ok) {
-    const ld = await lr.json();
-    const ns = (ld.models || [])
-      .filter(
-        (m) =>
-          (m.supportedGenerationMethods || []).indexOf('generateContent') > -1 &&
-          /flash/i.test(m.name) &&
-          !/image|tts|live|audio|embed|exp|robotics|computer/i.test(m.name)
-      )
-      .map((m) => m.name.replace('models/', ''))
-      .sort((a, b) => (/2\.5/.test(b) ? 1 : 0) - (/2\.5/.test(a) ? 1 : 0));
-
-    for (let i = 0; i < ns.length && i < 4; i++) {
-      if (tried[ns[i]]) continue;
-      const t = await one(ns[i]);
-      if (t) return t;
+    preferredModel = localStorage.getItem('rai_m') || '';
+  } catch {}
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 22000);
+  try {
+    const r = await fetch('/api/ai/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      signal: ac.signal,
+      body: JSON.stringify({ prompt, preferredModel }),
+    });
+    const d = await r.json().catch(() => ({}));
+    handleAiAuthCheck(r.status, d);
+    if (r.ok && d.text) {
+      if (d.model) {
+        try {
+          localStorage.setItem('rai_m', d.model);
+        } catch {}
+      }
+      return d.text;
     }
+    throw new Error(d.error || 'NOMODEL');
+  } finally {
+    clearTimeout(tm);
   }
-  throw new Error('NOMODEL');
 }
 
 function rCat() {
@@ -549,7 +511,7 @@ function chFix(L) {
   return L.filter((o) => !(o.f < 0 && has[o.i]));
 }
 
-async function rAI(key, text) {
+async function rAI(text) {
   const pr =
     'أنت مساعد دقيق لاستلام طلبات متجر جملة. العميل كتب أو قال طلبه بالعامية المصرية (ممكن يكون فيه أخطاء إملائية أو أخطاء من التعرف على الصوت). طابق كل صنف في كلامه مع الكتالوج بدقة واستخرج الكمية.\n' +
     'الكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|القسم|النكهات بصيغة رقم=اسم):\n' +
@@ -564,7 +526,7 @@ async function rAI(key, text) {
     '- ماتخلطش بين نكهة وصنف: كلمة بعد اسم الصنف غالبًا نكهته لو موجودة في نكهات الصنف.\n' +
     '- ماتخترعش أصناف أو نكهات مش في الكتالوج، وحط أي كلام مش لاقي له صنف في unknown بنصه.\nطلب العميل:\n' +
     text;
-  const raw = await rGem(key, pr);
+  const raw = await rGem(pr);
   const j = JSON.parse(raw.replace(/```json|```/g, '').trim());
   const items = rNorm(j);
   return { items, unk: (j.unknown || []).map(String) };
@@ -686,16 +648,11 @@ function vWav(f, sr) {
   return btoa(b);
 }
 
-async function gAud(key, b64) {
-  const B = 'https://generativelanguage.googleapis.com/v1beta/';
-  const H = { 'Content-Type': 'application/json', 'x-goog-api-key': key };
-  const ms = [];
-  let sv = '';
+async function gAud(b64) {
+  let preferredModel = '';
   try {
-    sv = localStorage.getItem('rai_m') || '';
-  } catch (z) {}
-  if (sv) ms.push(sv);
-  ms.push('gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-flash-lite-latest');
+    preferredModel = localStorage.getItem('rai_m') || '';
+  } catch {}
   const vc = vCat();
   const pr =
     'اكتب بالظبط الكلام المنطوق في المقطع الصوتي ده (بالعامية المصرية، وموضوعه طلب أصناف وكميات من متجر جملة) بإملاء صحيح. الأرقام بالإنجليزية. ماتضيفش أي شرح أو علامات اقتباس ولا تترجم. لو مفيش كلام مفهوم ارجع نص فاضي. العميل بيقول مثلاً: «عايز كرتونة شيبسي وكرتونة دوريتوس بطعم الشطة»، وكلمة «طعم» أو «بطعم» بتيجي قبل النكهة. لو سمعت كلمة قريبة في النطق من اسم صنف أو نكهة من القوايم دي اكتبها بالاسم الصح. أسماء الأصناف: ' +
@@ -703,43 +660,33 @@ async function gAud(key, b64) {
     ' والنكهات: ' +
     JSON.stringify(vc.f);
 
-  for (let i = 0; i < ms.length; i++) {
-    const m = ms[i];
-    const ac = new AbortController();
-    const tm = setTimeout(() => ac.abort(), 25000);
-    try {
-      const r = await fetch(B + 'models/' + m + ':generateContent', {
-        method: 'POST',
-        headers: H,
-        signal: ac.signal,
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: pr }, { inline_data: { mime_type: 'audio/wav', data: b64 } }] }],
-          generationConfig: { temperature: 0 },
-        }),
-      });
-      if (r.ok) {
-        const d = await r.json();
-        const c = d.candidates && d.candidates[0];
-        const t =
-          c && c.content && c.content.parts
-            ? c.content.parts.map((p) => p.text || '').join('')
-            : '';
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 28000);
+  try {
+    const r = await fetch('/api/ai/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      signal: ac.signal,
+      body: JSON.stringify({ prompt: pr, audioBase64: b64, preferredModel }),
+    });
+    const d = await r.json().catch(() => ({}));
+    handleAiAuthCheck(r.status, d);
+    if (r.ok) {
+      if (d.model) {
         try {
-          localStorage.setItem('rai_m', m);
-        } catch (z) {}
-        return t.trim().replace(/^["«»“”]+|["«»“”]+$/g, '').trim();
+          localStorage.setItem('rai_m', d.model);
+        } catch {}
       }
-      if (r.status === 429) throw new Error('LIMIT');
-      let bt = '';
-      try {
-        bt = await r.text();
-      } catch (z) {}
-      if (r.status === 403 || /API key|API_KEY/i.test(bt)) throw new Error('KEY');
-    } finally {
-      clearTimeout(tm);
+      return String(d.text || '')
+        .trim()
+        .replace(/^["«»“”]+|["«»“”]+$/g, '')
+        .trim();
     }
+    throw new Error(d.error || 'NOMODEL');
+  } finally {
+    clearTimeout(tm);
   }
-  throw new Error('NOMODEL');
 }
 
 function vAIrender() {
@@ -801,7 +748,7 @@ function vRelease() {
   } catch (z) {}
 }
 
-function vSend(f, sr, key, sid) {
+function vSend(f, sr, sid) {
   const idx = VSL.length;
   VSL.push(null);
   VPEND++;
@@ -814,7 +761,7 @@ function vSend(f, sr, key, sid) {
     VPEND--;
     return;
   }
-  gAud(key, b64)
+  gAud(b64)
     .then((t) => {
       if (sid !== VSID) return;
       VSL[idx] = t;
@@ -831,7 +778,7 @@ function vSend(f, sr, key, sid) {
     });
 }
 
-async function vAI(key) {
+async function vAI() {
   const sid = ++VSID;
   const ta = $('rt');
   if (!ta) return;
@@ -871,7 +818,6 @@ async function vAI(key) {
       noise: 0.004,
       t0: ac.currentTime + 0.3,
       stopping: false,
-      key,
       sid,
       sr,
     };
@@ -891,7 +837,7 @@ async function vAI(key) {
         f.set(c, o);
         o += c.length;
       });
-      vSend(f, sr, key, sid);
+      vSend(f, sr, sid);
     };
     pr.onaudioprocess = (e) => {
       if (!VST || VST !== S || S.stopping) return;
@@ -979,7 +925,7 @@ function vStopAI(graceful) {
 
 async function vPolish() {
   const ta = $('rt');
-  if (!ta || !state.CFG || !state.CFG.gk || state.CFG.aiMode === 'local') return;
+  if (!ta || !state.CFG || !state.CFG.hasAiKey || state.CFG.aiMode === 'local') return;
   const tx = ta.value.trim();
   if (!tx) return;
   VPOL = true;
@@ -994,7 +940,7 @@ async function vPolish() {
       JSON.stringify(vc.f) +
       '\nأرجع JSON فقط بالشكل {"text":""}\nالنص:\n' +
       tx;
-    const raw = await rGem(state.CFG.gk, pr);
+    const raw = await rGem(pr);
     const j = JSON.parse(raw.replace(/```json|```/g, '').trim());
     const out = String(j.text || '').trim();
     const nl = (x) => x.split(/\n+/).filter((q) => q.trim()).length;
@@ -1097,7 +1043,7 @@ function vCanAI() {
   const AC = window.AudioContext || window.webkitAudioContext;
   return !!(
     state.CFG &&
-    state.CFG.gk &&
+    state.CFG.hasAiKey &&
     state.CFG.aiMode !== 'local' &&
     navigator.mediaDevices &&
     navigator.mediaDevices.getUserMedia &&
@@ -1119,7 +1065,7 @@ function vStart() {
   vUI(true);
   if (canAI) {
     VENG = 'ai';
-    vAI(state.CFG.gk);
+    vAI();
   } else {
     VENG = 'sr';
     vRun();
@@ -1961,9 +1907,9 @@ async function rGo() {
     b.textContent = '⏳ بحلل طلبك...';
   }
   let res = null;
-  if (state.CFG && state.CFG.gk && state.CFG.aiMode !== 'local') {
+  if (state.CFG && state.CFG.hasAiKey && state.CFG.aiMode !== 'local') {
     try {
-      res = await rAI(state.CFG.gk, t);
+      res = await rAI(t);
     } catch (e) {
       res = null;
     }
@@ -2004,11 +1950,11 @@ async function chSend() {
   CH.busy = 1;
   chRender();
 
-  const useGemini = !!(state.CFG && state.CFG.gk && state.CFG.aiMode !== 'local');
+  const useGemini = !!(state.CFG && state.CFG.hasAiKey && state.CFG.aiMode !== 'local');
   let ok = false;
   if (useGemini) {
     try {
-      const raw = await rGem(state.CFG.gk, chPrompt());
+      const raw = await rGem(chPrompt());
       let j = JSON.parse(raw.replace(/```json|```/g, '').trim());
       if (Array.isArray(j)) j = { items: j };
       const L = rNorm(j);

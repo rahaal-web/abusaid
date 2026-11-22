@@ -7,7 +7,7 @@ import {
   openFlavorModal,
   updCartSummary,
 } from './cart.js';
-import { DBU, LOGO_FALLBACK, saveCachedData } from './data.js';
+import { clearCachedData, LOGO_FALLBACK, saveCachedData } from './data.js';
 import { bindOfferEvents, renderOffers } from './offers.js';
 import {
   $,
@@ -222,13 +222,30 @@ function applyCustomColors() {
   }
 }
 
+function handleAuthResponse(res) {
+  if (res.status === 401) {
+    clearCachedData();
+    window.location.replace('/login?reason=expired');
+    return false;
+  }
+  if (res.status === 403) {
+    clearCachedData();
+    window.location.replace('/account-status');
+    return false;
+  }
+  return true;
+}
+
 function loadFontAssets() {
   const C = state.CFG || {};
   [C.fontBodyId, C.fontHeadId].filter(Boolean).forEach((k) => {
     if (state.IMGS[k] || state.IMGQ[k]) return;
     state.IMGQ[k] = 1;
-    fetch('https://' + DBU + '/chips/img/' + encodeURIComponent(k) + '.json')
-      .then((r) => r.json())
+    fetch('/api/img/' + encodeURIComponent(k), { credentials: 'same-origin' })
+      .then((r) => {
+        if (!handleAuthResponse(r)) return null;
+        return r.json();
+      })
       .then((v) => {
         delete state.IMGQ[k];
         if (v) {
@@ -390,8 +407,11 @@ function logoLoad() {
   const k = state.CFG && state.CFG.logo;
   if (!k || state.IMGS[k] || state.IMGQ[k]) return;
   state.IMGQ[k] = 1;
-  fetch('https://' + DBU + '/chips/img/' + encodeURIComponent(k) + '.json')
-    .then((r) => r.json())
+  fetch('/api/img/' + encodeURIComponent(k), { credentials: 'same-origin' })
+    .then((r) => {
+      if (!handleAuthResponse(r)) return null;
+      return r.json();
+    })
     .then((v) => {
       delete state.IMGQ[k];
       if (v) {
@@ -430,8 +450,11 @@ function loadImgs() {
 
   need.forEach((k) => {
     state.IMGQ[k] = 1;
-    fetch('https://' + DBU + '/chips/img/' + encodeURIComponent(k) + '.json')
-      .then((r) => r.json())
+    fetch('/api/img/' + encodeURIComponent(k), { credentials: 'same-origin' })
+      .then((r) => {
+        if (!handleAuthResponse(r)) return null;
+        return r.json();
+      })
       .then((v) => {
         if (v) state.IMGS[k] = v;
       })
@@ -465,12 +488,35 @@ function ref() {
   observeReveals();
 }
 
+function checkSession() {
+  fetch('/api/auth/me', { credentials: 'same-origin' })
+    .then((r) => {
+      if (!handleAuthResponse(r)) return null;
+      return r.json();
+    })
+    .then((d) => {
+      if (!d || !d.user) return;
+      state.user = d.user;
+      const badge = $('userNameBadge');
+      const wrap = $('userBadgeWrap');
+      if (badge && wrap) {
+        badge.textContent = d.user.fullName || d.user.phone || '';
+        wrap.hidden = false;
+      }
+    })
+    .catch(() => {});
+}
+
 function sync() {
-  fetch('https://' + DBU + '/chips/data.json')
-    .then((r) => r.json())
+  fetch('/api/catalog', { credentials: 'same-origin' })
+    .then((r) => {
+      if (!handleAuthResponse(r)) return null;
+      return r.json();
+    })
     .then((v) => {
+      if (!v) return;
       state.syncing = false;
-      if (!v || !v.json || v.ts === state.ct) {
+      if (!v.json || v.ts === state.ct) {
         renderGrid();
         return;
       }
@@ -578,8 +624,26 @@ function bindGlobalEvents() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) vStop(false);
-    else sync();
+    else {
+      checkSession();
+      sync();
+    }
   });
+
+  const logoutBtn = $('logoutBtn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      logoutBtn.disabled = true;
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'same-origin',
+        });
+      } catch {}
+      clearCachedData();
+      window.location.replace('/login?loggedOut=1');
+    });
+  }
 }
 
 function bootstrap() {
@@ -595,6 +659,7 @@ function bootstrap() {
   bindGlobalEvents();
 
   ref();
+  checkSession();
   sync();
 
   setTimeout(() => {
@@ -602,8 +667,9 @@ function bootstrap() {
       state.syncing = false;
       renderGrid();
     }
-  }, 1100);
+  }, 1500);
 
+  setInterval(checkSession, 15000);
   setInterval(sync, 45000);
 }
 
