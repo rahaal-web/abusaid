@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   applyValidatedAdminOps,
+  buildOneShotCustomerDraft,
   buildStoreKB,
   checkProductDuplicates,
   computeDraftTotals,
@@ -662,6 +663,357 @@ async function runCustomerSuite() {
       ]
     );
   });
+
+  // C20: Mandatory Case 1 + 5-item repeated order: never merges distinct items, never drops items, never guesses جاكودار->جاجوار, accumulates شيبسي=2
+  await runCase('Customer AI', 'C20: Independent extraction, repetition accumulation, unknown reporting & multi-turn queue (5-item order)', () => {
+    const richCat = {
+      cats: ['شيبسي', 'سناكس', 'حلويات', 'مشروبات'],
+      cfg: { unit: 'كرتونة', brandName: 'أبو سعيد' },
+      p: [
+        ['شيبسي', 'شيبسي', 'كرتونة 24 كيس', 110, '#1', '#2', '🥔', 0, '', [['ملح وخل', 0], ['جبنة متبلة', 0]], 'صغير', 0],
+        ['شيبسي', 'شيبسي', 'كرتونة 12 كيس', 185, '#1', '#2', '🥔', 0, '', [['ملح وخل', 0], ['طماطم', 0]], 'عائلي', 0],
+        ['دوريتوس', 'سناكس', 'كرتونة 20 كيس', 120, '#1', '#2', '🔺', 0, '', [['جبنة', 0], ['فلفل حلو', 0]], '', 0],
+        ['جاجوار', 'سناكس', 'كرتونة 24 كيس', 130, '#1', '#2', '🐆', 0, '', [['جبنة', 0], ['شطة', 0]], '', 0],
+        ['مياه غازية', 'مشروبات', 'كرتونة 24 كانز', 145, '#1', '#2', '🥤', 0, '', [], '', 0],
+      ],
+      offers: [],
+    };
+
+    // Part A: Exact 3-item prompt from requirements
+    const oneShotA = buildOneShotCustomerDraft({
+      text: 'عايز كرتونة شيبسي وكرتونة جاكودار و3 كراتين دوريتوس',
+      catalogData: richCat,
+    });
+    assert.ok(oneShotA.unk.some((u) => /جاكودار/.test(u)), 'جاكودار must appear in unk, never guessed as جاجوار');
+    assert.equal(oneShotA.items.some((x) => x.i === 3), false, 'Must NEVER pick جاجوار for جاكودار');
+    assert.equal(oneShotA.items.find((x) => x.i === 0)?.q, 1);
+    assert.equal(oneShotA.items.find((x) => x.i === 0)?.amb, true);
+    assert.equal(oneShotA.items.find((x) => x.i === 2)?.q, 3);
+
+    // Part B: 5-item prompt with repeated شيبسي
+    const msg5 = 'عايز كرتونة شيبسي وكرتونة شيبسي وكرتونة جاكودار وكرتونة مياه غازية و3 كراتين دوريتوس';
+    const oneShotB = buildOneShotCustomerDraft({ text: msg5, catalogData: richCat });
+    assert.ok(oneShotB.unk.some((u) => /جاكودار/.test(u)));
+    assert.equal(oneShotB.items.some((x) => x.i === 3), false, 'جاجوار must never be guessed for جاكودار');
+    assert.equal(oneShotB.items.find((x) => x.i === 0)?.q, 2, 'Repeated شيبسي accumulates to 2');
+    assert.equal(oneShotB.items.find((x) => x.i === 4)?.q, 1, 'مياه غازية must have q=1');
+    assert.equal(oneShotB.items.find((x) => x.i === 2)?.q, 3, 'دوريتوس must keep q=3');
+
+    // Chat multi-turn queue flow on msg5
+    const t1 = processCustomerTurn({ text: msg5, catalogData: richCat, currentDraft: [] });
+    assert.equal(t1.draft.length, 1);
+    assert.equal(t1.draft[0].i, 4);
+    assert.equal(t1.draft[0].q, 1);
+    assert.match(t1.reply, /جاكودار/, 'Reply must explicitly report unrecognized جاكودار');
+    assert.equal(t1.nextState.pendingClarification?.type, 'disambiguate_product');
+    assert.equal(t1.nextState.pendingClarification?.explicitQty, 2, 'Repeated شيبسي accumulates qty=2');
+    assert.equal(t1.nextState.pendingQueue.length, 1);
+    assert.equal(t1.nextState.pendingQueue[0].prodIdx, 2);
+    assert.equal(t1.nextState.pendingQueue[0].explicitQty, 3);
+
+    const t2 = processCustomerTurn({ text: 'صغير', catalogData: richCat, currentDraft: t1.draft, convState: t1.nextState });
+    assert.equal(t2.nextState.pendingClarification?.type, 'flavor');
+    assert.equal(t2.nextState.pendingClarification?.prodIdx, 0);
+    assert.equal(t2.nextState.pendingClarification?.explicitQty, 2);
+
+    const t3 = processCustomerTurn({ text: 'ملح وخل', catalogData: richCat, currentDraft: t2.draft, convState: t2.nextState });
+    assert.equal(t3.draft.find((x) => x.i === 0 && x.f === 0)?.q, 2);
+    assert.equal(t3.nextState.pendingClarification?.type, 'flavor', 'Queue must advance to دوريتوس flavor');
+    assert.equal(t3.nextState.pendingClarification?.prodIdx, 2);
+    assert.equal(t3.nextState.pendingClarification?.explicitQty, 3);
+
+    const t4 = processCustomerTurn({ text: 'جبنة', catalogData: richCat, currentDraft: t3.draft, convState: t3.nextState });
+    assert.equal(t4.nextState.pendingClarification, null);
+    assert.equal(t4.draft.length, 3);
+    assert.equal(t4.draft.find((x) => x.i === 4)?.q, 1);
+    assert.equal(t4.draft.find((x) => x.i === 0 && x.f === 0)?.q, 2);
+    assert.equal(t4.draft.find((x) => x.i === 2 && x.f === 0)?.q, 3);
+  });
+
+  // C21: Mandatory Case 2: Attached conjunctions ("ودوريتوس وجاكودار") + disclaimer ("بس مش فاكر الأحجام")
+  await runCase('Customer AI', 'C21: Attached conjunctions & size disclaimer extract all 3 items without dropping or guessing', () => {
+    const text = 'عايز شيبسي ودوريتوس وجاكودار، بس مش فاكر الأحجام';
+    const oneShot = buildOneShotCustomerDraft({ text, catalogData: catCartonData });
+    assert.equal(oneShot.items.some((x) => x.i === 0 && x.amb), true, 'شيبسي extracted as ambiguous');
+    assert.equal(oneShot.items.some((x) => x.i === 2), true, 'دوريتوس extracted independently');
+    assert.equal(oneShot.items.some((x) => x.i === 3), false, 'جاجوار must NOT be guessed for جاكودار');
+    assert.ok(oneShot.unk.some((u) => /جاكودار/.test(u)), 'جاكودار reported as unknown');
+    assert.equal(oneShot.unk.some((u) => /الاحجام|مش فاكر/.test(u)), false, 'Size disclaimer must not be mislabeled as unknown product');
+
+    const chat = processCustomerTurn({ text, catalogData: catCartonData, currentDraft: [] });
+    assert.match(chat.reply, /جاكودار/);
+    assert.equal(chat.nextState.pendingClarification?.type, 'disambiguate_product');
+    assert.ok(chat.nextState.pendingQueue.some((t) => t.prodIdx === 2), 'دوريتوس stays queued');
+  });
+
+  // C22: Mandatory Case 3: "هاتلي 2 دوريتوس وواحد مياه غازية"
+  await runCase('Customer AI', 'C22: "هاتلي 2 دوريتوس وواحد مياه غازية" binds exact independent quantities 2 & 1', () => {
+    const richCat = {
+      cats: ['سناكس', 'مشروبات'],
+      cfg: { unit: 'كرتونة', brandName: 'أبو سعيد' },
+      p: [
+        ['دوريتوس', 'سناكس', 'كرتونة 20 كيس', 120, '#1', '#2', '🔺', 0, '', [], '', 0],
+        ['مياه غازية', 'مشروبات', 'كرتونة 24 كانز', 145, '#1', '#2', '🥤', 0, '', [], '', 0],
+      ],
+      offers: [],
+    };
+    const res = processCustomerTurn({
+      text: 'هاتلي 2 دوريتوس وواحد مياه غازية',
+      catalogData: richCat,
+      currentDraft: [],
+    });
+    assert.equal(res.draft.length, 2);
+    assert.equal(res.draft.find((x) => x.i === 0)?.q, 2);
+    assert.equal(res.draft.find((x) => x.i === 1)?.q, 1);
+  });
+
+  // C23: Mandatory Case 4: Fractional quantities ("عايز نصف كرتونة شيبسي و2 دوريتوس", "كرتونة ونص", "ربع")
+  await runCase('Customer AI', 'C23: Fractional quantities (نصف كرتونة / 0.5 / ربع / كرتونة ونص) preserved in draft, queue & totals', () => {
+    const singleCat = {
+      cats: ['شيبسي', 'سناكس'],
+      cfg: { unit: 'كرتونة', brandName: 'أبو سعيد' },
+      p: [
+        ['شيبسي عائلي', 'شيبسي', 'كرتونة 12 كيس', 200, '#1', '#2', '🥔', 0, '', [], '', 0],
+        ['دوريتوس', 'سناكس', 'كرتونة 20 كيس', 120, '#1', '#2', '🔺', 0, '', [], '', 0],
+      ],
+      offers: [],
+    };
+    const res = processCustomerTurn({
+      text: 'عايز نصف كرتونة شيبسي عائلي و2 دوريتوس',
+      catalogData: singleCat,
+      currentDraft: [],
+    });
+    assert.equal(res.draft.length, 2);
+    assert.equal(res.draft.find((x) => x.i === 0)?.q, 0.5);
+    assert.equal(res.draft.find((x) => x.i === 1)?.q, 2);
+    const tot = computeDraftTotals(res.draft, singleCat.p);
+    assert.equal(tot.totalQty, 2.5);
+    assert.equal(tot.totalPrice, 0.5 * 200 + 2 * 120);
+
+    // Multi-variant ambiguous شيبسي preserves explicitQty = 0.5 in pendingClarification & one-shot!
+    const ambHalf = processCustomerTurn({
+      text: 'عايز نصف كرتونة شيبسي و2 دوريتوس',
+      catalogData: catCartonData,
+      currentDraft: [],
+    });
+    assert.equal(ambHalf.nextState.pendingClarification?.explicitQty, 0.5);
+    assert.equal(ambHalf.nextState.pendingQueue[0]?.explicitQty, 2);
+
+    const oneHalf = buildOneShotCustomerDraft({
+      text: 'عايز نصف كرتونة شيبسي و2 دوريتوس',
+      catalogData: catCartonData,
+    });
+    assert.equal(oneHalf.items.find((x) => x.i === 0)?.q, 0.5);
+    assert.equal(oneHalf.items.find((x) => x.i === 2)?.q, 2);
+
+    // Compound fraction "كرتونة ونص"
+    const compound = processCustomerTurn({
+      text: 'عايز كرتونة ونص دوريتوس وربع شيبسي عائلي',
+      catalogData: singleCat,
+      currentDraft: [],
+    });
+    assert.equal(compound.draft.find((x) => x.i === 1)?.q, 1.5);
+    assert.equal(compound.draft.find((x) => x.i === 0)?.q, 0.25);
+  });
+
+  // C24: Mandatory Case 5: Uncertain product name ("مش عارف اسم المنتج بالظبط، تقريبا جاجور أو حاجه شبيهه")
+  await runCase('Customer AI', 'C24: Uncertain query NEVER auto-adds product and asks confirmation first', () => {
+    const text = 'مش عارف اسم المنتج بالظبط، تقريبا جاجور أو حاجه شبيهه';
+    const t1 = processCustomerTurn({ text, catalogData: catCartonData, currentDraft: [] });
+    assert.equal(t1.draft.length, 0, 'Must NEVER silently add جاجوار when user is unsure');
+    assert.equal(t1.nextState.pendingClarification?.type, 'confirm_suggestion');
+    assert.ok(t1.nextState.pendingClarification.candidates.includes(3));
+    assert.match(t1.reply, /جاجوار/);
+    assert.ok(t1.quick.some((q) => q.val.includes('جاجوار')));
+
+    // Confirm -> moves to flavor, STILL doesn't blind-add without flavor + qty
+    const t2 = processCustomerTurn({
+      text: 'أيوه جاجوار',
+      catalogData: catCartonData,
+      currentDraft: t1.draft,
+      convState: t1.nextState,
+    });
+    assert.equal(t2.draft.length, 0);
+    assert.equal(t2.nextState.pendingClarification?.type, 'flavor');
+    assert.equal(t2.nextState.pendingClarification?.prodIdx, 3);
+
+    // One-shot mode also never puts unconfirmed جاجوار into confirmed items
+    const oneShot = buildOneShotCustomerDraft({ text, catalogData: catCartonData });
+    assert.equal(oneShot.items.length, 0);
+    assert.ok(oneShot.unk.some((u) => /جاجور.*جاجوار/.test(u)));
+  });
+
+  // C25: Mandatory Case 6: Cross-item variant reference ("عايز كرتونتين شيبسي ونفس الحجم دوريتوس")
+  await runCase('Customer AI', 'C25: "عايز كرتونتين شيبسي ونفس الحجم دوريتوس" carries chosen size across queue without guessing qty', () => {
+    const varCat = {
+      cats: ['شيبسي', 'سناكس'],
+      cfg: { unit: 'كرتونة', brandName: 'أبو سعيد' },
+      p: [
+        ['شيبسي', 'شيبسي', 'كرتونة 24 كيس', 110, '#1', '#2', '🥔', 0, '', [], 'صغير', 0],
+        ['شيبسي', 'شيبسي', 'كرتونة 12 كيس', 185, '#1', '#2', '🥔', 0, '', [], 'عائلي', 0],
+        ['دوريتوس', 'سناكس', 'كرتونة 24 كيس', 125, '#1', '#2', '🔺', 0, '', [], 'صغير', 0],
+        ['دوريتوس', 'سناكس', 'كرتونة 12 كيس', 200, '#1', '#2', '🔺', 0, '', [], 'عائلي', 0],
+      ],
+      offers: [],
+    };
+    const t1 = processCustomerTurn({
+      text: 'عايز كرتونتين شيبسي ونفس الحجم دوريتوس',
+      catalogData: varCat,
+      currentDraft: [],
+    });
+    assert.equal(t1.draft.length, 0);
+    assert.equal(t1.nextState.pendingClarification?.type, 'disambiguate_product');
+    assert.equal(t1.nextState.pendingClarification?.explicitQty, 2);
+    assert.equal(t1.nextState.pendingQueue.length, 1);
+    assert.equal(t1.nextState.pendingQueue[0].variantRef, true);
+
+    const t2 = processCustomerTurn({
+      text: 'عائلي',
+      catalogData: varCat,
+      currentDraft: t1.draft,
+      convState: t1.nextState,
+    });
+    assert.equal(t2.draft.find((x) => x.i === 1)?.q, 2, 'شيبسي عائلي added with qty=2');
+    assert.equal(t2.nextState.lastResolvedVariant, 'عائلي');
+    assert.equal(t2.nextState.pendingClarification?.type, 'qty', 'دوريتوس عائلي auto-narrowed by same variant and asks qty');
+    assert.equal(t2.nextState.pendingClarification?.prodIdx, 3);
+
+    const t3 = processCustomerTurn({
+      text: '3',
+      catalogData: varCat,
+      currentDraft: t2.draft,
+      convState: t2.nextState,
+    });
+    assert.equal(t3.draft.length, 2);
+    assert.equal(t3.draft.find((x) => x.i === 1)?.q, 2);
+    assert.equal(t3.draft.find((x) => x.i === 3)?.q, 3);
+  });
+
+  // C26: Adversarial Gemini audit (`validateCustomerGeminiResponse` catches dropped items, swapped qty, lookalike guess, rounded 0.5)
+  await runCase('Customer AI', 'C26: Programmatic Guard 3 catches dropped items, swapped qtys, lookalike guesses, and rounded 0.5 in Gemini output', () => {
+    const richCat = {
+      cats: ['شيبسي', 'سناكس', 'مشروبات'],
+      cfg: { unit: 'كرتونة', brandName: 'أبو سعيد' },
+      p: [
+        ['شيبسي', 'شيبسي', 'كرتونة 24 كيس', 110, '#1', '#2', '🥔', 0, '', [['ملح وخل', 0]], 'صغير', 0],
+        ['شيبسي', 'شيبسي', 'كرتونة 12 كيس', 185, '#1', '#2', '🥔', 0, '', [['طماطم', 0]], 'عائلي', 0],
+        ['دوريتوس', 'سناكس', 'كرتونة 20 كيس', 120, '#1', '#2', '🔺', 0, '', [], '', 0],
+        ['جاجوار', 'سناكس', 'كرتونة 24 كيس', 130, '#1', '#2', '🐆', 0, '', [], '', 0],
+        ['مياه غازية', 'مشروبات', 'كرتونة 24 كانز', 145, '#1', '#2', '🥤', 0, '', [], '', 0],
+      ],
+      offers: [],
+    };
+
+    // Gemini drops مياه غازية, guesses شيبسي صغير q=1, guesses جاجوار for جاكودار, swaps دوريتوس qty to 1 instead of 3, and sets action=review!
+    const badGem = validateCustomerGeminiResponse({
+      geminiJson: {
+        reply: 'تمام ضفتلك الطلب',
+        intent: 'order',
+        items: [
+          { i: 0, f: 0, q: 1, a: false },
+          { i: 3, f: -1, q: 1, a: false },
+          { i: 2, f: -1, q: 1, a: false },
+        ],
+        unknown: [],
+        clear: false,
+        action: 'review',
+      },
+      userMessage: 'عايز كرتونة شيبسي وكرتونة شيبسي وكرتونة جاكودار وكرتونة مياه غازية و3 كراتين دوريتوس',
+      currentDraft: [],
+      catalogData: richCat,
+      stateCtx: {},
+    });
+
+    assert.equal(badGem.action, 'none', 'Must block action=review when unknowns or disambiguations exist');
+    assert.equal(badGem.draft.some((x) => x.i === 3), false, 'Must strip hallucinated جاجوار guess');
+    assert.equal(badGem.draft.some((x) => x.i === 0), false, 'Must strip guessed شيبسي صغير');
+    assert.equal(badGem.draft.find((x) => x.i === 4)?.q, 1, 'Must recover dropped مياه غازية with q=1');
+    assert.equal(badGem.draft.find((x) => x.i === 2)?.q, 3, 'Must restore swapped دوريتوس qty to 3');
+    assert.ok(badGem.unknown.some((u) => /جاكودار/.test(u)), 'Must report جاكودار in unknown');
+    assert.equal(badGem.nextState.pendingClarification?.type, 'disambiguate_product');
+    assert.equal(badGem.nextState.pendingClarification?.explicitQty, 2, 'Must preserve accumulated qty=2 for repeated شيبسي');
+
+    // Gemini rounds 0.5 up to 1 & guesses جاجوار on uncertain prompt -> corrected programmatically
+    const halfGem = validateCustomerGeminiResponse({
+      geminiJson: {
+        reply: 'تمام',
+        intent: 'order',
+        items: [
+          { i: 4, f: -1, q: 1, a: false },
+          { i: 2, f: -1, q: 2, a: false },
+        ],
+        unknown: [],
+        action: 'review',
+      },
+      userMessage: 'عايز نصف كرتونة مياه غازية و2 دوريتوس',
+      currentDraft: [],
+      catalogData: richCat,
+      stateCtx: {},
+    });
+    assert.equal(halfGem.draft.find((x) => x.i === 4)?.q, 0.5);
+    assert.equal(halfGem.draft.find((x) => x.i === 2)?.q, 2);
+
+    const unsureGem = validateCustomerGeminiResponse({
+      geminiJson: {
+        reply: 'ضفتلك جاجوار',
+        intent: 'order',
+        items: [{ i: 3, f: -1, q: 1, a: false }],
+        unknown: [],
+        action: 'review',
+      },
+      userMessage: 'مش عارف اسم المنتج بالظبط، تقريبا جاجور أو حاجه شبيهه',
+      currentDraft: [],
+      catalogData: richCat,
+      stateCtx: {},
+    });
+    assert.equal(unsureGem.draft.length, 0);
+    assert.equal(unsureGem.action, 'none');
+    assert.equal(unsureGem.nextState.pendingClarification?.type, 'confirm_suggestion');
+  });
+
+  // C27: Typos match genuine targets ("شبسي", "دريتوس", "مية غازية") while non-existent lookalike ("جاكودار") never matches "جاجوار"
+  await runCase('Customer AI', 'C27: Real typos match while unknown lookalike جاكودار is rejected safely', () => {
+    const cat = {
+      cats: ['شيبسي', 'سناكس', 'مشروبات'],
+      cfg: { unit: 'كرتونة', brandName: 'أبو سعيد' },
+      p: [
+        ['شيبسي عائلي', 'شيبسي', 'كرتونة', 180, '#1', '#2', '🥔', 0, '', [], '', 0],
+        ['دوريتوس', 'سناكس', 'كرتونة', 120, '#1', '#2', '🔺', 0, '', [], '', 0],
+        ['جاجوار', 'سناكس', 'كرتونة', 130, '#1', '#2', '🐆', 0, '', [], '', 0],
+        ['مياه غازية', 'مشروبات', 'كرتونة', 145, '#1', '#2', '🥤', 0, '', [], '', 0],
+      ],
+      offers: [],
+    };
+    const typos = processCustomerTurn({
+      text: 'عايز 2 شبسي عائلي وكرتونة دريتوس ومية غازية وكرتونة جاكودار',
+      catalogData: cat,
+      currentDraft: [],
+    });
+    assert.equal(typos.draft.find((x) => x.i === 0)?.q, 2);
+    assert.equal(typos.draft.find((x) => x.i === 1)?.q, 1);
+    assert.equal(typos.nextState.pendingClarification?.type, 'qty', 'Unquantified مية غازية asks qty instead of guessing 1');
+    assert.equal(typos.nextState.pendingClarification?.prodIdx, 3);
+    assert.equal(typos.draft.some((x) => x.i === 2), false, 'جاكودار must NEVER match جاجوار');
+    assert.match(typos.reply, /جاكودار/);
+
+    const typos2 = processCustomerTurn({
+      text: '1',
+      catalogData: cat,
+      currentDraft: typos.draft,
+      convState: typos.nextState,
+    });
+    assert.equal(typos2.draft.find((x) => x.i === 3)?.q, 1);
+
+    const typosDirect = processCustomerTurn({
+      text: 'عايز 2 شبسي عائلي وكرتونة دريتوس وكرتونة مية غازية وكرتونة جاكودار',
+      catalogData: cat,
+      currentDraft: [],
+    });
+    assert.equal(typosDirect.draft.find((x) => x.i === 0)?.q, 2);
+    assert.equal(typosDirect.draft.find((x) => x.i === 1)?.q, 1);
+    assert.equal(typosDirect.draft.find((x) => x.i === 3)?.q, 1);
+    assert.equal(typosDirect.draft.some((x) => x.i === 2), false, 'جاكودار must NEVER match جاجوار');
+  });
 }
 
 // =========================================================================
@@ -1307,6 +1659,30 @@ async function runHttpAndOrdersIntegrationSuite() {
       assert.equal(isHollowAiReply(chipsHollow.json.reply), false);
       assert.equal(chipsHollow.json.nextState?.pendingClarification?.type, 'disambiguate_product');
       assert.ok(Array.isArray(chipsHollow.json.quick) && chipsHollow.json.quick.length >= 2);
+
+      // Verify /api/ai/validate catches dropped items, fractional 0.5 rounding, lookalikes, and ambiguity against live default catalog
+      const multiAudit = await requestJson(server, 'POST', '/api/ai/validate', {
+        cookie: cookieU1,
+        body: {
+          message: 'عايز نصف كرتونة مياه غازية وكرتونة جاكودار و3 كراتين فشار بالكراميل و2 شيبسي',
+          currentDraft: [],
+          geminiJson: {
+            reply: 'تم',
+            intent: 'order',
+            items: [{ i: firstAvailIdx, f: -1, q: 1, a: false }],
+            unknown: [],
+            action: 'review',
+          },
+        },
+      });
+      assert.equal(multiAudit.status, 200);
+      assert.equal(multiAudit.json.ok, true);
+      assert.equal(multiAudit.json.action, 'none');
+      assert.ok(multiAudit.json.unknown.some((u) => /جاكودار/.test(u)));
+      assert.equal(multiAudit.json.draft.find((d) => d.i === 15)?.q, 0.5);
+      assert.equal(multiAudit.json.draft.find((d) => d.i === 7)?.q, 3);
+      assert.equal(multiAudit.json.nextState?.pendingClarification?.type, 'disambiguate_product');
+      assert.equal(multiAudit.json.nextState?.pendingClarification?.explicitQty, 2);
 
       const testCat = makeTestCatalog();
       const opId = 'op_http_idem_123';
@@ -2016,6 +2392,27 @@ async function runCustomerUiAndCartSuite() {
     assert.equal(document.getElementById('chold'), null, 'chat_only must hide one-shot switch button');
     routerMod.commitRoute({ layers: ['ai'], aiStep: 'old' }, { mode: 'replace' });
     assert.equal(aiMod.__getAiStateForTest().RMODE, 'chat', 'chat_only must force interactive chat even if route asks for old');
+  });
+
+  // U7: One-shot rlocal fractional + unknown reporting + 0.5 stepper behavior in DOM without premature deletion
+  await runCase('UI & Cart', 'U7: One-shot fractional qty (نصف كرتونة), multi-item unk preservation, and 1.5 - 1 -> 0.5 stepper in DOM', async () => {
+    resetEnv();
+    await aiMod.chSend('عايز كرتونة ونص فريسكا');
+    assert.equal(aiMod.__getAiStateForTest().RL[0].q, 1.5);
+    const minusBtn = document.getElementById('chd').querySelector('[data-cd-rn="0"][data-cd-rd="-1"]');
+    assert.ok(minusBtn);
+    minusBtn.click();
+    assert.equal(aiMod.__getAiStateForTest().RL.length, 1, 'Decrementing 1.5 by 1 must keep line at 0.5');
+    assert.equal(aiMod.__getAiStateForTest().RL[0].q, 0.5);
+    minusBtn.click();
+    assert.equal(aiMod.__getAiStateForTest().RL.length, 0, 'Decrementing 0.5 by 1 removes the line cleanly');
+
+    const one = aiMod.rlocal('عايز نصف كرتونة فريسكا وكرتونة جاكودار و3 كراتين دوريتوس');
+    assert.equal(one.items.find((x) => x.i === 4)?.q, 0.5);
+    assert.equal(one.items.find((x) => x.i === 2)?.q, 3);
+    assert.ok(one.unk.some((u) => /جاكودار/.test(u)));
+    assert.equal(one.items.some((x) => x.i === 3), false);
+    assert.deepEqual(state.cart, {});
   });
 }
 

@@ -10,6 +10,7 @@ import { ovf } from './store.js';
 import { $, AN, pname, saveCart, showToast, state, totals } from './state.js';
 import { esc, FL, isOut, money, numAr, rnd, rn, rtk } from './utils.js';
 import {
+  buildOneShotCustomerDraft,
   buildStoreKB as engineBuildStoreKB,
   computeDraftTotals,
   dedupeAndNormalizeDraft,
@@ -19,6 +20,7 @@ import {
   isProductOutOfStock,
   matchProductFlavors as engineMatchProductFlavors,
   matchProductsInCatalog as engineMatchProductsInCatalog,
+  normalizeQtyValue,
   ntk as engineNtk,
   parseQuantityAndRest as engineParseQuantityAndRest,
   processCustomerTurn,
@@ -38,6 +40,8 @@ const CH = {
   pendingFlavorIdx: -1,
   pendingAltCands: null,
   pendingClarification: null,
+  pendingQueue: [],
+  lastResolvedVariant: '',
   lastReferencedProductIdx: -1,
   lastReferencedFlavorIdx: -1,
 };
@@ -366,100 +370,10 @@ function splitMultiFlavors(fl, queryToks) {
 }
 
 function rlocal(text) {
-  const items = [];
-  const unk = [];
-  const soldOutHits = [];
-  const products = Array.isArray(state.P) ? state.P : [];
-  const unit = (state.CFG && state.CFG.unit) || 'كرتونة';
-  let prevProdIdx = -1;
-
-  engineSegmentOrderText(text).forEach((rawSg) => {
-    const { clean, hints } = engineExtractHints(rawSg);
-    const qp = engineParseQuantityAndRest(clean || rawSg, unit);
-    const m = engineMatchProductsInCatalog(qp.rest, products, {
-      priceHints: hints,
-      includeSoldOut: false,
-      rawCleanText: clean || rawSg,
-    });
-
-    const nonStopTokens = qp.rest.filter((t) => !RSTOP[t]);
-    let inheritedHandled = false;
-    if (prevProdIdx >= 0 && products[prevProdIdx] && !isOut(products[prevProdIdx]) && !products[prevProdIdx][7]) {
-      const prevP = products[prevProdIdx];
-      const fmPrev = engineMatchProductFlavors(prevP, qp.rest, clean || rawSg);
-      const topOther = m && m.cs[0];
-      const topIsOtherExact = Boolean(topOther && topOther.i !== prevProdIdx && (topOther.exactBase || topOther.exactFull));
-      const matchedPrevToks = new Set();
-      [...fmPrev.avail, ...fmPrev.soldOut].forEach((x) => engineNtk(x.name).forEach((t) => matchedPrevToks.add(t)));
-      const hasOtherNonFlavor = nonStopTokens.some((t) => !matchedPrevToks.has(t) && !/^(?:طعم|نكهه|بطعم|بنكهه|نكهات)$/.test(t));
-
-      if ((!m || m.cs[0].flavorOnlyMatch || ((fmPrev.avail.length || fmPrev.soldOut.length) && !hasOtherNonFlavor && !topIsOtherExact))) {
-        if (fmPrev.avail.length) {
-          const cands = [prevProdIdx];
-          fmPrev.avail.forEach((af) => items.push({ i: prevProdIdx, f: af.j, q: qp.qty, c: cands, amb: false }));
-          inheritedHandled = true;
-        } else if (fmPrev.soldOut.length) {
-          soldOutHits.push(pname(prevProdIdx) + ' (' + fmPrev.soldOut[0].name + ')');
-          inheritedHandled = true;
-        }
-      }
-    }
-    if (inheritedHandled) return;
-
-    if (!m) {
-      const mOut = engineMatchProductsInCatalog(qp.rest, products, {
-        priceHints: hints,
-        includeSoldOut: true,
-        rawCleanText: clean || rawSg,
-      });
-      if (mOut && mOut.cs[0] && mOut.cs[0].out && !mOut.cs[0].isFuzzyOnly) {
-        soldOutHits.push(pname(mOut.cs[0].i));
-      } else {
-        unk.push(rawSg);
-      }
-      return;
-    }
-
-    const top = m.cs[0];
-    if (top.isFuzzyOnly && top.unmatchedTokens.length > 0) {
-      unk.push(rawSg);
-      return;
-    }
-
-    const p = products[top.i];
-    const fl = FL(p);
-    const fs = [];
-    const outFlavors = [];
-
-    if (fl.length) {
-      const fm = engineMatchProductFlavors(p, qp.rest, clean || rawSg);
-      fm.avail.forEach((af) => fs.push(af.j));
-      fm.soldOut.forEach((sf) => outFlavors.push(sf.name));
-    }
-
-    if (!fs.length && outFlavors.length) {
-      soldOutHits.push(pname(top.i) + ' (' + outFlavors[0] + ')');
-      return;
-    }
-
-    prevProdIdx = top.i;
-    const strongComp = m.cs.filter((c) => !c.isFuzzyOnly && !c.flavorOnlyMatch);
-    const cands = (strongComp.length ? strongComp : m.cs).slice(0, 5).map((c) => c.i);
-    const sameNameAlts = strongComp.filter((c) => c.i !== top.i && rn(products[c.i][0]) === rn(p[0]));
-    const amb =
-      !hints.length &&
-      !top.exactFull &&
-      ((strongComp.length > 1 && strongComp[1].s >= top.s * 0.92) ||
-        (sameNameAlts.length > 0 && sameNameAlts[0].s >= top.s * 0.88));
-
-    if (fs.length) {
-      fs.forEach((j) => items.push({ i: top.i, f: j, q: qp.qty, c: cands, amb }));
-    } else {
-      items.push({ i: top.i, f: -1, q: qp.qty, c: cands, amb });
-    }
+  return buildOneShotCustomerDraft({
+    text,
+    catalogData: getCatalogSnapshot(),
   });
-
-  return { items: dedupeAndNormalizeDraft(items, products), unk, soldOutHits };
 }
 
 function handleAiAuthCheck(status, data) {
@@ -521,6 +435,8 @@ async function rGem(prompt, opts = {}) {
 async function validateCustomerWithServer(geminiJson, userMessage) {
   const stateCtx = {
     pendingClarification: CH.pendingClarification || null,
+    pendingQueue: Array.isArray(CH.pendingQueue) ? CH.pendingQueue : [],
+    lastResolvedVariant: CH.lastResolvedVariant || '',
     lastReferencedProductIdx: Number.isInteger(CH.lastReferencedProductIdx)
       ? CH.lastReferencedProductIdx
       : -1,
@@ -605,7 +521,7 @@ function rNorm(j) {
       if (foundIdx >= 0) i = foundIdx;
     }
     let f = x && x.f != null ? +x.f : -1;
-    let q = Math.round(+x?.q) || 1;
+    let q = normalizeQtyValue(x?.q, 1);
     const p = state.P[i];
     if (!p || p[7] || isOut(p)) return;
     const fl = FL(p);
@@ -622,10 +538,10 @@ function rNorm(j) {
     } else {
       f = -1;
     }
-    q = Math.max(1, Math.min(q, 99));
+    q = normalizeQtyValue(q, 1);
     const k = i + ':' + f;
     if (seen[k]) {
-      seen[k].q = Math.min(seen[k].q + q, 99);
+      seen[k].q = Math.min(Math.round((seen[k].q + q) * 100) / 100, 99);
       return;
     }
     const c = [i];
@@ -655,13 +571,13 @@ async function rAI(text) {
     unit +
     '.';
   const pr =
-    'العميل كتب أو قال طلبه بالعامية المصرية (ممكن يحتوي أخطاء إملائية أو أخطاء تحويل صوت لنص). طابق كل صنف مع الكتالوج واستخرج الكمية والنكهة.\n' +
+    'العميل كتب أو قال طلبه بالعامية المصرية (ممكن يحتوي أخطاء إملائية أو أخطاء تحويل صوت لنص). استخرج كل صنف وكميته بشكل مستقل دون دمج أصناف مختلفة أو تجاهل أي صنف.\n' +
     'الكتالوج (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|القسم|النكهات بصيغة رقم=اسم):\n' +
     rCat() +
     '\nالقواعد:\n' +
-    '- i هو رقم الصنف من الكتالوج بالظبط، name اسمه في الكتالوج، f رقم النكهة أو -1، flavorName اسم النكهة المطلوبة، q الكمية بالأرقام الإنجليزية.\n' +
+    '- i هو رقم الصنف من الكتالوج بالظبط، name اسمه في الكتالوج، f رقم النكهة أو -1، flavorName اسم النكهة المطلوبة، q الكمية بالأرقام الإنجليزية (نصف=0.5، ربع=0.25، كرتونة ونص=1.5).\n' +
     '- لو هناك أكثر من حجم/سعر لنفس الاسم والعميل لم يحدد، ضع a=true و alt=[أرقام البدائل].\n' +
-    '- لا تخترع أصنافاً أو نكهات. ضع غير الموجود في unknown.\nطلب العميل:\n' +
+    '- لا تخترع أصنافاً أو نكهات ولا تخمن صنفاً قريباً في الاسم لغير الموجود. ضع غير الموجود في unknown.\nطلب العميل:\n' +
     text;
   const res = await rGem(pr, {
     schemaType: 'customer_extract',
@@ -677,9 +593,64 @@ async function rAI(text) {
     currentDraft: [],
     catalogData: getCatalogSnapshot(),
   });
+
+  // In one-shot review mode, include incomplete items (ambiguous / missing flavor / missing qty) as editable review cards
+  const reviewItems = [...validated.draft];
+  const pendingList = [];
+  if (validated.nextState?.pendingClarification) pendingList.push(validated.nextState.pendingClarification);
+  if (Array.isArray(validated.nextState?.pendingQueue)) pendingList.push(...validated.nextState.pendingQueue);
+
+  const suggestLabels = [];
+  pendingList.forEach((task) => {
+    if (task.type === 'disambiguate_product' && Array.isArray(task.candidates) && task.candidates.length) {
+      reviewItems.push({
+        i: task.candidates[0],
+        f: -1,
+        q: task.explicitQty || 1,
+        c: task.candidates.slice(0, 6),
+        amb: task.candidates.length > 1,
+      });
+    } else if (task.type === 'flavor') {
+      reviewItems.push({
+        i: task.prodIdx,
+        f: -1,
+        q: task.explicitQty || 1,
+        c: [task.prodIdx],
+        amb: false,
+      });
+    } else if (task.type === 'qty') {
+      const fIds = Array.isArray(task.flavorIndices) && task.flavorIndices.length
+        ? task.flavorIndices
+        : [task.flavorIdx >= 0 ? task.flavorIdx : -1];
+      fIds.forEach((fIdx) => {
+        reviewItems.push({
+          i: task.prodIdx,
+          f: fIdx,
+          q: 1,
+          c: [task.prodIdx],
+          amb: false,
+          needsQtyConfirm: true,
+        });
+      });
+    } else if (task.type === 'confirm_suggestion' && Array.isArray(task.candidates) && task.candidates.length) {
+      const sugNames = task.candidates.map((idx) => getProductDisplayName(state.P[idx])).filter(Boolean).join(' / ');
+      if (sugNames) suggestLabels.push(`${task.query || ''} (هل تقصد: ${sugNames}؟)`.trim());
+    }
+  });
+
+  const mergedUnk = [...(validated.unknown || [])].map((u) => {
+    const matchSug = suggestLabels.find((sl) => rn(sl).includes(rn(u)));
+    return matchSug || u;
+  });
+  suggestLabels.forEach((sl) => {
+    if (!mergedUnk.some((u) => rn(u) === rn(sl) || rn(sl).includes(rn(u)))) {
+      mergedUnk.push(sl);
+    }
+  });
+
   return {
-    items: validated.draft,
-    unk: validated.unknown || [],
+    items: dedupeAndNormalizeDraft(reviewItems, state.P),
+    unk: mergedUnk,
     soldOutHits: validated.rejectedReasons || [],
   };
 }
@@ -1092,7 +1063,7 @@ async function vPolish() {
   try {
     const vc = vCat();
     const pr =
-      'ده طلب اتكتب بالإملاء الصوتي (بالعامية المصرية) لمتجر جملة، وممكن فيه كلمات اتسمعت غلط. صحّح الكلمات اللي اتسمعت غلط وخليها اسم الصنف أو النكهة الصح من القوايم، من غير ما تغيّر المعنى أو الأرقام أو الكميات. مثال: «بتاع مشاطة» تبقى «بطعم الشطة». ماتضيفش ولا تحذف أصناف أو كميات، وماتزودش عدد الأسطر. اكتب الأرقام بالإنجليزية.\nأسماء الأصناف: ' +
+      'ده طلب اتكتب بالإملاء الصوتي (بالعامية المصرية) لمتجر جملة، وممكن فيه كلمات اتسمعت غلط. صحّح الكلمات اللي اتسمعت غلط وخليها اسم الصنف أو النكهة الصح من القوايم، من غير ما تغيّر المعنى أو الأرقام أو الكميات أو الكسور (زي نصف=0.5 أو ربع=0.25 أو كرتونتين). مثال: «بتاع مشاطة» تبقى «بطعم الشطة». ممنوع تدمج أصناف مختلفة أو تضيف أو تحذف أصناف أو كميات، وماتزودش عدد الأسطر. اكتب الأرقام بالإنجليزية.\nأسماء الأصناف: ' +
       JSON.stringify(vc.n) +
       '\nالنكهات: ' +
       JSON.stringify(vc.f) +
@@ -1281,6 +1252,8 @@ function chReset() {
   CH.pendingFlavorIdx = -1;
   CH.pendingAltCands = null;
   CH.pendingClarification = null;
+  CH.pendingQueue = [];
+  CH.lastResolvedVariant = '';
   CH.lastReferencedProductIdx = -1;
   CH.lastReferencedFlavorIdx = -1;
   RL = [];
@@ -1586,15 +1559,18 @@ function chPrompt() {
     rCat() +
     '\nالقواعد الإلزامية (تصرف كمندوب مبيعات محترف خطوة بخطوة):\n' +
     '- أرجع JSON مطابق للـ Schema بدقة.\n' +
+    '- استخرج كل صنف وكميته بشكل مستقل (نصف=0.5، ربع=0.25، كرتونتين=2). ممنوع دمج أصناف مختلفة أو نقل كمية من صنف لصنف أو تجاهل تكرار صنف.\n' +
     '- ممنوع تماماً الرد بكلمة تأكيد عامة فقط مثل «تمام» أو «حاضر» أو «ماشي»، وممنوع قول «ضفتلك في السلة» أو «أضفت للسلة» لأنك تبني «مسودة الطلب» فقط.\n' +
     '- لو طلب العميل قسماً أو اسماً عاماً يطابق أكثر من صنف (مثل: «عايز كرتونة شيبسي»)، لا تخمن صنفاً ولا تضفه لـ items؛ احتفظ بـ items كما هي في «الطلب الحالي»، اجعل intent="clarify"، اسأله عن النوع المطلوب، واعرض الأنواع المتاحة في quick.\n' +
     '- لو الصنف له نكهات والعميل لم يحدد نكهة، لا تضف الصنف نهائياً لـ items قبل اختيار النكهة؛ اجعل intent="clarify" واسأله عن النكهة واعرض النكهات المتاحة في quick.\n' +
     '- عند تحديد الصنف والنكهة (والكمية المحددة أو الوحدة المفردة مثل «كرتونة» = 1)، أرجع الصنف في items لتظهر بطاقته التفاعلية في مسودة الطلب داخل المحادثة، واعرض ملخص مسودة الطلب وسعره واطلب التأكيد أو التعديل.\n' +
     '- لو طلب نكهة غير موجودة أو خلصانة، لا تضفه، واذكر النكهات المتاحة فعلياً لهذا الصنف في quick.\n' +
-    '- لو طلب منتجاً غير موجود في الكتالوج، ضعه في unknown ولا تخترع منتجاً بديلاً وأخبره بوضوح.\n' +
-    '- action="review" فقط عند موافقة العميل الصريحة على المراجعة والمسودة ليست فارغة وكل الأصناف مكتملة.\n' +
+    '- لو طلب منتجاً غير موجود في الكتالوج، ممنوع اختيار منتج قريب في الاسم بالظن! ضعه في unknown وأخبره بوضوح مع كل باقي الأصناف المطلوبة.\n' +
+    '- action="review" فقط عند موافقة العميل الصريحة على المراجعة والمسودة ليست فارغة وكل الأصناف مكتملة بدون أصناف غير واضحة.\n' +
     'حالة التوضيح السابقة: ' +
     JSON.stringify(CH.pendingClarification || null) +
+    '\nطابور التوضيحات المنتظرة: ' +
+    JSON.stringify(CH.pendingQueue || []) +
     '\nآخر صنف تمت مناقشته: ' +
     CH.lastReferencedProductIdx +
     ' (نكهة: ' +
@@ -1762,6 +1738,8 @@ function chLocal(t) {
     currentDraft: RL,
     convState: {
       pendingClarification: CH.pendingClarification || null,
+      pendingQueue: Array.isArray(CH.pendingQueue) ? CH.pendingQueue : [],
+      lastResolvedVariant: CH.lastResolvedVariant || '',
       lastReferencedProductIdx: Number.isInteger(CH.lastReferencedProductIdx)
         ? CH.lastReferencedProductIdx
         : -1,
@@ -1773,6 +1751,8 @@ function chLocal(t) {
   RL = Array.isArray(res.draft) ? res.draft : RL;
   if (res.nextState && typeof res.nextState === 'object') {
     CH.pendingClarification = res.nextState.pendingClarification || null;
+    CH.pendingQueue = Array.isArray(res.nextState.pendingQueue) ? res.nextState.pendingQueue : [];
+    CH.lastResolvedVariant = res.nextState.lastResolvedVariant || '';
     CH.lastReferencedProductIdx = Number.isInteger(res.nextState.lastReferencedProductIdx)
       ? res.nextState.lastReferencedProductIdx
       : -1;
@@ -1813,18 +1793,22 @@ async function rGo() {
       res = null;
     }
   }
-  if (!res || !res.items.length) res = rlocal(t);
+  if (!res || (!res.items.length && !res.unk.length && !(res.soldOutHits && res.soldOutHits.length))) {
+    res = rlocal(t);
+  }
   const b2 = $('rgo');
   if (b2) {
     b2.disabled = false;
     b2.textContent = 'حلّل طلبي 🤖';
   }
   if (!res.items.length) {
-    rErr(
-      res.soldOutHits && res.soldOutHits.length
-        ? 'الأصناف دي خلصانة حالياً: ' + res.soldOutHits.join('، ')
-        : 'ما فهمتش طلبك، جرّب تكتب اسم الصنف والكمية'
-    );
+    if (res.unk && res.unk.length) {
+      rErr('ما لقيتش في الكتالوج: «' + res.unk.join('»، «') + '» — تأكد من اسم الصنف المطلوب');
+    } else if (res.soldOutHits && res.soldOutHits.length) {
+      rErr('الأصناف دي خلصانة حالياً: ' + res.soldOutHits.join('، '));
+    } else {
+      rErr('ما فهمتش طلبك، جرّب تكتب اسم الصنف والكمية');
+    }
     return;
   }
   RL = res.items;
@@ -1873,6 +1857,10 @@ async function chSend(overrideText = null) {
       CH.quick = Array.isArray(validated.quick) ? validated.quick : [];
       if (validated.nextState && typeof validated.nextState === 'object') {
         CH.pendingClarification = validated.nextState.pendingClarification || null;
+        CH.pendingQueue = Array.isArray(validated.nextState.pendingQueue)
+          ? validated.nextState.pendingQueue
+          : [];
+        CH.lastResolvedVariant = validated.nextState.lastResolvedVariant || '';
         CH.lastReferencedProductIdx = Number.isInteger(validated.nextState.lastReferencedProductIdx)
           ? validated.nextState.lastReferencedProductIdx
           : -1;
@@ -1892,7 +1880,7 @@ async function chSend(overrideText = null) {
         const hasIncomplete = RL.some(
           (l) => l.amb || (getProductFlavors(state.P[l.i]).some((f) => !f[1]) && l.f < 0)
         );
-        if (validated.action === 'review' && RL.length && !hasIncomplete) chReview();
+        if (validated.action === 'review' && RL.length && !hasIncomplete && !CH.pendingClarification) chReview();
       }
     } catch (x) {
       ok = false;
@@ -2378,12 +2366,12 @@ export function bindAIEvents() {
         return;
       }
       if (cdEl.dataset.cdRd) {
-        cl.q += +cdEl.dataset.cdRd;
-        if (cl.q < 1) RL.splice(cdn, 1);
+        cl.q = Math.round((cl.q + +cdEl.dataset.cdRd) * 100) / 100;
+        if (cl.q <= 0) RL.splice(cdn, 1);
         else if (cl.q > 99) cl.q = 99;
         RL = dedupeAndNormalizeDraft(RL, state.P);
-        CH.lastReferencedProductIdx = cl.q >= 1 ? cl.i : RL.length ? RL[RL.length - 1].i : -1;
-        CH.lastReferencedFlavorIdx = cl.q >= 1 ? cl.f : RL.length ? RL[RL.length - 1].f : -1;
+        CH.lastReferencedProductIdx = cl.q > 0 ? cl.i : RL.length ? RL[RL.length - 1].i : -1;
+        CH.lastReferencedFlavorIdx = cl.q > 0 ? cl.f : RL.length ? RL[RL.length - 1].f : -1;
         rErr('');
         chRender();
         return;
@@ -2404,8 +2392,8 @@ export function bindAIEvents() {
       return;
     }
     if (t.dataset.rd) {
-      l.q += +t.dataset.rd;
-      if (l.q < 1) RL.splice(+n, 1);
+      l.q = Math.round((l.q + +t.dataset.rd) * 100) / 100;
+      if (l.q <= 0) RL.splice(+n, 1);
       else if (l.q > 99) l.q = 99;
       rRv();
     }
