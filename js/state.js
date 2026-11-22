@@ -1,8 +1,8 @@
-import { DEFAULT_DATA, loadCachedData } from './data.js';
+import { EMPTY_DATA, loadCachedData } from './data.js';
 import { FL, gk, pk } from './utils.js';
 
 const cached = loadCachedData();
-const initialData = cached ? cached.data : DEFAULT_DATA;
+const initialData = cached ? cached.data : EMPTY_DATA;
 
 export const state = {
   D: initialData,

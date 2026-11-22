@@ -7,7 +7,7 @@ import {
   openFlavorModal,
   updCartSummary,
 } from './cart.js';
-import { DBU, LOGO_FALLBACK, saveCachedData } from './data.js';
+import { LOGO_FALLBACK, clearCachedData, saveCachedData } from './data.js';
 import { bindOfferEvents, renderOffers } from './offers.js';
 import {
   $,
@@ -222,13 +222,46 @@ function applyCustomColors() {
   }
 }
 
+let redirectingAuth = false;
+function forceRedirectToLogin(reason) {
+  if (redirectingAuth) return;
+  redirectingAuth = true;
+  clearCachedData();
+  const q = reason ? '?reason=' + encodeURIComponent(reason) : '';
+  location.replace('/login' + q);
+}
+
+async function verifyActiveSession() {
+  try {
+    const r = await fetch('/api/auth/me', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.authenticated) {
+      forceRedirectToLogin(d.status || 'expired');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    return true;
+  }
+}
+
 function loadFontAssets() {
   const C = state.CFG || {};
   [C.fontBodyId, C.fontHeadId].filter(Boolean).forEach((k) => {
     if (state.IMGS[k] || state.IMGQ[k]) return;
     state.IMGQ[k] = 1;
-    fetch('https://' + DBU + '/chips/img/' + encodeURIComponent(k) + '.json')
-      .then((r) => r.json())
+    fetch('/api/img/' + encodeURIComponent(k), { credentials: 'same-origin' })
+      .then(async (r) => {
+        if (r.status === 401 || r.status === 403) {
+          const d = await r.json().catch(() => ({}));
+          forceRedirectToLogin(d.status || 'expired');
+          return null;
+        }
+        return r.ok ? r.json() : null;
+      })
       .then((v) => {
         delete state.IMGQ[k];
         if (v) {
@@ -390,8 +423,15 @@ function logoLoad() {
   const k = state.CFG && state.CFG.logo;
   if (!k || state.IMGS[k] || state.IMGQ[k]) return;
   state.IMGQ[k] = 1;
-  fetch('https://' + DBU + '/chips/img/' + encodeURIComponent(k) + '.json')
-    .then((r) => r.json())
+  fetch('/api/img/' + encodeURIComponent(k), { credentials: 'same-origin' })
+    .then(async (r) => {
+      if (r.status === 401 || r.status === 403) {
+        const d = await r.json().catch(() => ({}));
+        forceRedirectToLogin(d.status || 'expired');
+        return null;
+      }
+      return r.ok ? r.json() : null;
+    })
     .then((v) => {
       delete state.IMGQ[k];
       if (v) {
@@ -430,8 +470,15 @@ function loadImgs() {
 
   need.forEach((k) => {
     state.IMGQ[k] = 1;
-    fetch('https://' + DBU + '/chips/img/' + encodeURIComponent(k) + '.json')
-      .then((r) => r.json())
+    fetch('/api/img/' + encodeURIComponent(k), { credentials: 'same-origin' })
+      .then(async (r) => {
+        if (r.status === 401 || r.status === 403) {
+          const d = await r.json().catch(() => ({}));
+          forceRedirectToLogin(d.status || 'expired');
+          return null;
+        }
+        return r.ok ? r.json() : null;
+      })
       .then((v) => {
         if (v) state.IMGS[k] = v;
       })
@@ -466,16 +513,27 @@ function ref() {
 }
 
 function sync() {
-  fetch('https://' + DBU + '/chips/data.json')
-    .then((r) => r.json())
+  fetch('/api/catalog', {
+    credentials: 'same-origin',
+    cache: 'no-store',
+  })
+    .then(async (r) => {
+      if (r.status === 401 || r.status === 403) {
+        const errData = await r.json().catch(() => ({}));
+        forceRedirectToLogin(errData.status || 'expired');
+        return null;
+      }
+      return r.json();
+    })
     .then((v) => {
+      if (!v) return;
       state.syncing = false;
-      if (!v || !v.json || v.ts === state.ct) {
+      if (!v.data || (v.ts === state.ct && state.P.length)) {
         renderGrid();
         return;
       }
-      state.ct = v.ts;
-      const o = JSON.parse(v.json);
+      state.ct = v.ts || Date.now();
+      const o = v.data;
       if (o.v !== state.D.v) {
         state.cart = {};
         saveCart();
@@ -487,7 +545,7 @@ function sync() {
       if (state.CATS.indexOf(state.cat) < 0) state.cat = 'الكل';
       cleanCart();
       saveCart();
-      saveCachedData(o, v.ts);
+      saveCachedData(o, state.ct);
       ref();
     })
     .catch(() => {
@@ -576,9 +634,31 @@ function bindGlobalEvents() {
     }
   });
 
+  const logoutBtn = $('logoutBtn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      logoutBtn.disabled = true;
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'same-origin',
+        });
+      } catch (e) {}
+      forceRedirectToLogin('logout');
+    });
+  }
+
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) vStop(false);
-    else sync();
+    else {
+      verifyActiveSession().then((ok) => {
+        if (ok) sync();
+      });
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    verifyActiveSession();
   });
 }
 
@@ -595,7 +675,9 @@ function bootstrap() {
   bindGlobalEvents();
 
   ref();
-  sync();
+  verifyActiveSession().then((ok) => {
+    if (ok) sync();
+  });
 
   setTimeout(() => {
     if (state.syncing) {
@@ -604,6 +686,7 @@ function bootstrap() {
     }
   }, 1100);
 
+  setInterval(verifyActiveSession, 15000);
   setInterval(sync, 45000);
 }
 
