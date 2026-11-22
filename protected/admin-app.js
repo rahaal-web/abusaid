@@ -4071,12 +4071,21 @@
   }
   var KW = '(?:في|فيه|وفيه|عنده|بسعر|سعره|سعرها|سعر|النكهات|نكهات|الطعوم|طعوم|الطعم|طعم|نكهة|عبوة|العبوة|الحجم|قسم|القسم|بدل|قبل)';
   function sfl(v) {
+    var rawStr = String(v || '');
+    var hasPunct = /[,،؛;\n\/|]/.test(rawStr);
+    var isOnlyCompound = /^\s*(?:ملح\s+و\s*خل|خل\s+و\s*ملح)\s*$/i.test(rawStr);
+    var src = (hasPunct || isOnlyCompound)
+      ? rawStr.replace(/ملح\s+و\s*خل/g, 'ملح_وخل').replace(/خل\s+و\s*ملح/g, 'خل_وملح')
+      : rawStr;
     var r = [], seen = {};
-    String(v || '').split(/[,،؛;\n\/|]+/).forEach(function (x) {
-      x.split(/\s+و\s+/).forEach(function (y) {
-        y = y.trim().replace(/[.\u061B]+$/, '');
-        if (y && !seen[y]) { seen[y] = 1; r.push(y); }
-      });
+    src.split(/[,،؛;\n\/|]+|\s+و(?=\S)/).forEach(function (x) {
+      var y = x
+        .replace(/ملح_وخل/g, 'ملح وخل')
+        .replace(/خل_وملح/g, 'خل وملح')
+        .replace(/^(?:وطعم|طعم|نكهة|نكهه)\s+/, '')
+        .trim()
+        .replace(/[.\u061B]+$/, '');
+      if (y && !seen[y]) { seen[y] = 1; r.push(y); }
     });
     return r;
   }
@@ -4085,42 +4094,66 @@
     var f = D.cats.filter(function (c) { return c.indexOf(cn) > -1 || cn.indexOf(c) > -1; });
     return f.length ? f[0] : snap(cn, D.cats);
   }
+  function inferProdEmoji(nStr, cStr) {
+    var ref = an(String(nStr || '') + ' ' + String(cStr || ''));
+    if (ref.indexOf('دوريتوس') > -1) return '🔺';
+    if (ref.indexOf('شيبسي') > -1 || ref.indexOf('بطاطس') > -1) return '🥔';
+    if (ref.indexOf('فشار') > -1 || ref.indexOf('ذره') > -1) return '🍿';
+    if (ref.indexOf('عصير') > -1 || ref.indexOf('مشروب') > -1 || ref.indexOf('بيبسي') > -1 || ref.indexOf('كولا') > -1) return '🧃';
+    if (ref.indexOf('شوكولات') > -1 || ref.indexOf('فريسكا') > -1) return '🍫';
+    if (ref.indexOf('مولتو') > -1 || ref.indexOf('كرواسون') > -1) return '🥐';
+    if (ref.indexOf('بسكويت') > -1 || ref.indexOf('ويفر') > -1) return '🍪';
+    if (ref.indexOf('لب') > -1 || ref.indexOf('سوداني') > -1) return '🥜';
+    return '🥔';
+  }
   function lpb(s) {
     var o = { n: '', c: '', d: '', p: 0, o: 0, v: '', e: '', f: [], on: 1 }, m;
-    s = s.replace(/^(?:انا |أنا )?(?:عندي|ضيف|أضف|اضف|اضافة|إضافة)\s+/, '');
-    if ((m = s.match(/(?:بدل|قبل الخصم|السعر القديم|كان بـ?)\s*:?\s*(\d+(?:\.\d+)?)/))) { o.o = +m[1]; s = s.replace(m[0], ' '); }
-    if ((m = s.match(/(?:^|\s)(?:بسعر|السعر|سعره|سعرها|سعر|بـ|ب)\s*:?\s*(\d+(?:\.\d+)?)/))) { o.p = +m[1]; s = s.replace(m[0], ' '); }
-    else if ((m = s.match(/(\d+(?:\.\d+)?)\s*(?:جنيه|جنية|ج|egp)(?=[\s,،]|$)/i))) { o.p = +m[1]; s = s.replace(m[0], ' '); }
-    s = s.replace(/\s(?:جنيه|جنية|ج)(?=[\s,،]|$)/g, ' ').replace(/\d+\s*(?:طعم|نكهة|نكهات|اطعمة|أطعمة|طعوم)(?=\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
-    if ((m = s.match(new RegExp('(?:النكهات|نكهات|الطعوم|طعوم|الأطعمة|الاطعمة|الطعم|طعم|نكهة)\\s*(?:هي|هم|كالتالي)?\\s*:?\\s*(.+?)(?=\\s+(?:القسم|قسم|في قسم|عبوة|العبوة|الحجم|النوع|كرتونة|كرتونه|دستة|شوال|باكو)(?:\\s|:|$)|$)')))) {
+    s = s.replace(/^(?:انا |أنا )?(?:عندي|ضيفلي|ضيف|أضف|اضف|اضافة|إضافة)\s+(?:منتج\s+|صنف\s+)?/, '');
+    if ((m = s.match(/(?:بدل(?:\s+من)?|قبل الخصم|السعر القديم|كان بـ?)\s*:?\s*(\d+(?:\.\d+)?)(?:\s*(?:جنيه|جنية|ج))?/))) { o.o = +m[1]; s = s.replace(m[0], ' '); }
+    if ((m = s.match(/(?:النكهات|نكهات|الطعوم|طعوم|الأطعمة|الاطعمة|الطعم|طعم|نكهة|نكهه)\s*(?:هي|هم|كالتالي)?\s*:?\s*(.+?)(?=[\s,،]*(?:(?:في\s+)?(?:القسم|قسم)|العبوة|عبوة|الحجم|النوع|بسعر|سعره|سعرها|سعر|الكرتونة|كرتونة|الكرتونه|كرتونه|دستة|شوال)(?:[\s:،,]|$)|$)/))) {
       o.f = sfl(/[,،؛;\/|\n]/.test(m[1]) ? m[1] : m[1].replace(/\s+و(?=\S)/g, '،'));
       s = s.replace(m[0], ' ');
     }
-    if ((m = s.match(new RegExp('(?:في\\s+)?(?:القسم|قسم)\\s*:?\\s*(.+?)(?=\\s+(?:عبوة|العبوة|الحجم|النوع)(?:\\s|:|$)|[,،]|$)')))) {
-      o.c = mc(m[1].trim());
+    if ((m = s.match(/(?:في\s+)?(?:القسم|قسم)\s*:?\s*([^,،\n]+?)(?=\s+(?:العبوة|عبوة|الحجم|النوع|النكهات|نكهات|بسعر|سعر|الكرتونة|كرتونة|دستة|شوال)(?:[\s:،,]|$)|[,،\n]|$)/))) {
+      o.c = mc(m[1].replace(/\s*(?:جنيه|جنية|ج)\s*$/g, '').trim());
       s = s.replace(m[0], ' ');
     } else {
       var cf = D.cats.filter(function (c) { return s.indexOf(c) > -1; });
       if (cf.length == 1) o.c = cf[0];
     }
-    if ((m = s.match(/(?:العبوة|عبوة|الحجم|الوصف)\s*:?\s*(.+?)(?=\s+(?:قسم|القسم|الطعم|طعم|نكهات|النكهات)(?:\s|:|$)|[,،]|$)/))) {
+    if ((m = s.match(/(?:العبوة|عبوة|الوصف)\s*:?\s*([^,،\n]+?)(?=\s+(?:قسم|القسم|الطعم|طعم|نكهات|النكهات|الحجم|بسعر|سعر)(?:[\s:،,]|$)|[,،\n]|$)/))) {
       o.d = m[1].trim(); s = s.replace(m[0], ' ');
-    } else if ((m = s.match(/(?:كرتونة|كرتونه|دستة|شوال|علبة|باكو)\s*\d*\s*(?:كيس|علبة|قطعة|حبة|باكو|زجاجة)?/))) {
+    } else if ((m = s.match(/(?:ال)?(?:كرتونة|كرتونه|دستة|شوال|علبة|باكو)\s*\d+\s*(?:كيس|علبة|قطعة|حبة|باكو|زجاجة|عبوة)?/))) {
       o.d = m[0].trim(); s = s.replace(m[0], ' ');
     }
-    s = s.replace(/\s+/g, ' ').trim();
+    if ((m = s.match(/(?:^|[\s,،])(?:بسعر|السعر|سعره|سعرها|سعر|بـ|ب)\s*:?\s*(\d+(?:\.\d+)?)(?:\s*(?:جنيه|جنية|ج|egp))?(?=[\s,،.]|$)/i))) {
+      o.p = +m[1]; s = s.replace(m[0], ' ');
+    } else if ((m = s.match(/(\d+(?:\.\d+)?)\s*(?:جنيه|جنية|ج|egp)(?=[\s,،.]|$)/i))) {
+      o.p = +m[1]; s = s.replace(m[0], ' ');
+    }
+    if ((m = s.match(/(?:الحجم|النوع|حجم|نوع)\s*:?\s*([^,،\n]+?)(?=\s+(?:القسم|قسم|العبوة|عبوة|النكهات|نكهات|بسعر|سعر)(?:[\s:،,]|$)|[,،\n]|$)/))) {
+      o.v = m[1].trim(); s = s.replace(m[0], ' ');
+    }
+    s = s.replace(/[,،:؛;]+/g, ' ').replace(/\s(?:جنيه|جنية|ج|وعنده|وفيه|عنده|فيه)(?=\s|$)/g, ' ').replace(/\d+\s*(?:طعم|نكهة|نكهات|اطعمة|أطعمة|طعوم)(?=\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
     for (var i = 0; i < 2; i++) s = s.replace(/^(?:الصنف|صنف|اسم الصنف|اسمه|اسمها|اسم)\s*(?:هو|هي)?\s*:?\s*/, '');
     var cut = s.search(new RegExp('\\s+' + KW + '(?:\\s|:|$)|[,،:\\n]'));
     o.n = (cut > 0 ? s.slice(0, cut) : s).trim();
+    o.e = inferProdEmoji(o.n, o.c);
     return o.n ? o : null;
   }
   function lp(text) {
+    var E = eng();
+    if (E && typeof E.parseAdminLocalTurn === 'function') {
+      var res = E.parseAdminLocalTurn({ text: text, catalogData: D, currentDraft: [] });
+      if (res && Array.isArray(res.draft) && res.draft.length) return res.draft;
+    }
     var t = nd(text).replace(/\r/g, ''), bl = /\n\s*\n/.test(t) ? t.split(/\n\s*\n/) : t.split('\n'), out = [];
     bl.forEach(function (b) { b = b.replace(/\s+/g, ' ').trim(); if (b.length >= 2) { var r = lpb(b); if (r) out.push(r); } });
     return out;
   }
   function nz(x) {
-    return { n: String(x.name || '').trim(), c: String(x.category || '').trim(), d: String(x.pack || '').trim(), p: +x.price || 0, o: +x.oldPrice || 0, v: String(x.variant || '').trim(), e: String(x.emoji || '').trim(), f: sfl((x.flavors || []).map(function (f) { return String(f).trim(); }).join('،')), on: 1 };
+    var n = String(x.name || '').trim(), c = String(x.category || '').trim();
+    return { n: n, c: c, d: String(x.pack || '').trim(), p: +x.price || 0, o: +x.oldPrice || 0, v: String(x.variant || '').trim(), e: String(x.emoji || '').trim() || inferProdEmoji(n, c), f: sfl((x.flavors || []).map(function (f) { return String(f).trim(); }).join('،')), on: 1, im: '' };
   }
   function an(s) {
     return nd(s).replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/[^\u0621-\u064Aa-zA-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -4162,9 +4195,12 @@
       m[k2] = o; out.push(o);
     });
     out.forEach(function (o) {
+      var miss = o.f.filter(function (f) { var k = an(f); return T.indexOf(k) < 0 && !k.split(' ').some(function (w) { return w.length > 2 && T.indexOf(w) > -1; }); });
+      if (miss.length) o.w.push('نكهات مش واضحة في الكلام: ' + miss.join('، '));
       if (!(o.p > 0)) o.w.push('مفيش سعر، اكتبه');
       else if (N.indexOf(o.p) < 0) o.w.push('السعر ' + o.p + ' مش مكتوب بالأرقام في الكلام، تأكد منه');
       if (o.o && o.p && o.o <= o.p) o.w.push('السعر القديم مش أكبر من الجديد، هيتتجاهل');
+      if (o.n && T.indexOf(an(o.n)) < 0 && !an(o.n).split(' ').some(function (w) { return w.length > 2 && T.indexOf(w) > -1; })) o.w.push('اسم الصنف مش مكتوب كده في الكلام، راجعه');
     });
     return out;
   }
@@ -4173,18 +4209,26 @@
   }
 
   var ADMIN_CHAT_SYS = [
-    'أنت مساعد ذكي لتاجر جملة مصري يدير كتالوج متجر أبو سعيد.',
-    'القاعدة الذهبية: لا تغيّر أو تحذف أو تعدّل أي صنف غير موجود في الكتالوج، ولا تخترع أسعاراً.',
-    'عند إضافة صنف جديد بدون سعر أو ببيانات ناقصة، اذكر النقص بوضوح واسأل التاجر بدل اختراع سعر.',
-    'إذا تشابه أكثر من صنف (مثلاً أحجام مختلفة لنفس الاسم)، لا تخمّن: اترك ops فارغة واسأل التاجر ليحدد الصنف المطلوب.',
-    'عند طلب تعديل جماعي أو حذف، جهّز ops دقيقة ليراجعها التاجر قبل الضغط على تنفيذ.',
+    'أنت مساعد ذكي لتاجر جملة مصري يتحدث بالعامية المصرية ويدير كتالوج متجر أبو سعيد. ردودك قصيرة وودودة (سطرين بالكتير) وتسأل سؤالاً واحداً فقط في المرة.',
+    'القاعدة الذهبية: لا تغيّر أو تحذف أو تعدّل أي صنف غير موجود في الكتالوج، ولا تخترع أسعاراً أو نكهات أو عبوات.',
+    'مهم جداً: إذا ذكر التاجر صنفاً واحداً وله أكثر من نكهة مفصولة بـ «و» أو فاصلة (مثل «دوريتوس عنده نكهات ملح وخل وشطة»)، فهذا صنف واحد فقط تُجمع كل نكهاته داخل flavors، ولا تنشئ صنفاً منفصلاً لكل نكهة.',
+    'إذا ذُكر للصنف أكثر من حجم أو نوع بأسعار مختلفة، أنشئ عنصراً منفصلاً لكل حجم بنفس name وضع الحجم أو النوع في variant.',
+    'اسأل عن الناقص بالترتيب: السعر أولاً (اجعل price: 0 ولا تخترع سعراً)، ثم القسم، ثم العبوة والنكهات مرة واحدة فقط.',
+    'إذا تشابه الصنف الجديد مع صنف موجود في الكتالوج نبّه التاجر في reply، وإذا تشابه أكثر من صنف عند التعديل أو الحذف اترك ops فارغة واسأله أيهم يقصد.',
     'أعد الرد JSON فقط وفق المخطط المحدد.',
   ].join('\n');
 
   var ADMIN_BATCH_SYS = [
-    'أنت مساعد لاستخراج بيانات أصناف جملة مصرية من نص حر إلى JSON.',
-    'لا تخترع أسعاراً غير مذكورة في النص (اجعل price: 0 إذا لم يُذكر السعر).',
-    'التزم بأسماء الأقسام الحالية إن وُجد قسم مطابق، واستخرج النكهات والأحجام والعبوات بدقة.',
+    'أنت مساعد لإدخال بيانات أصناف متجر جملة مصري. حوّل النص التالي إلى JSON فقط (من غير أي كلام إضافي) بالشكل: {"products":[{"name":"","category":"","pack":"","price":0,"oldPrice":0,"variant":"","emoji":"","flavors":[""]}]}.',
+    'القواعد:',
+    '- name هو اسم الصنف فقط (مثل دوريتوس، شيبسي، مولتو).',
+    '- category يجب أن يطابق أحد الأقسام الحالية بالضبط إن ناسب، وإلا اقترح اسم قسم قصير.',
+    '- pack العبوة أو الوصف (مثل الكرتونة 24 كيس) واتركه فارغاً لو لم يُذكر. oldPrice السعر قبل الخصم أو 0.',
+    '- مهم جداً: إذا كان الكلام عن صنف واحد وبعده عدة نكهات مفصولة بـ «و» أو فاصلة (مثل «ضيف دوريتوس عنده نكهات ملح وخل وشطة»)، فهذا صنف واحد فقط؛ ضع كل النكهات في flavors ولا تنشئ عنصراً لكل نكهة.',
+    '- إذا كان للصنف أحجام أو أنواع متعددة بأسعار مختلفة أنشئ عنصراً منفصلاً لكل حجم بنفس name مع وضع الحجم في variant.',
+    '- انسخ الأسعار والأرقام كما وردت تماماً دون تقريب أو حساب، وإذا لم يُذكر السعر اجعل price: 0.',
+    '- emoji إيموجي واحد مناسب للصنف. صحح الإملاء البسيط في الاسم والنكهات دون تبديل الكلمات.',
+    'مثال: «ضيف دوريتوس في قسم الشيبسي، الكرتونة 24 كيس، سعرها 260 جنيه، وعنده نكهات ملح وخل وشطة» -> {"products":[{"name":"دوريتوس","category":"شيبسي","pack":"الكرتونة 24 كيس","price":260,"oldPrice":0,"variant":"","emoji":"🔺","flavors":["ملح","خل","شطة"]}]}.',
   ].join('\n');
 
   function aiPrompt(text) {
@@ -4208,6 +4252,7 @@
       body: JSON.stringify({
         prompt: prompt,
         apiKey: key || undefined,
+        audioBase64: opts.audioBase64 || undefined,
         preferredModel: pref,
         schemaType: opts.schemaType || undefined,
         systemInstruction: opts.systemInstruction || undefined,
@@ -4226,8 +4271,13 @@
   }
 
   var VSR = window.SpeechRecognition || window.webkitSpeechRecognition, VR = null, VON = false, VPOL = false, VERR = 0, VWL = null;
+  var VENG = '', VST = null, VSID = 0, VSL = [], VPEND = 0, VBASE = '', VAIERR = 0, VGP = false;
   function vfix(s) {
-    return nd(s).replace(/\s*(?:سطر جديد|سطر تاني|صنف جديد|صنف تاني)\s*/g, '\n').replace(/\s*(?:فاصلة|فاصله)\s*/g, '، ').replace(/[ \t]{2,}/g, ' ').replace(/ *\n */g, '\n');
+    return nd(s)
+      .replace(/\s*(?:سطر جديد|سطر تاني|سطر تانيه|السطر الجديد|صنف جديد|صنف تاني|صنف تانيه)\s*/g, '\n')
+      .replace(/\s*(?:فاصلة|فاصله)\s*/g, '، ')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/ *\n */g, '\n');
   }
   function vUI(on) {
     var b = $('smmic'), l = $('smvl');
@@ -4238,6 +4288,159 @@
         navigator.wakeLock.request('screen').then(function (x) { VWL = x; x.addEventListener('release', function () { VWL = null; }); }).catch(function () {});
       } else if (!on && VWL) { VWL.release(); VWL = null; }
     } catch (e) {}
+  }
+  function vBeep(ac) {
+    try {
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.25, ac.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.14);
+      o.connect(g); g.connect(ac.destination);
+      o.start(); o.stop(ac.currentTime + 0.16);
+    } catch (z) {}
+  }
+  function vWav(f, sr) {
+    var ra = sr / 16000, n = Math.floor(f.length / ra), buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf), i, j;
+    function ws(o, t) { for (var q = 0; q < t.length; q++) v.setUint8(o + q, t.charCodeAt(q)); }
+    ws(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    ws(36, 'data'); v.setUint32(40, n * 2, true);
+    for (i = 0; i < n; i++) {
+      var a = 0, c = 0, st = Math.floor(i * ra), en = Math.min(f.length, Math.floor((i + 1) * ra));
+      for (j = st; j < en; j++) { a += f[j]; c++; }
+      var x = c ? a / c : 0; x = Math.max(-1, Math.min(1, x));
+      v.setInt16(44 + i * 2, x < 0 ? x * 32768 : x * 32767, true);
+    }
+    var u = new Uint8Array(buf), b = '', k;
+    for (k = 0; k < u.length; k += 8192) b += String.fromCharCode.apply(null, u.subarray(k, k + 8192));
+    return btoa(b);
+  }
+  async function gAud(key, b64) {
+    var nm = D.p.slice(0, 100).map(function (p) { return p[0]; }).filter(Boolean);
+    var pr = 'اكتب بالظبط الكلام المنطوق في المقطع الصوتي ده (بالعامية المصرية، وموضوعه أصناف ونكهات وأسعار متجر جملة) بإملاء صحيح. الأرقام بالإنجليزية. ماتضيفش أي شرح أو علامات اقتباس ولا تترجم. لو مفيش كلام مفهوم ارجع نص فاضي. أسماء أصناف موجودة للاسترشاد في الإملاء: ' + JSON.stringify(nm) + ' والأقسام: ' + JSON.stringify(D.cats);
+    var txt = await askGemini(key, pr, { audioBase64: b64, taskType: 'voice_raw', temperature: 0 });
+    return String(txt || '').trim().replace(/^["«»“”]+|["«»“”]+$/g, '').trim();
+  }
+  function vAIrender() {
+    var t = $('smt'); if (!t) return;
+    t.value = VBASE + vfix(VSL.map(function (x) { return x == null ? '…' : x; }).filter(function (x) { return x !== ''; }).join(' '));
+    t.scrollTop = t.scrollHeight; SMT = t.value;
+  }
+  function vRelease() {
+    var s = VST; VST = null; if (!s) return;
+    try { s.pr.onaudioprocess = null; s.pr.disconnect(); } catch (z) {}
+    try { s.src.disconnect(); } catch (z) {}
+    try { s.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (z) {}
+    try { s.ac.close(); } catch (z) {}
+  }
+  function vAIfail(err) {
+    var m = err && err.message; VAIERR++;
+    if (m === 'KEY' || m === 'LIMIT' || m === 'NOMODEL' || VAIERR >= 3) {
+      if (VST && !VST.stopping) {
+        var was = VON; vRelease(); VENG = 'sr';
+        toast(m === 'LIMIT' ? 'حصة الذكاء الاصطناعي خلصت، هكمل بتعرف المتصفح' : m === 'KEY' ? 'مفتاح الـ API غير مضبوط، هكمل بتعرف المتصفح' : 'الذكاء الاصطناعي مش متاح دلوقتي، هكمل بتعرف المتصفح');
+        if (was && VSR) { VON = true; vRun(); } else { VON = false; vUI(false); }
+      }
+    }
+  }
+  function vSend(f, sr, key, sid) {
+    var idx = VSL.length; VSL.push(null); VPEND++; vAIrender();
+    var b64;
+    try { b64 = vWav(f, sr); } catch (z) { VSL[idx] = ''; VPEND--; return; }
+    gAud(key, b64)
+      .then(function (t) { if (sid !== VSID) return; VSL[idx] = t; VAIERR = 0; })
+      .catch(function (e) { if (sid !== VSID) return; VSL[idx] = ''; vAIfail(e); })
+      .then(function () { VPEND--; if (sid === VSID) vAIrender(); });
+  }
+  async function vAI(key) {
+    var sid = ++VSID, ta = $('smt'); if (!ta) return;
+    VBASE = ta.value; if (VBASE && !/\s$/.test(VBASE)) VBASE += ' ';
+    VSL = []; VPEND = 0; VAIERR = 0;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      var stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      var ac = new AC();
+      if (ac.state === 'suspended') await ac.resume();
+      if (sid !== VSID || !VON) { stream.getTracks().forEach(function (t) { t.stop(); }); try { ac.close(); } catch (z) {} return; }
+      vBeep(ac);
+      var src = ac.createMediaStreamSource(stream), pr = ac.createScriptProcessor(4096, 1, 1), sr = ac.sampleRate;
+      var S = { ac: ac, src: src, pr: pr, stream: stream, seg: [], pre: [], len: 0, speaking: false, silent: 0, noise: 0.004, t0: ac.currentTime + 0.3, stopping: false, key: key, sid: sid, sr: sr };
+      VST = S;
+      S.flush = function () {
+        var tot = S.len, sp = S.speaking, arr = S.seg;
+        S.seg = []; S.len = 0; S.speaking = false; S.silent = 0;
+        if (!sp || tot < sr * 0.4) return;
+        var f = new Float32Array(tot), o = 0;
+        arr.forEach(function (c) { f.set(c, o); o += c.length; });
+        vSend(f, sr, key, sid);
+      };
+      pr.onaudioprocess = function (e) {
+        if (!VST || VST !== S || S.stopping) return;
+        if (ac.currentTime < S.t0) return;
+        var d = e.inputBuffer.getChannelData(0), c = new Float32Array(d.length); c.set(d);
+        var sum = 0, i; for (i = 0; i < c.length; i++) sum += c[i] * c[i];
+        var rms = Math.sqrt(sum / c.length), thr = Math.max(0.012, S.noise * 3);
+        if (rms > thr) {
+          if (!S.speaking) { S.speaking = true; S.seg = S.pre.slice(); S.len = 0; S.seg.forEach(function (x) { S.len += x.length; }); }
+          S.silent = 0; S.seg.push(c); S.len += c.length;
+        } else {
+          S.noise = S.noise * 0.95 + rms * 0.05;
+          if (S.speaking) { S.seg.push(c); S.len += c.length; S.silent += c.length; if (S.silent > sr * 0.8) S.flush(); }
+          else { S.pre.push(c); if (S.pre.length > 3) S.pre.shift(); }
+        }
+        if (S.speaking && S.len > sr * 12) S.flush();
+      };
+      src.connect(pr); pr.connect(ac.destination);
+    } catch (x) {
+      VON = false; vUI(false);
+      toast(x && (x.name === 'NotAllowedError' || x.name === 'SecurityError') ? 'اسمح للمايك من إعدادات المتصفح' : 'تعذر تشغيل الميكروفون');
+    }
+  }
+  function vStopAI(graceful) {
+    var S = VST;
+    if (!graceful) { VSID++; VON = false; vRelease(); vUI(false); return; }
+    if (!S) { VON = false; vUI(false); return; }
+    S.stopping = true; S.flush(); VON = false; vRelease();
+    var sid = S.sid, n = 0;
+    var iv = setInterval(function () {
+      n++;
+      if (VPEND <= 0 || n > 200 || sid !== VSID) {
+        clearInterval(iv);
+        if (sid === VSID) { vAIrender(); vUI(false); vPolish(); }
+        else vUI(false);
+      }
+    }, 100);
+  }
+  async function vPolish() {
+    var ta = $('smt'), ke = $('smk'), er = $('sme');
+    if (!ta) return;
+    var key = (ke && ke.value.trim()) || '';
+    var hasKey = Boolean(key || (D.cfg && (D.cfg.hasGk || D.cfg.gkFromEnv)));
+    if (!hasKey || (D.cfg && D.cfg.aiMode === 'local')) return;
+    var tx = ta.value.trim(); if (!tx) return;
+    SMT = ta.value;
+    VPOL = true;
+    var l = $('smvl'); if (l) l.textContent = '✨ بظبط الكتابة...';
+    if (er) { er.style.color = 'var(--mu)'; er.textContent = '✨ بظبط الكتابة...'; }
+    try {
+      var names = D.p.slice(0, 150).map(function (p) { return p[0]; }).filter(Boolean);
+      var pr = 'ده نص اتكتب بالإملاء الصوتي (بالعامية المصرية) لوصف أصناف متجر جملة. صحّح الأخطاء الإملائية وأخطاء التعرف على الصوت وحط علامات الترقيم الصح، من غير ما تغيّر المعنى. القواعد:\n- ماتغيّرش أي رقم أو سعر أو كمية، وحوّل الأرقام العربية لأرقام إنجليزية.\n- ماتضيفش ولا تحذف أصناف أو نكهات أو معلومات.\n- ماتقسمش الصنف الواحد: لو ذكر صنف واحد وله أكتر من طعم أو نكهة (زي «دوريتوس عنده طعم جبنة وكباب وملح وشطة») سيبه في سطر واحد وماتكررش اسم الصنف مع كل طعم. السطر الجديد بس لصنف تاني مختلف.\n- ماتزودش عدد الأسطر عن اللي في النص الأصلي.\n- اكتب أسماء الأصناف والنكهات بشكلها الصح، وده أسماء أصناف موجودة عندنا للاسترشاد: ' + JSON.stringify(names) + '\n- الأقسام الموجودة: ' + JSON.stringify(D.cats) + '\nأرجع JSON فقط بالشكل {"text":""}\nالنص:\n' + tx;
+      var resObj = await askGemini(key, pr, { schemaType: 'voice_polish', taskType: 'voice_polish', temperature: 0, returnObject: true });
+      var j = resObj.structured || JSON.parse(String(resObj.text || '{}').replace(/```json|```/g, '').trim());
+      var out = String(j.text || '').trim();
+      var ta2 = $('smt');
+      var nl = function (x) { return x.split(/\n+/).filter(function (q) { return q.trim(); }).length; };
+      if (ta2 && out && out.length > tx.length * 0.5 && out.length < tx.length * 2 && nl(out) <= nl(tx) && ta2.value.trim() === tx && nsame(out, tx)) {
+        ta2.value = out; SMT = out;
+      }
+      if ($('sme')) { $('sme').style.color = 'var(--mu)'; $('sme').textContent = '✅ الكتابة اتظبطت'; }
+    } catch (x) {
+      if ($('sme')) { $('sme').style.color = ''; $('sme').textContent = ''; }
+    }
+    VPOL = false;
+    var l2 = $('smvl'); if (l2 && !VON && !VST && !VR) l2.textContent = 'اكتب بالصوت';
   }
   function vRun() {
     var ta = $('smt'); if (!VON || !ta) return;
@@ -4254,26 +4457,48 @@
           else if (!(lf && lf.indexOf(t) > -1)) fin.push(t);
         } else im = t;
       }
+      var lf2 = fin.length ? fin[fin.length - 1] : '';
+      if (lf2 && im.indexOf(lf2) === 0) im = im.slice(lf2.length).trim();
+      else if (lf2 && im.length > 3 && lf2.indexOf(im) > -1) im = '';
       t2.value = base + vfix(fin.join(' ') + (im ? ' ' + im : ''));
       t2.scrollTop = t2.scrollHeight; SMT = t2.value;
     };
-    r.onerror = function (e) { if (e.error == 'not-allowed' || e.error == 'service-not-allowed') { VON = false; toast('اسمح للمايك من المتصفح'); } else VERR++; };
+    r.onerror = function (e) { if (e.error == 'not-allowed' || e.error == 'service-not-allowed') { VON = false; toast('اسمح للمايك من المتصفح'); } else if (e.error == 'network' || e.error == 'audio-capture') VERR++; };
     r.onend = function () {
       if (VR === r) VR = null;
       if (VON) { if (VERR > 20) { VON = false; vUI(false); return; } setTimeout(vRun, VERR ? 600 : 120); return; }
       vUI(false);
+      if (VGP) { VGP = false; vPolish(); }
     };
-    try { r.start(); } catch (e) { VR = null; VON = false; vUI(false); }
+    try { r.start(); } catch (e) {
+      VR = null;
+      if (VON) {
+        VERR++;
+        if (VERR > 20) { VON = false; vUI(false); }
+        else setTimeout(vRun, 400);
+      }
+    }
+  }
+  function vCanAI() {
+    var key = $('smk') ? $('smk').value.trim() : '';
+    var hasKey = Boolean(key || (D.cfg && (D.cfg.hasGk || D.cfg.gkFromEnv)));
+    var AC = window.AudioContext || window.webkitAudioContext;
+    return Boolean(hasKey && !(D.cfg && D.cfg.aiMode === 'local') && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && AC && window.btoa);
   }
   function vStart() {
-    if (VON || VR) return;
-    if (!VSR) return toast('المتصفح لا يدعم الإملاء الصوتي، جرّب Chrome');
-    VON = true; VPOL = false; VERR = 0; vUI(true); vRun();
+    if (VON || VR || VST || VPOL) return;
+    var canAI = vCanAI();
+    if (!canAI && !VSR) return toast('المتصفح لا يدعم الإملاء الصوتي، جرّب Chrome');
+    VON = true; VGP = false; VERR = 0; vUI(true);
+    if (canAI) { VENG = 'ai'; vAI($('smk') ? $('smk').value.trim() : ''); }
+    else { VENG = 'sr'; vRun(); }
   }
-  function vStop() {
-    VON = false;
-    if (VR) { try { VR.stop(); } catch (e) { VR = null; vUI(false); } }
-    else vUI(false);
+  function vStop(polish) {
+    if (VENG === 'ai' && (VST || VON)) { vStopAI(!!polish); return; }
+    if (!polish) VSID++;
+    var was = VON || !!VR; VGP = !!polish && was; VON = false;
+    if (VR) { try { VR.stop(); } catch (e) { VR = null; vUI(false); if (VGP) { VGP = false; vPolish(); } } }
+    else { vUI(false); if (VGP) { VGP = false; vPolish(); } }
   }
 
   function renderSmInModalDom(t) {
@@ -4635,8 +4860,9 @@
         j = JSON.parse(String(aiRes.text || '').replace(/```json|```/g, '').trim());
       }
       if (Array.isArray(j)) j = { products: j };
+      var tx = CH.msgs.filter(function (x) { return x.r === 'u'; }).map(function (x) { return x.t; }).join('\n');
       var L = (Array.isArray(j.products) ? j.products : []).map(nz).filter(function (o) { return o.n; });
-      if (L.length) CH.draft = annotateDraftDuplicates(fixList(L, t));
+      if (L.length) CH.draft = annotateDraftDuplicates(fixList(L, tx || t));
 
       var ops = Array.isArray(j.ops) ? j.ops : [];
       CH.pend = null;
@@ -4698,24 +4924,43 @@
       chRender();
     }
   }
-  function pk(o) { var h = 0, i; for (i = 0; i < o.n.length; i++) h += o.n.charCodeAt(i); return h % PAL.length; }
-  function renderSmRvModalDom() {
-    vStop();
-    var h = '<div class="pn"><h2>مراجعة الأصناف (' + SM.length + ')<button class="x" type="button" id="smx">✕</button></h2>';
+  function pk(o) {
+    var n = String(o.n || ''), mp = [['طماطم', 1], ['شطة', 1], ['حار', 1], ['جبن', 2], ['برتقال', 2], ['خل', 3], ['ملح', 0], ['شوكولات', 5], ['كاكاو', 5], ['فراولة', 6], ['ذرة', 7], ['فشار', 7]];
+    for (var i = 0; i < mp.length; i++) if (n.indexOf(mp[i][0]) > -1) return mp[i][1];
+    var h = 0; for (i = 0; i < n.length; i++) h += n.charCodeAt(i);
+    return h % PAL.length;
+  }
+  function renderSmRvModalDom(keep) {
+    vStop(false);
+    var op = document.querySelector('#ov .pn'), st = keep && op ? op.scrollTop : 0;
+    var h = '<div class="pn"><h2>مراجعة الأصناف (' + SM.length + ')<button class="x" type="button" id="smx">✕</button></h2>' +
+      '<p class="hint">راجع وعدّل أي بيانات، وشيل العلامة من الصنف اللي مش عايز تضيفه.</p>';
     SM.forEach(function (o, i) {
       var cs = D.cats.slice(); if (o.c && cs.indexOf(o.c) < 0) cs.push(o.c);
       var a = ' data-si="' + i + '" data-sk=';
       var warns = (o.w && o.w.length) ? '<div class="hint" style="color:#d97706;margin-bottom:6px">' + o.w.map(esc).join('<br>') + '</div>' : '';
-      h += '<div class="card2"><label class="ck" style="margin:0"><input type="checkbox"' + a + '"on"' + (o.on ? ' checked' : '') + '> إضافة الصنف</label>' +
+      h += '<div class="card2"><label class="ck" style="margin:0"><input type="checkbox"' + a + '"on"' + (o.on ? ' checked' : '') + '> إضافة الصنف' +
+        (o.dup ? ' <span style="color:#d97706;font-weight:700">⚠️ مشابه موجود</span>' : '') + '</label>' +
         warns +
+        '<label>صورة المنتج (اختياري)</label><div class="ip"><div class="ipv" style="width:68px;height:68px">' +
+        (o.im ? '<img src="' + esc(o.im) + '" alt="">' : esc(o.e || '🥔')) +
+        '</div><div class="btns"><label class="btn btn-primary btn-sm" style="display:inline-block;cursor:pointer;margin:0">📷 اختيار صورة<input type="file" accept="image/*" hidden data-si="' + i + '" data-sk="img"></label>' +
+        (o.im ? '<button class="btn btn-danger btn-sm" type="button" data-si="' + i + '" data-sk="rmim">إزالة الصورة</button>' : '') +
+        '</div></div>' +
         '<label>الاسم</label><input' + a + '"n" value="' + esc(o.n) + '">' +
-        '<div class="r2"><div><label>السعر</label><input type="number"' + a + '"p" value="' + (o.p || '') + '"></div><div><label>القسم</label><select' + a + '"c">' +
+        '<div class="r2"><div><label>السعر (جنيه)</label><input type="number" inputmode="numeric"' + a + '"p" value="' + (o.p || '') + '"></div>' +
+        '<div><label>السعر قبل الخصم</label><input type="number" inputmode="numeric"' + a + '"o" value="' + (o.o || '') + '" placeholder="اختياري"></div></div>' +
+        '<div class="r2"><div><label>الحجم / النوع</label><input' + a + '"v" value="' + esc(o.v || '') + '" placeholder="مثال: كبير / صغير"></div>' +
+        '<div style="max-width:86px"><label>إيموجي</label><input' + a + '"e" value="' + esc(o.e || '🥔') + '" style="text-align:center"></div></div>' +
+        '<label>العبوة / الوصف</label><input' + a + '"d" value="' + esc(o.d || '') + '" placeholder="مثال: الكرتونة 24 كيس">' +
+        '<label>القسم</label><select' + a + '"c">' +
         cs.map(function (c) { return '<option' + (c == o.c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') +
-        '</select></div></div>' +
-        '<label>النكهات (بفاصلة)</label><input' + a + '"f" value="' + esc(o.f.join('، ')) + '"></div>';
+        '</select>' +
+        '<label>النكهات (' + o.f.length + ') — افصل بفاصلة</label><input' + a + '"f" value="' + esc(o.f.join('، ')) + '"></div>';
     });
     $('ov').innerHTML = h + '<div class="r2" style="margin-top:14px"><button class="btn btn-success btn-lg" id="smok" type="button">➕ إضافة المحدد</button><button class="btn btn-lg" id="smbk" type="button">رجوع</button></div></div>';
     $('ov').classList.add('on');
+    var np2 = document.querySelector('#ov .pn'); if (np2) np2.scrollTop = st;
   }
   function smRv() {
     commitAdminRoute(
@@ -4755,20 +5000,28 @@
     return ok;
   }
   function chReview() {
+    vStop(false);
     var list = annotateDraftDuplicates(JSON.parse(JSON.stringify(CH.draft)));
-    list.forEach(function (o) { o.on = 1; o.c = o.c ? mc(o.c) : D.cats[0] || 'عام'; });
+    list.forEach(function (o) {
+      o.on = 1;
+      o.im = o.im || '';
+      o.c = o.c ? mc(o.c) : D.cats[0] || 'عام';
+      o.e = o.e || inferProdEmoji(o.n, o.c);
+      o.dup = D.p.some(function (p) { return nr(p[0]) === nr(o.n) && nr(p[10] || '') === nr(o.v) && nr(p[1]) === nr(o.c); });
+      if (o.dup) o.on = 0;
+    });
     SM = list; smRv();
   }
   async function smGo(ai) {
-    vStop();
+    vStop(false);
     var tx = $('smt').value.trim(), er = $('sme');
-    SMT = tx; er.textContent = '';
+    SMT = tx; er.textContent = ''; er.style.color = '';
     if (!tx) { er.textContent = 'اكتب وصف الأصناف أولاً'; return; }
     try {
       var list;
       if (ai) {
         var k = $('smk') ? $('smk').value.trim() : '';
-        er.textContent = '⏳ جاري التحليل...';
+        er.style.color = 'var(--mu)'; er.textContent = '⏳ جاري التحليل...';
         try {
           var aiRes = await askGemini(k, aiPrompt(tx), {
             schemaType: 'admin_batch',
@@ -4784,10 +5037,16 @@
         }
       } else list = lp(tx);
       list = annotateDraftDuplicates(fixList(list.filter(function (o) { return o.n; }), tx));
-      if (!list.length) { er.textContent = 'لم أستطع استخراج أصناف من النص'; return; }
-      list.forEach(function (o) { o.c = o.c ? mc(o.c) : D.cats[0] || 'عام'; });
+      if (!list.length) { er.style.color = ''; er.textContent = 'لم أستطع استخراج أصناف من النص'; return; }
+      list.forEach(function (o) {
+        o.im = o.im || '';
+        o.c = o.c ? mc(o.c) : D.cats[0] || 'عام';
+        o.e = o.e || inferProdEmoji(o.n, o.c);
+        o.dup = D.p.some(function (p) { return nr(p[0]) === nr(o.n) && nr(p[10] || '') === nr(o.v) && nr(p[1]) === nr(o.c); });
+        if (o.dup) o.on = 0;
+      });
       SM = list; smRv();
-    } catch (e) { er.textContent = 'تعذر التحليل، جرّب التحليل المحلي السريع'; }
+    } catch (e) { er.style.color = ''; er.textContent = 'تعذر التحليل، جرّب التحليل المحلي السريع'; }
   }
 
   // ===== MODAL DELEGATED EVENTS (#ov) =====
@@ -4870,7 +5129,12 @@
       });
       return;
     }
-    if (b && b.id === 'smmic') { if (VON || VR) vStop(); else vStart(); return; }
+    if (b && b.id === 'smmic') {
+      if (VPOL) return;
+      if (VON || VR || VST) vStop(true);
+      else if (!(VENG === 'ai' && b.classList.contains('rec'))) vStart();
+      return;
+    }
     if (b && b.id === 'chsend') { chSend(); return; }
     if (b && b.id === 'chex') { chExec(); return; }
     if (b && b.id === 'chcx') { CH.pend = null; chRender(); return; }
@@ -4878,6 +5142,9 @@
     if (b && b.id === 'chrv') { chReview(); return; }
     if (b && b.id === 'chnw') { chReset(); chRender(); return; }
     if (b && b.id === 'chold') { smOpen(); return; }
+    if (t.dataset && t.dataset.sk === 'rmim' && SM[+t.dataset.si]) {
+      SM[+t.dataset.si].im = ''; renderSmRvModalDom(1); return;
+    }
     if (t.id === 'smbk') {
       if (admCanGoBack()) history.back();
       else commitAdminRoute({ ov: CHF ? 'ai-chat' : 'ai-batch' }, { mode: 'replace', forceOverlay: true });
@@ -4894,12 +5161,20 @@
         ? sel.some(function (o) { return (E.checkProductDuplicates(o, D.p).exactMatches || []).length > 0; })
         : false;
       var commitAdd = function () {
+        var imap = {};
         sel.forEach(function (o) {
-          var k = pk(o), a = [o.n, o.c, o.d, o.p, PAL[k][1], PAL[k][2], o.e || '🥔', 0, ''];
+          var k = pk(o), a = [o.n, o.c, o.d || '', o.p, PAL[k][1], PAL[k][2], o.e || inferProdEmoji(o.n, o.c), 0, ''];
           if (o.f.length) a[9] = o.f.map(function (f) { return [f, 0]; });
           if (o.v) a[10] = o.v;
           if (o.o > o.p) a[11] = o.o;
           a[12] = new Date().toISOString();
+          if (o.im) {
+            if (!imap[o.im]) {
+              var nid = 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+              IMG[nid] = o.im; PEND[nid] = 1; imap[o.im] = nid;
+            }
+            a[8] = imap[o.im];
+          }
           if (D.cats.indexOf(o.c) < 0) D.cats.push(o.c);
           D.p.push(a);
         });
@@ -4932,8 +5207,13 @@
     else if (t.dataset.fa != null && fls[+t.dataset.fa]) fls[+t.dataset.fa][1] = t.checked ? 0 : 1;
     else if (t.dataset.sk != null && SM[+t.dataset.si]) {
       var o = SM[+t.dataset.si], k = t.dataset.sk;
+      if (k === 'img') {
+        var fl = t.files && t.files[0];
+        if (fl) shrink(fl).then(function (u) { o.im = u; renderSmRvModalDom(1); }).catch(function () { toast('الصورة دي مش شغالة، جرّب غيرها'); });
+        return;
+      }
       if (k === 'on') o.on = t.checked ? 1 : 0;
-      else if (k === 'p') o.p = +t.value || 0;
+      else if (k === 'p' || k === 'o') o[k] = +t.value || 0;
       else if (k === 'f') o.f = sfl(t.value);
       else o[k] = t.value.trim();
     }

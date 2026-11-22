@@ -595,6 +595,73 @@ async function runCustomerSuite() {
     assert.match(step4.reply, /ملخص الطلب/);
     assert.match(step4.reply, /260 جنيه/);
   });
+
+  // C18: Cross-segment flavor inheritance stays on previous product even if another catalog item has "ملح"
+  await runCase('Customer AI', 'C18: "عايز 3 كراتين دوريتوس شطة و2 ملح" inherits دوريتوس instead of jumping to شيبسي ملح', () => {
+    const saltCat = {
+      cats: ['شيبسي', 'سناكس'],
+      cfg: { unit: 'كرتونة', brandName: 'أبو سعيد' },
+      p: [
+        ['شيبسي ملح', 'شيبسي', 'كرتونة 24 كيس', 110, '#1', '#2', '🥔', 0, '', [], '', 0],
+        ['دوريتوس', 'شيبسي', 'كرتونة 24 كيس', 260, '#1', '#2', '🔺', 0, '', [['ملح', 0], ['خل', 0], ['شطة', 0]], '', 0],
+      ],
+      offers: [],
+    };
+    const res = processCustomerTurn({
+      text: 'عايز 3 كراتين دوريتوس شطة و2 ملح',
+      catalogData: saltCat,
+      currentDraft: [],
+    });
+    assert.equal(res.draft.length, 2);
+    assert.deepEqual(
+      res.draft.map((x) => ({ i: x.i, f: x.f, q: x.q })),
+      [
+        { i: 1, f: 2, q: 3 },
+        { i: 1, f: 0, q: 2 },
+      ]
+    );
+  });
+
+  // C19: Single-segment multi-flavor ("عايز كرتونتين دوريتوس جبنة وفلفل حلو" + missing-qty slot fill)
+  await runCase('Customer AI', 'C19: Single-segment multi-flavor preserves all matched flavors with and without quantity', () => {
+    const resWithQty = processCustomerTurn({
+      text: 'عايز كرتونتين دوريتوس جبنة وفلفل حلو',
+      catalogData: catCartonData,
+      currentDraft: [],
+    });
+    assert.equal(resWithQty.draft.length, 2);
+    assert.deepEqual(
+      resWithQty.draft.map((x) => ({ i: x.i, f: x.f, q: x.q })).sort((a, b) => a.f - b.f),
+      [
+        { i: 2, f: 0, q: 2 },
+        { i: 2, f: 1, q: 2 },
+      ]
+    );
+
+    const t1 = processCustomerTurn({
+      text: 'عايز دوريتوس جبنة وفلفل حلو',
+      catalogData: catCartonData,
+      currentDraft: [],
+    });
+    assert.equal(t1.draft.length, 0);
+    assert.equal(t1.nextState.pendingClarification?.type, 'qty');
+    assert.deepEqual([...(t1.nextState.pendingClarification?.flavorIndices || [])].sort((a, b) => a - b), [0, 1]);
+
+    const t2 = processCustomerTurn({
+      text: '3',
+      catalogData: catCartonData,
+      currentDraft: t1.draft,
+      convState: t1.nextState,
+    });
+    assert.equal(t2.draft.length, 2);
+    assert.deepEqual(
+      t2.draft.map((x) => ({ i: x.i, f: x.f, q: x.q })).sort((a, b) => a.f - b.f),
+      [
+        { i: 2, f: 0, q: 3 },
+        { i: 2, f: 1, q: 3 },
+      ]
+    );
+  });
 }
 
 // =========================================================================
@@ -907,6 +974,94 @@ async function runAdminSuite() {
     // Verify User-Agent header exists directly in geminiServer.js source
     const gsSrc = fs.readFileSync(path.join(ROOT_DIR, 'lib', 'geminiServer.js'), 'utf8');
     assert.match(gsSrc, /'User-Agent':\s*'aistudio-build'/);
+  });
+
+  // A16: Exact user prompt grouped into single product with all 3 flavors, pack, price, category, emoji & duplicate alert
+  await runCase('Admin AI', 'A16: Exact multi-flavor single-product command parses all fields without splitting flavors', () => {
+    const catData = makeTestCatalog();
+    const res = parseAdminLocalTurn({
+      text: 'ضيف دوريتوس في قسم الشيبسي، الكرتونة 24 كيس، سعرها 260 جنيه، وعنده نكهات ملح وخل وشطة',
+      catalogData: catData,
+      currentDraft: [],
+    });
+    assert.equal(res.draft.length, 1, 'Multi-flavor product must remain ONE product');
+    assert.equal(res.draft[0].n, 'دوريتوس');
+    assert.equal(res.draft[0].c, 'شيبسي');
+    assert.equal(res.draft[0].d, 'الكرتونة 24 كيس');
+    assert.equal(res.draft[0].p, 260);
+    assert.deepEqual(res.draft[0].f, ['ملح', 'خل', 'شطة']);
+    assert.ok(res.draft[0].e, 'Must assign a suitable emoji');
+    assert.ok(res.draft[0].w.some((w) => /مشابه|مكرر/.test(w)), 'Must flag existing دوريتوس similarity');
+  });
+
+  // A17: Multi-product batch, multi-variant distinct prices & field edits (pack, oldPrice)
+  await runCase('Admin AI', 'A17: Multi-product batch, multi-variant price split & pack/oldPrice edits', () => {
+    const catData = makeTestCatalog();
+
+    // Multi-product batch
+    const batchRes = parseAdminLocalTurn({
+      text: 'ضيف كرانشي بسعر 140 قسم سناكس\nضيف تويست بسعر 95 قسم الحلويات نكهات برتقال وتفاح',
+      catalogData: catData,
+      currentDraft: [],
+    });
+    assert.equal(batchRes.draft.length, 2);
+    assert.equal(batchRes.draft[0].n, 'كرانشي');
+    assert.equal(batchRes.draft[0].p, 140);
+    assert.equal(batchRes.draft[1].n, 'تويست');
+    assert.equal(batchRes.draft[1].c, 'حلويات');
+    assert.deepEqual(batchRes.draft[1].f, ['برتقال', 'تفاح']);
+
+    // Multi-variant with distinct prices -> separate entries sharing name
+    const varRes = parseAdminLocalTurn({
+      text: 'ضيف مولتو جديد صغير بـ 100 ووسط بـ 150 قسم الحلويات',
+      catalogData: catData,
+      currentDraft: [],
+    });
+    assert.equal(varRes.draft.length, 2);
+    assert.deepEqual(
+      varRes.draft.map((x) => ({ n: x.n, v: x.v, p: x.p, c: x.c })),
+      [
+        { n: 'مولتو جديد', v: 'صغير', p: 100, c: 'حلويات' },
+        { n: 'مولتو جديد', v: 'وسط', p: 150, c: 'حلويات' },
+      ]
+    );
+
+    // Pack and oldPrice edits via parseAdminLocalTurn + applyValidatedAdminOps
+    const packEdit = parseAdminLocalTurn({
+      text: 'عدل العبوة لـ دوريتوس لـ كرتونة 30 كيس',
+      catalogData: catData,
+      currentDraft: [],
+    });
+    assert.ok(packEdit.pendingOps?.valid);
+    applyValidatedAdminOps(catData, packEdit.pendingOps.ops);
+    assert.equal(catData.p[2][2], 'كرتونة 30 كيس');
+
+    const oldPriceEdit = parseAdminLocalTurn({
+      text: 'عدل السعر القديم لـ دوريتوس لـ 150',
+      catalogData: catData,
+      currentDraft: [],
+    });
+    assert.ok(oldPriceEdit.pendingOps?.valid);
+    applyValidatedAdminOps(catData, oldPriceEdit.pendingOps.ops);
+    assert.equal(catData.p[2][11], 150);
+  });
+
+  // A18: Verify protected/admin-app.js includes Rahal AI voice, review modal & multi-flavor rules
+  await runCase('Admin AI', 'A18: protected/admin-app.js preserves Rahal AI voice, polish & review modal hooks', () => {
+    const adminJsSrc = fs.readFileSync(path.join(ROOT_DIR, 'protected', 'admin-app.js'), 'utf8');
+    for (const marker of [
+      'function vWav(',
+      'function vAI(',
+      'function vPolish(',
+      'function nsame(',
+      'function fixList(',
+      'function renderSmRvModalDom(',
+      'ADMIN_CHAT_SYS',
+      'ADMIN_BATCH_SYS',
+      'parseAdminLocalTurn',
+    ]) {
+      assert.ok(adminJsSrc.includes(marker), `admin-app.js missing expected Rahal AI marker: ${marker}`);
+    }
   });
 }
 
@@ -1760,6 +1915,46 @@ async function runCustomerUiAndCartSuite() {
       globalThis.fetch = origFetch;
       routerMod.switchOverlay(null);
     }
+  });
+
+  // U5: One-shot rlocal() mode handles cross-segment flavor inheritance, multi-flavor single-segment, & ambiguity
+  await runCase('UI & Cart', 'U5: One-shot rlocal() handles flavor inheritance, multi-flavor & ambiguity without mutating cart', () => {
+    const saltCat = {
+      cats: ['شيبسي', 'سناكس'],
+      cfg: { unit: 'كرتونة', brandName: 'أبو سعيد' },
+      p: [
+        ['شيبسي ملح', 'شيبسي', 'كرتونة 24 كيس', 110, '#1', '#2', '🥔', 0, '', [], '', 0],
+        ['دوريتوس', 'شيبسي', 'كرتونة 24 كيس', 260, '#1', '#2', '🔺', 0, '', [['ملح', 0], ['خل', 0], ['شطة', 0]], '', 0],
+      ],
+      offers: [],
+    };
+    resetEnv(saltCat);
+
+    const inherited = aiMod.rlocal('عايز 3 كراتين دوريتوس شطة و2 ملح');
+    assert.equal(inherited.unk.length, 0);
+    assert.deepEqual(
+      inherited.items.map((x) => ({ i: x.i, f: x.f, q: x.q })),
+      [
+        { i: 1, f: 2, q: 3 },
+        { i: 1, f: 0, q: 2 },
+      ]
+    );
+
+    resetEnv();
+    const ambRes = aiMod.rlocal('عايز كرتونة شيبسي');
+    assert.equal(ambRes.items.length, 1);
+    assert.equal(ambRes.items[0].amb, true, 'rlocal must mark ambiguous شيبسي variants');
+    assert.ok(ambRes.items[0].c.length >= 2);
+
+    const multiFl = aiMod.rlocal('عايز كرتونتين دوريتوس جبنة وفلفل حلو');
+    assert.deepEqual(
+      multiFl.items.map((x) => ({ i: x.i, f: x.f, q: x.q })).sort((a, b) => a.f - b.f),
+      [
+        { i: 2, f: 0, q: 2 },
+        { i: 2, f: 1, q: 2 },
+      ]
+    );
+    assert.deepEqual(state.cart, {}, 'rlocal must never mutate state.cart');
   });
 }
 

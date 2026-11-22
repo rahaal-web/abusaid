@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
+    "dev": "PORT=3000 node server.js",
     "start": "node server.js",
-    "build": "sh -c 'for f in server.js worker.js lib/*.js js/*.js protected/*.js; do node -c \"$f\" || exit 1; done'",
-    "lint": "sh -c 'for f in server.js worker.js lib/*.js js/*.js protected/*.js; do node -c \"$f\" || exit 1; done'"
+    "build": "sh -c 'for f in server.js worker.js lib/*.js js/*.js js/ai/*.js protected/*.js; do node -c \"$f\" || exit 1; done'",
+    "lint": "sh -c 'for f in server.js worker.js lib/*.js js/*.js js/ai/*.js protected/*.js; do node -c \"$f\" || exit 1; done'"
   },
   "dependencies": {
     "@google/genai": "^3.6.1",

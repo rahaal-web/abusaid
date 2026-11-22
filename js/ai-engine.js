@@ -495,6 +495,17 @@ export function matchProductFlavors(product, queryTokens, rawCleanText = '') {
   const matchedIndices = new Set();
   const normRaw = rn(rawCleanText);
 
+  const expandedToks = [];
+  (queryTokens || []).forEach((t) => {
+    const nt = normTok(t);
+    if (!nt) return;
+    expandedToks.push(nt);
+    if (nt.length > 2 && nt.startsWith('و')) {
+      const sub = normTok(nt.slice(1));
+      if (sub && !RSTOP_SET.has(sub)) expandedToks.push(sub);
+    }
+  });
+
   fl.forEach((f, j) => {
     const fNorm = rn(f[0]);
     const fToks = ntk(f[0]).filter((t) => !RSTOP_SET.has(t));
@@ -503,14 +514,15 @@ export function matchProductFlavors(product, queryTokens, rawCleanText = '') {
     // Direct full phrase match
     if (fNorm.length >= 2 && normRaw && (normRaw.includes(fNorm) || normRaw.includes(fToks.join(' ')))) {
       matchedIndices.add(j);
-      if (f[1]) soldOut.push({ j, name: f[0], score: 10 });
-      else avail.push({ j, name: f[0], score: 10 });
+      const entry = { j, name: f[0], score: 10 + fToks.length * 0.5, fToks };
+      if (f[1]) soldOut.push(entry);
+      else avail.push(entry);
       return;
     }
 
     let score = 0;
     let exactHits = 0;
-    queryTokens.forEach((qt) => {
+    expandedToks.forEach((qt) => {
       const s = tokSim(qt, fToks);
       if (s > 0) {
         score += s;
@@ -519,14 +531,32 @@ export function matchProductFlavors(product, queryTokens, rawCleanText = '') {
     });
     if (exactHits >= fToks.length || (score >= 0.85 && fToks.length === 1) || score >= fToks.length * 0.8) {
       matchedIndices.add(j);
-      if (f[1]) soldOut.push({ j, name: f[0], score });
-      else avail.push({ j, name: f[0], score });
+      const entry = { j, name: f[0], score, fToks };
+      if (f[1]) soldOut.push(entry);
+      else avail.push(entry);
     }
   });
 
+  // Dedupe sub-flavors wholly subsumed by a matched multi-word flavor (e.g., "ملح وخل" covers "ملح" / "خل")
+  const dedupeSubsumed = (list) => {
+    const multiPhraseToks = new Set();
+    list.forEach((item) => {
+      if (item.score >= 10 && item.fToks && item.fToks.length > 1) {
+        item.fToks.forEach((ft) => multiPhraseToks.add(ft));
+      }
+    });
+    if (!multiPhraseToks.size) return list.map(({ j, name, score }) => ({ j, name, score }));
+    return list
+      .filter((item) => {
+        if (item.score >= 10 && item.fToks && item.fToks.length > 1) return true;
+        return !item.fToks || !item.fToks.every((ft) => multiPhraseToks.has(ft));
+      })
+      .map(({ j, name, score }) => ({ j, name, score }));
+  };
+
   avail.sort((a, b) => b.score - a.score);
   soldOut.sort((a, b) => b.score - a.score);
-  return { avail, soldOut, matchedIndices };
+  return { avail: dedupeSubsumed(avail), soldOut: dedupeSubsumed(soldOut), matchedIndices };
 }
 
 export function matchProductsInCatalog(restTokens, products, options = {}) {
@@ -1482,11 +1512,13 @@ export function processCustomerTurn({
         }
         const fm = matchProductFlavors(p, qp.rest, sg);
         if (fm.avail.length) {
-          picked.push({
-            j: fm.avail[0].j,
-            q: qp.explicitQty ? qp.qty : pc.explicitQty,
-            name: fm.avail[0].name,
-            hadExplicitQty: qp.explicitQty || Boolean(pc.explicitQty),
+          fm.avail.forEach((af) => {
+            picked.push({
+              j: af.j,
+              q: qp.explicitQty ? qp.qty : pc.explicitQty,
+              name: af.name,
+              hadExplicitQty: qp.explicitQty || Boolean(pc.explicitQty),
+            });
           });
         } else if (fm.soldOut.length) {
           rejectedFlavor = `نكهة «${fm.soldOut[0].name}» خلصانة حالياً في ${getProductDisplayName(p)}. المتاح: ${availFl.map((f) => f[0]).join('، ')}`;
@@ -1594,20 +1626,26 @@ export function processCustomerTurn({
 
       if (resolvedQty > 0 && !isSwitched) {
         const fl = getProductFlavors(p);
-        const fIdx = pc.flavorIdx >= 0 && fl[pc.flavorIdx] && !fl[pc.flavorIdx][1] ? pc.flavorIdx : -1;
-        const nextDraft = dedupeAndNormalizeDraft(
-          [...draft, { i: pc.prodIdx, f: fIdx, q: resolvedQty, c: [pc.prodIdx], amb: false }],
-          products
-        );
+        const fIndices = Array.isArray(pc.flavorIndices) && pc.flavorIndices.length
+          ? pc.flavorIndices.filter((idx) => idx >= 0 && fl[idx] && !fl[idx][1])
+          : [pc.flavorIdx >= 0 && fl[pc.flavorIdx] && !fl[pc.flavorIdx][1] ? pc.flavorIdx : -1];
+        const newLines = fIndices.map((fIdx) => ({
+          i: pc.prodIdx,
+          f: fIdx,
+          q: resolvedQty,
+          c: [pc.prodIdx],
+          amb: false,
+        }));
+        const nextDraft = dedupeAndNormalizeDraft([...draft, ...newLines], products);
         nextState.pendingClarification = null;
         nextState.lastReferencedProductIdx = pc.prodIdx;
-        nextState.lastReferencedFlavorIdx = fIdx;
+        nextState.lastReferencedFlavorIdx = fIndices[fIndices.length - 1];
+        const summaryHeader = fIndices.length > 1
+          ? `ضفتلك في مسودة الطلب ✅:\n` +
+            fIndices.map((fIdx) => `${resolvedQty} ${unit} ${getProductDisplayName(p)} · ${fl[fIdx][0]}`).join('\n')
+          : `ضفتلك في مسودة الطلب ✅: ${resolvedQty} ${unit} من ${getProductDisplayName(p)}${fIndices[0] >= 0 ? ' · ' + fl[fIndices[0]][0] : ''} (${fmtMoneyAr(p[3] * resolvedQty)})`;
         return {
-          reply: formatOrderSummaryReply(
-            `ضفتلك في مسودة الطلب ✅: ${resolvedQty} ${unit} من ${getProductDisplayName(p)}${fIdx >= 0 ? ' · ' + fl[fIdx][0] : ''} (${fmtMoneyAr(p[3] * resolvedQty)})`,
-            nextDraft,
-            kb
-          ),
+          reply: formatOrderSummaryReply(summaryHeader, nextDraft, kb),
           draft: nextDraft,
           nextState,
           go: false,
@@ -2251,39 +2289,58 @@ export function processCustomerTurn({
       rawCleanText: clean || rawSg,
     });
 
-    // Check if segment has NO product name of its own, only a flavor of the previous segment's product
-    if ((!m || m.cs[0].flavorOnlyMatch) && prevProdIdx >= 0 && products[prevProdIdx] && !isProductOutOfStock(products[prevProdIdx])) {
+    // Check if segment has NO distinct product name of its own, only flavor(s) of the previous segment's product
+    if (prevProdIdx >= 0 && products[prevProdIdx] && !isProductOutOfStock(products[prevProdIdx])) {
       const prevP = products[prevProdIdx];
       const fmPrev = matchProductFlavors(prevP, qp.rest, clean || rawSg);
-      if (fmPrev.avail.length) {
-        if (!qp.explicitQty && !qp.hasSingularUnit) {
-          nextState.pendingClarification = {
-            type: 'qty',
-            prodIdx: prevProdIdx,
-            flavorIdx: fmPrev.avail[0].j,
-          };
-          return {
-            reply: `تمام (${getProductDisplayName(prevP)} · ${fmPrev.avail[0].name}) 👍 عايز كام ${unit}؟`,
-            draft: dedupeAndNormalizeDraft(draft, products),
-            nextState,
-            go: false,
-            quick: [
-              { label: `١ ${unit}`, val: '1' },
-              { label: `٢ ${unit}`, val: '2' },
-              { label: `٥ ${unit}`, val: '5' },
-            ],
-          };
+      const unmatchedPrev = detectUnmatchedFlavorTokens(prevP, qp.rest, fmPrev);
+      const prevMatchedToks = new Set();
+      [...fmPrev.avail, ...fmPrev.soldOut].forEach((x) => ntk(x.name).forEach((t) => prevMatchedToks.add(t)));
+      const nonPrevFlavToks = nonStopTokens.filter(
+        (t) => !FLAVOR_MODIFIER_WORDS.has(t) && !prevMatchedToks.has(t) && tokSim(t, Array.from(prevMatchedToks)) < 0.85
+      );
+      const topOther = m && m.cs[0];
+      const topIsOtherExactName = Boolean(topOther && topOther.i !== prevProdIdx && (topOther.exactBase || topOther.exactFull));
+      const purePrevFlavorSegment =
+        (fmPrev.avail.length > 0 || fmPrev.soldOut.length > 0) &&
+        !unmatchedPrev.length &&
+        nonPrevFlavToks.length === 0 &&
+        !topIsOtherExactName;
+
+      if (!m || m.cs[0].flavorOnlyMatch || purePrevFlavorSegment) {
+        if (fmPrev.avail.length) {
+          if (!qp.explicitQty && !qp.hasSingularUnit) {
+            nextState.pendingClarification = {
+              type: 'qty',
+              prodIdx: prevProdIdx,
+              flavorIdx: fmPrev.avail[0].j,
+              flavorIndices: fmPrev.avail.length > 1 ? fmPrev.avail.map((f) => f.j) : undefined,
+            };
+            return {
+              reply: `تمام (${getProductDisplayName(prevP)} · ${fmPrev.avail.map((f) => f.name).join(' و')}) 👍 عايز كام ${unit}؟`,
+              draft: dedupeAndNormalizeDraft(draft, products),
+              nextState,
+              go: false,
+              quick: [
+                { label: `١ ${unit}`, val: '1' },
+                { label: `٢ ${unit}`, val: '2' },
+                { label: `٥ ${unit}`, val: '5' },
+              ],
+            };
+          }
+          const useQ = qp.explicitQty ? qp.qty : 1;
+          fmPrev.avail.forEach((af) => {
+            draft.push({ i: prevProdIdx, f: af.j, q: useQ, c: [prevProdIdx], amb: false });
+            addedMsgs.push(`${useQ} ${unit} ${getProductDisplayName(prevP)} · ${af.name}`);
+          });
+          nextState.lastReferencedProductIdx = prevProdIdx;
+          nextState.lastReferencedFlavorIdx = fmPrev.avail[fmPrev.avail.length - 1].j;
+          continue;
         }
-        const useQ = qp.explicitQty ? qp.qty : 1;
-        draft.push({ i: prevProdIdx, f: fmPrev.avail[0].j, q: useQ, c: [prevProdIdx], amb: false });
-        addedMsgs.push(`${useQ} ${unit} ${getProductDisplayName(prevP)} · ${fmPrev.avail[0].name}`);
-        nextState.lastReferencedProductIdx = prevProdIdx;
-        nextState.lastReferencedFlavorIdx = fmPrev.avail[0].j;
-        continue;
-      }
-      if (fmPrev.soldOut.length) {
-        warnings.push(`نكهة «${fmPrev.soldOut[0].name}» خلصانة في ${getProductDisplayName(prevP)}.`);
-        continue;
+        if (fmPrev.soldOut.length) {
+          warnings.push(`نكهة «${fmPrev.soldOut[0].name}» خلصانة في ${getProductDisplayName(prevP)}.`);
+          continue;
+        }
       }
     }
 
@@ -2537,13 +2594,14 @@ export function processCustomerTurn({
           type: 'qty',
           prodIdx: top.i,
           flavorIdx: bestF.j,
+          flavorIndices: fm.avail.length > 1 ? fm.avail.map((f) => f.j) : undefined,
         };
         nextState.lastReferencedFlavorIdx = bestF.j;
         const normalizedSoFar = dedupeAndNormalizeDraft(draft, products);
         return {
           reply:
             (addedMsgs.length ? `ضفتلك في مسودة الطلب ✅:\n${addedMsgs.join('\n')}\n\n` : '') +
-            `تمام (${getProductDisplayName(p)} · ${bestF.name}) 👍 عايز كام ${unit}؟`,
+            `تمام (${getProductDisplayName(p)} · ${fm.avail.map((f) => f.name).join(' و')}) 👍 عايز كام ${unit}؟`,
           draft: normalizedSoFar,
           nextState,
           go: false,
@@ -2556,9 +2614,11 @@ export function processCustomerTurn({
       }
 
       const useQ = effQty;
-      draft.push({ i: top.i, f: bestF.j, q: useQ, c: [top.i], amb: false });
-      addedMsgs.push(`${useQ} ${unit} ${getProductDisplayName(p)} · ${bestF.name}`);
-      nextState.lastReferencedFlavorIdx = bestF.j;
+      fm.avail.forEach((af) => {
+        draft.push({ i: top.i, f: af.j, q: useQ, c: [top.i], amb: false });
+        addedMsgs.push(`${useQ} ${unit} ${getProductDisplayName(p)} · ${af.name}`);
+      });
+      nextState.lastReferencedFlavorIdx = fm.avail[fm.avail.length - 1].j;
     } else {
       if (!effQty) {
         nextState.pendingClarification = { type: 'qty', prodIdx: top.i, flavorIdx: -1 };
@@ -2851,6 +2911,9 @@ export function previewAndValidateAdminOps({
 
         const changes = [];
         if (newPrice !== oldPrice) changes.push(`السعر: ${oldPrice} ج ← ${newPrice} ج`);
+        if (d.setOldPrice != null && isFinite(Number(d.setOldPrice)) && Number(d.setOldPrice) !== Number(p[11] || 0)) {
+          changes.push(`السعر القديم: ${Number(p[11] || 0)} ج ← ${Number(d.setOldPrice)} ج`);
+        }
         if (d.setName && String(d.setName).trim() && String(d.setName).trim() !== p[0]) {
           changes.push(`الاسم: «${p[0]}» ← «${String(d.setName).trim()}»`);
         }
@@ -3505,36 +3568,249 @@ export function parseAdminLocalTurn({
     }
   }
 
-  // 6) Add product ("ضيف منتج بسكويت لوكس بسعر 180 قسم الحلويات نكهات فانيليا وشوكولاتة")
-  if (/^(?:ضيف|أضف|اضف|اضافة|إضافة)\s+(?:منتج|صنف)?\s*/.test(n)) {
-    let s = String(text || '')
-      .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-      .replace(/^(?:انا |أنا )?(?:ضيف|أضف|اضف|اضافة|إضافة)\s+(?:منتج|صنف)?\s*/i, '')
-      .trim();
-    let price = 0;
-    const pm = s.match(/(?:بسعر|السعر|سعره|سعر|بـ)\s*:?\s*(\d+(?:\.\d+)?)/);
-    if (pm) {
-      price = Number(pm[1]);
-      s = s.replace(pm[0], ' ');
+  // 5b) Edit pack / variant / oldPrice / name for an existing product
+  const rawDigitsText = String(text || '')
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .trim();
+  const fieldEditM = rawDigitsText.match(
+    /^(?:عدّل|عدل|غيّر|غير|خلّي|خلي|اضبط)\s+(العبوة|العبوه|عبوة|عبوه|الحجم|النوع|السعر القديم|الاسم|اسم(?:\s+منتج)?)\s+(?:لـ?|بتاع|متاع)?\s*(.+?)\s+(?:لـ|ل|لي|الي|إلى|بـ|ب)\s+(.+)$/
+  );
+  if (fieldEditM) {
+    const fld = rn(fieldEditM[1]);
+    const prodQ = fieldEditM[2].trim();
+    const newVal = fieldEditM[3].trim();
+    const doObj = {};
+    if (/عبوه/.test(fld)) doObj.setPack = newVal;
+    else if (/حجم|نوع/.test(fld)) doObj.setVariant = newVal;
+    else if (/سعر.*قديم|قديم/.test(fld)) {
+      const nVal = parseFloat(rnd(newVal));
+      if (isFinite(nVal)) doObj.setOldPrice = nVal;
+    } else if (/اسم/.test(fld)) doObj.setName = newVal;
+
+    if (Object.keys(doObj).length) {
+      const op = { type: 'product', where: { name: prodQ }, do: doObj };
+      const preview = previewAndValidateAdminOps({ ops: [op], catalogData });
+      if (preview.needsClarification.length) {
+        const nc = preview.needsClarification[0];
+        return {
+          reply:
+            `يوجد أكثر من صنف مطابق لـ «${prodQ}»:\n` +
+            nc.candidates.map((c, k) => `${k + 1}) ${c.label} — ${c.price} ج`).join('\n'),
+          draft: nextDraft,
+          pendingOps: null,
+          pendingClarification: { type: 'disambiguate_op', op, candidates: nc.candidates },
+          action: 'none',
+        };
+      }
+      if (preview.valid) {
+        return {
+          reply: `التعديل المقترح:\n${preview.lines.join('\n')}\nاضغط «تنفيذ» للتأكيد.`,
+          draft: nextDraft,
+          pendingOps: preview,
+          pendingClarification: null,
+          action: 'none',
+        };
+      }
     }
+  }
+
+  // 6) Add one or multiple products (supports full natural speech, pack, oldPrice, variant, multi-variant prices, emoji, and multi-flavor single-product grouping)
+  const normalizeDigitsOnly = (str) =>
+    String(str || '')
+      .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+
+  const inferEmoji = (nameStr, catStr) => {
+    const ref = rn(nameStr + ' ' + catStr);
+    if (/دوريتوس/.test(ref)) return '🔺';
+    if (/شيبسي|بطاطس/.test(ref)) return '🥔';
+    if (/ذره|فشار/.test(ref)) return '🍿';
+    if (/عصير|مشروب|بيبسي|كولا|صودا|مياه/.test(ref)) return '🧃';
+    if (/شوكولات|شيكولات|كاكاو|فريسكا/.test(ref)) return '🍫';
+    if (/مولتو|كرواسون/.test(ref)) return '🥐';
+    if (/بسكويت|ويفر|كوكيز/.test(ref)) return '🍪';
+    if (/لب|سوداني|مكسرات/.test(ref)) return '🥜';
+    if (/حلويات|كاندي|مصاص|لبان/.test(ref)) return '🍬';
+    if (/سناكس|كرانشي|كراتيه|جاجوار/.test(ref)) return '🥨';
+    return '🥔';
+  };
+
+  const splitFlavorStrings = (raw) => {
+    const outF = [];
+    const seenF = new Set();
+    const rawStr = String(raw || '');
+    const hasPunctSep = /[,،؛;\/|\n]/.test(rawStr);
+    const isOnlyCompound = /^\s*(?:ملح\s+و\s*خل|خل\s+و\s*ملح)\s*$/i.test(rawStr);
+    const cleaned = (hasPunctSep || isOnlyCompound)
+      ? rawStr.replace(/ملح\s+و\s*خل/g, 'ملح_وخل').replace(/خل\s+و\s*ملح/g, 'خل_وملح')
+      : rawStr;
+    cleaned.split(/[,،؛;\/|\n]+|\s+و(?=\S)/).forEach((tok) => {
+      let y = tok
+        .replace(/ملح_وخل/g, 'ملح وخل')
+        .replace(/خل_وملح/g, 'خل وملح')
+        .replace(/^(?:وطعم|طعم|نكهة|نكهه)\s+/, '')
+        .replace(/[.\u061B،,]+$/g, '')
+        .trim();
+      const k = rn(y);
+      if (y && k && !seenF.has(k)) {
+        seenF.add(k);
+        outF.push(y);
+      }
+    });
+    return outF;
+  };
+
+  const parseAdminProductBlock = (rawBlock) => {
+    let s = normalizeDigitsOnly(rawBlock)
+      .replace(/^(?:انا |أنا )?(?:عندي|ضيفلي|ضيف|أضف|اضف|اضافة|إضافة)\s+(?:منتج\s+|صنف\s+)?/i, '')
+      .trim();
+    if (!s || s.length < 2) return [];
+
+    let oldPrice = 0;
+    const oldPm = s.match(/(?:بدل(?:\s+من)?|قبل الخصم|السعر القديم|كان بـ?)\s*:?\s*(\d+(?:\.\d+)?)(?:\s*(?:جنيه|جنية|ج))?/i);
+    if (oldPm) {
+      oldPrice = Number(oldPm[1]);
+      s = s.replace(oldPm[0], ' ');
+    }
+
+    // Extract flavors
     let flavors = [];
-    const fm = s.match(/(?:النكهات|نكهات|الطعوم|طعوم|طعم|نكهة|نكهه)\s*:?\s*(.+?)(?=\s+(?:القسم|قسم|عبوة|العبوة|الحجم|$)|$)/);
+    const flRe = /(?:و?\s*عنده\s+|و?\s*فيه\s+|بـ?\s*)?(?:النكهات|نكهات|الطعوم|طعوم|الأطعمة|الاطعمة|الطعم|طعم|نكهة|نكهه)\s*(?:هي|هم|كالتالي)?\s*:?\s*(.+?)(?=[\s,،]*(?:(?:في\s+)?(?:القسم|قسم)|العبوة|عبوة|الحجم|النوع|بسعر|سعره|سعرها|سعر|بدل|قبل الخصم|كرتونة|كرتونه|الكرتونة|الكرتونه|دستة|شوال)(?:[\s:،,]|$)|$)/;
+    const fm = s.match(flRe);
     if (fm) {
-      flavors = fm[1]
-        .split(/[,،؛;\/|\n]+|\s+و(?:\s+|(?=[\u0621-\u064A]{3,}))/)
-        .map((x) => x.trim())
-        .filter(Boolean);
+      const flRaw = fm[1].trim();
+      if (!/^(?:واحد|اتنين|\d+)\s*(?:طعم|نكهة)/.test(rn(flRaw))) {
+        flavors = splitFlavorStrings(flRaw);
+      }
       s = s.replace(fm[0], ' ');
     }
+
+    // Extract category (stop cleanly at commas or other field keywords)
     let cat = '';
-    const cm = s.match(/(?:في\s+)?(?:القسم|قسم)\s*:?\s*(.+?)(?=\s+(?:النكهات|نكهات|العبوة|عبوة|الحجم|$)|$)/);
+    const cm = s.match(/(?:في\s+)?(?:القسم|قسم)\s*:?\s*([^,،\n]+?)(?=\s+(?:العبوة|عبوة|الحجم|النوع|النكهات|نكهات|الطعوم|طعم|نكهة|بسعر|سعر|الكرتونة|كرتونة|الكرتونه|كرتونه|دستة|شوال)(?:[\s:،,]|$)|[,،\n]|$)/);
     if (cm) {
-      const rawC = cm[1].trim();
+      const rawC = cm[1].replace(/\s*(?:جنيه|جنية|ج)\s*$/g, '').trim();
       cat = cats.find((c) => rn(c) === rn(rawC) || rn(c).includes(rn(rawC)) || rn(rawC).includes(rn(c))) || rawC;
       s = s.replace(cm[0], ' ');
     }
-    const name = s.replace(/\s*(?:جنيه|جني|ج)\s*$/g, '').replace(/\s+/g, ' ').trim();
-    if (!name) {
+
+    // Extract pack
+    let pack = '';
+    const pkExplicit = s.match(/(?:العبوة|عبوة|الوصف)\s*:?\s*([^,،\n]+?)(?=\s+(?:القسم|قسم|النكهات|نكهات|الطعم|طعم|الحجم|النوع|بسعر|سعر)(?:[\s:،,]|$)|[,،\n]|$)/);
+    if (pkExplicit) {
+      pack = pkExplicit[1].trim();
+      s = s.replace(pkExplicit[0], ' ');
+    } else {
+      const pkAuto = s.match(/(?:ال)?(?:كرتونة|كرتونه|دستة|شوال|علبة|باكو)\s*\d+\s*(?:كيس|علبة|قطعة|حبة|باكو|زجاجة|عبوة)?/);
+      if (pkAuto) {
+        pack = pkAuto[0].trim();
+        s = s.replace(pkAuto[0], ' ');
+      }
+    }
+
+    // Check for multi-variant price specs in the same block (e.g., "دوريتوس صغير بـ 100 ووسط بـ 150")
+    const varPairs = [];
+    const vpRe = /(?:الحجم\s+|النوع\s+|حجم\s+|نوع\s+)?(?:و\s*)?(?:ال)?(صغير|وسط|متوسط|كبير|عائلي|جامبو|ميني|اقتصادي|سوبر|عادي)\s*(?:بسعر|السعر|سعره|سعرها|سعر|بـ|ب)\s*:?\s*(\d+(?:\.\d+)?)(?:\s*(?:جنيه|جنية|ج|egp))?/gi;
+    let vpMatch;
+    while ((vpMatch = vpRe.exec(s)) !== null) {
+      varPairs.push({ full: vpMatch[0], variant: vpMatch[1].trim(), price: Number(vpMatch[2]), idx: vpMatch.index });
+    }
+    if (varPairs.length >= 2) {
+      let baseName = s;
+      varPairs.forEach((vp) => {
+        baseName = baseName.replace(vp.full, ' ');
+      });
+      baseName = baseName
+        .replace(/[,،:؛;]+/g, ' ')
+        .replace(/(?:^|\s)(?:و|جنيه|جنية|في|عنده|بسعر|سعره|سعرها)(?=\s|$)/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (baseName) {
+        if (!cat) {
+          const cf = cats.filter((c) => rn(rawBlock).includes(rn(c)));
+          if (cf.length === 1) cat = cf[0];
+        }
+        return varPairs.map((vp) => ({
+          n: baseName,
+          c: cat || '',
+          d: pack,
+          p: vp.price,
+          o: oldPrice,
+          v: vp.variant,
+          e: inferEmoji(baseName, cat),
+          f: flavors.slice(),
+          on: 1,
+          w: [],
+        }));
+      }
+    }
+
+    // Single price extraction
+    let price = 0;
+    const pm1 = s.match(/(?:^|[\s,،])(?:بسعر|السعر|سعره|سعرها|سعر|بـ)\s*:?\s*(\d+(?:\.\d+)?)(?:\s*(?:جنيه|جنية|ج|egp))?(?=[\s,،.]|$)/i);
+    if (pm1) {
+      price = Number(pm1[1]);
+      s = s.replace(pm1[0], ' ');
+    } else {
+      const pm2 = s.match(/(\d+(?:\.\d+)?)\s*(?:جنيه|جنية|egp)(?=[\s,،.]|$)/i);
+      if (pm2) {
+        price = Number(pm2[1]);
+        s = s.replace(pm2[0], ' ');
+      }
+    }
+
+    // Extract single variant if present
+    let variant = '';
+    const vm = s.match(/(?:الحجم|النوع|حجم|نوع)\s*:?\s*([^,،\n]+?)(?=\s+(?:القسم|قسم|العبوة|عبوة|النكهات|نكهات|بسعر|سعر)(?:[\s:،,]|$)|[,،\n]|$)/);
+    if (vm) {
+      variant = vm[1].trim();
+      s = s.replace(vm[0], ' ');
+    }
+
+    const name = s
+      .replace(/[,،:؛;]+/g, ' ')
+      .replace(/(?:^|\s)(?:الصنف|صنف|اسم الصنف|اسمه|اسمها|اسم|جنيه|جنية|وعنده|وفيه|عنده|فيه)(?=\s|$)/g, ' ')
+      .replace(/\s*(?:و|في)\s*$/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!name) return [];
+
+    if (!cat) {
+      const cf = cats.filter((c) => rn(rawBlock).includes(rn(c)));
+      if (cf.length === 1) cat = cf[0];
+    }
+
+    return [
+      {
+        n: name,
+        c: cat || '',
+        d: pack,
+        p: price,
+        o: oldPrice > price ? oldPrice : 0,
+        v: variant,
+        e: inferEmoji(name, cat),
+        f: flavors,
+        on: 1,
+        w: [],
+      },
+    ];
+  };
+
+  if (/^(?:انا\s+|أنا\s+)?(?:ضيفلي|ضيف|أضف|اضف|اضافة|إضافة|عندي)\s+/.test(n)) {
+    const rawNormalized = normalizeDigitsOnly(text).replace(/\r/g, '');
+    const blocks = rawNormalized
+      .split(/\n+|[,،]?\s+(?=(?:وكمان\s+|كمان\s+)?(?:ضيفلي|ضيف|أضف|اضف)\s+)/)
+      .map((b) => b.trim())
+      .filter((b) => b.length >= 2);
+
+    const parsedItems = [];
+    blocks.forEach((b) => {
+      parseAdminProductBlock(b).forEach((item) => parsedItems.push(item));
+    });
+
+    if (!parsedItems.length) {
       return {
         reply: 'اكتب اسم الصنف المطلوب إضافته.',
         draft: nextDraft,
@@ -3544,35 +3820,75 @@ export function parseAdminLocalTurn({
       };
     }
 
-    const item = { n: name, c: cat || '', d: '', p: price, o: 0, v: '', e: '', f: flavors, on: 1, w: [] };
-    const dup = checkProductDuplicates(item, products);
-    if (dup.exactMatches.length || dup.similarMatches.length) {
-      item.w.push(
-        '⚠️ صنف مشابه/مكرر موجود بالفعل: ' +
-          [...dup.exactMatches, ...dup.similarMatches].map((x) => `${x.label} (${x.price} ج)`).join('، ')
+    let firstMissingPriceIdx = -1;
+    const summaryLines = [];
+    const warnLines = [];
+
+    parsedItems.forEach((item) => {
+      const dup = checkProductDuplicates(item, products);
+      if (dup.exactMatches.length || dup.similarMatches.length) {
+        const wMsg =
+          '⚠️ صنف مشابه/مكرر موجود بالفعل: ' +
+          [...dup.exactMatches, ...dup.similarMatches].map((x) => `${x.label} (${x.price} ج)`).join('، ');
+        item.w.push(wMsg);
+        warnLines.push(wMsg);
+      }
+
+      // Check if an identical (name + variant) entry in parsedItems/nextDraft can be merged when prices match
+      const existingDraftIdx = nextDraft.findIndex(
+        (dItem) => rn(dItem.n) === rn(item.n) && rn(dItem.v) === rn(item.v) && (!dItem.p || !item.p || dItem.p === item.p)
       );
-    }
+      let draftIdx;
+      if (existingDraftIdx >= 0) {
+        const tgt = nextDraft[existingDraftIdx];
+        item.f.forEach((f) => {
+          if (!tgt.f.some((ef) => rn(ef) === rn(f))) tgt.f.push(f);
+        });
+        tgt.p = tgt.p || item.p;
+        tgt.o = tgt.o || item.o;
+        tgt.d = tgt.d || item.d;
+        tgt.c = tgt.c || item.c;
+        tgt.e = tgt.e || item.e;
+        item.w.forEach((w) => {
+          if (!tgt.w.includes(w)) tgt.w.push(w);
+        });
+        draftIdx = existingDraftIdx;
+      } else {
+        nextDraft.push(item);
+        draftIdx = nextDraft.length - 1;
+      }
 
-    nextDraft.push(item);
-    const draftIdx = nextDraft.length - 1;
+      if (!(item.p > 0) && firstMissingPriceIdx < 0) {
+        item.w.push('السعر مطلوب ولم يتم تحديده');
+        firstMissingPriceIdx = draftIdx;
+      }
+      summaryLines.push(
+        `«${item.n}${item.v ? ' · ' + item.v : ''}»` +
+          ` (${item.p > 0 ? item.p + ' ج' : 'بدون سعر'}` +
+          `${item.c ? ' · قسم ' + item.c : ''}` +
+          `${item.d ? ' · ' + item.d : ''}` +
+          `${item.f.length ? ' · نكهات: ' + item.f.join('، ') : ''})`
+      );
+    });
 
-    if (!(price > 0)) {
-      item.w.push('السعر مطلوب ولم يتم تحديده');
+    if (firstMissingPriceIdx >= 0) {
+      const mItem = nextDraft[firstMissingPriceIdx];
       return {
         reply:
-          `جهّزت مسودة «${name}»${item.w.length ? '\n' + item.w.join('\n') : ''}\n` +
-          `⚠️ كم سعر «${name}»؟ (لم أفترض سعراً تلقائياً)`,
+          `جهّزت مسودة ${summaryLines.join('، ')}` +
+          (warnLines.length ? '\n' + warnLines.join('\n') : '') +
+          `\n⚠️ كم سعر «${mItem.n}${mItem.v ? ' · ' + mItem.v : ''}»؟ (لم أفترض سعراً تلقائياً)`,
         draft: nextDraft,
         pendingOps: null,
-        pendingClarification: { type: 'missing_price', draftIdx },
+        pendingClarification: { type: 'missing_price', draftIdx: firstMissingPriceIdx },
         action: 'none',
       };
     }
 
     return {
       reply:
-        `تمت إضافة «${name}» للمسودة (${price} ج${cat ? ' · قسم ' + cat : ''}${flavors.length ? ' · نكهات: ' + flavors.join('، ') : ''}).` +
-        (item.w.length ? '\n' + item.w.join('\n') : '\nاضغط «مراجعة وإضافة» لاعتمادها.'),
+        `تمت إضافة ${summaryLines.join(' و')} للمسودة.` +
+        (warnLines.length ? '\n' + warnLines.join('\n') : '\nاضغط «مراجعة وإضافة» لاعتمادها.'),
       draft: nextDraft,
       pendingOps: null,
       pendingClarification: null,

@@ -13,10 +13,16 @@ import {
   buildStoreKB as engineBuildStoreKB,
   computeDraftTotals,
   dedupeAndNormalizeDraft,
+  extractHints as engineExtractHints,
   getProductDisplayName,
   getProductFlavors,
   isProductOutOfStock,
+  matchProductFlavors as engineMatchProductFlavors,
+  matchProductsInCatalog as engineMatchProductsInCatalog,
+  ntk as engineNtk,
+  parseQuantityAndRest as engineParseQuantityAndRest,
   processCustomerTurn,
+  segmentOrderText as engineSegmentOrderText,
   validateCustomerGeminiResponse,
 } from './ai-engine.js';
 
@@ -363,15 +369,50 @@ function rlocal(text) {
   const items = [];
   const unk = [];
   const soldOutHits = [];
+  const products = Array.isArray(state.P) ? state.P : [];
+  const unit = (state.CFG && state.CFG.unit) || 'كرتونة';
+  let prevProdIdx = -1;
 
-  rseg(text).forEach((rawSg) => {
-    const { clean, hints } = extractHints(rawSg);
-    const r = rq(ntk(clean || rawSg));
-    const m = rmatch(r[1], hints, false);
+  engineSegmentOrderText(text).forEach((rawSg) => {
+    const { clean, hints } = engineExtractHints(rawSg);
+    const qp = engineParseQuantityAndRest(clean || rawSg, unit);
+    const m = engineMatchProductsInCatalog(qp.rest, products, {
+      priceHints: hints,
+      includeSoldOut: false,
+      rawCleanText: clean || rawSg,
+    });
+
+    const nonStopTokens = qp.rest.filter((t) => !RSTOP[t]);
+    let inheritedHandled = false;
+    if (prevProdIdx >= 0 && products[prevProdIdx] && !isOut(products[prevProdIdx]) && !products[prevProdIdx][7]) {
+      const prevP = products[prevProdIdx];
+      const fmPrev = engineMatchProductFlavors(prevP, qp.rest, clean || rawSg);
+      const topOther = m && m.cs[0];
+      const topIsOtherExact = Boolean(topOther && topOther.i !== prevProdIdx && (topOther.exactBase || topOther.exactFull));
+      const matchedPrevToks = new Set();
+      [...fmPrev.avail, ...fmPrev.soldOut].forEach((x) => engineNtk(x.name).forEach((t) => matchedPrevToks.add(t)));
+      const hasOtherNonFlavor = nonStopTokens.some((t) => !matchedPrevToks.has(t) && !/^(?:طعم|نكهه|بطعم|بنكهه|نكهات)$/.test(t));
+
+      if ((!m || m.cs[0].flavorOnlyMatch || ((fmPrev.avail.length || fmPrev.soldOut.length) && !hasOtherNonFlavor && !topIsOtherExact))) {
+        if (fmPrev.avail.length) {
+          const cands = [prevProdIdx];
+          fmPrev.avail.forEach((af) => items.push({ i: prevProdIdx, f: af.j, q: qp.qty, c: cands, amb: false }));
+          inheritedHandled = true;
+        } else if (fmPrev.soldOut.length) {
+          soldOutHits.push(pname(prevProdIdx) + ' (' + fmPrev.soldOut[0].name + ')');
+          inheritedHandled = true;
+        }
+      }
+    }
+    if (inheritedHandled) return;
 
     if (!m) {
-      const mOut = rmatch(r[1], hints, true);
-      if (mOut && mOut.cs[0] && mOut.cs[0].out) {
+      const mOut = engineMatchProductsInCatalog(qp.rest, products, {
+        priceHints: hints,
+        includeSoldOut: true,
+        rawCleanText: clean || rawSg,
+      });
+      if (mOut && mOut.cs[0] && mOut.cs[0].out && !mOut.cs[0].isFuzzyOnly) {
         soldOutHits.push(pname(mOut.cs[0].i));
       } else {
         unk.push(rawSg);
@@ -380,22 +421,20 @@ function rlocal(text) {
     }
 
     const top = m.cs[0];
-    const p = state.P[top.i];
+    if (top.isFuzzyOnly && top.unmatchedTokens.length > 0) {
+      unk.push(rawSg);
+      return;
+    }
+
+    const p = products[top.i];
     const fl = FL(p);
     const fs = [];
     const outFlavors = [];
 
     if (fl.length) {
-      const fMatches = splitMultiFlavors(fl, m.S);
-      if (fMatches.length) {
-        const bestScore = fMatches[0].score;
-        fMatches.forEach((fm) => {
-          if (fm.score >= bestScore * 0.65) {
-            if (fm.out) outFlavors.push(fm.name);
-            else fs.push(fm.j);
-          }
-        });
-      }
+      const fm = engineMatchProductFlavors(p, qp.rest, clean || rawSg);
+      fm.avail.forEach((af) => fs.push(af.j));
+      fm.soldOut.forEach((sf) => outFlavors.push(sf.name));
     }
 
     if (!fs.length && outFlavors.length) {
@@ -403,23 +442,24 @@ function rlocal(text) {
       return;
     }
 
-    const cands = m.cs.slice(0, 5).map((c) => c.i);
-    const sameNameAlts = m.cs.filter(
-      (c) => c.i !== top.i && rn(state.P[c.i][0]) === rn(p[0])
-    );
+    prevProdIdx = top.i;
+    const strongComp = m.cs.filter((c) => !c.isFuzzyOnly && !c.flavorOnlyMatch);
+    const cands = (strongComp.length ? strongComp : m.cs).slice(0, 5).map((c) => c.i);
+    const sameNameAlts = strongComp.filter((c) => c.i !== top.i && rn(products[c.i][0]) === rn(p[0]));
     const amb =
       !hints.length &&
-      ((m.cs.length > 1 && m.cs[1].s >= top.s * 0.94) ||
+      !top.exactFull &&
+      ((strongComp.length > 1 && strongComp[1].s >= top.s * 0.92) ||
         (sameNameAlts.length > 0 && sameNameAlts[0].s >= top.s * 0.88));
 
     if (fs.length) {
-      fs.forEach((j) => items.push({ i: top.i, f: j, q: r[0], c: cands, amb }));
+      fs.forEach((j) => items.push({ i: top.i, f: j, q: qp.qty, c: cands, amb }));
     } else {
-      items.push({ i: top.i, f: -1, q: r[0], c: cands, amb });
+      items.push({ i: top.i, f: -1, q: qp.qty, c: cands, amb });
     }
   });
 
-  return { items, unk, soldOutHits };
+  return { items: dedupeAndNormalizeDraft(items, products), unk, soldOutHits };
 }
 
 function handleAiAuthCheck(status, data) {
@@ -1067,6 +1107,12 @@ async function vPolish() {
     const j = resObj.structured || JSON.parse(String(resObj.text || '{}').replace(/```json|```/g, '').trim());
     const out = String(j.text || '').trim();
     const nl = (x) => x.split(/\n+/).filter((q) => q.trim()).length;
+    const numsOnly = (x) => (rnd(x).match(/\d+(?:\.\d+)?/g) || []).map(Number).sort((a, b) => a - b);
+    const numsMatch = (a, b) => {
+      const na = numsOnly(a);
+      const nb = numsOnly(b);
+      return na.length === nb.length && na.every((v, idx) => v === nb[idx]);
+    };
     const t2 = $('rt');
     if (
       t2 &&
@@ -1074,6 +1120,7 @@ async function vPolish() {
       out.length > tx.length * 0.5 &&
       out.length < tx.length * 2 &&
       nl(out) <= nl(tx) &&
+      numsMatch(out, tx) &&
       t2.value.trim() === tx
     ) {
       t2.value = out;
@@ -2392,4 +2439,4 @@ export function __setDraftForTest(nextDraft) {
   RL = Array.isArray(nextDraft) ? nextDraft : [];
 }
 
-export { chLocal, chRender, chReset, chReview, chSend, rAdd, rNorm, rRv };
+export { chLocal, chRender, chReset, chReview, chSend, rAdd, rlocal, rNorm, rRv };
