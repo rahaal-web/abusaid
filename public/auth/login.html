@@ -35,7 +35,14 @@
 
       <div id="loginAlert" class="alert" role="alert" hidden></div>
 
-      <form id="loginForm" novalidate>
+      <div id="savedAccountsBox" class="saved-accounts" hidden>
+        <div class="saved-accounts-head">
+          <span>👤 الحسابات المحفوظة على هذا الجهاز</span>
+        </div>
+        <div id="savedAccountsList" class="saved-list"></div>
+      </div>
+
+      <form id="loginForm" method="post" action="/login" novalidate>
         <div class="field">
           <label for="identifier">رقم الهاتف <span class="opt">(أو البريد الإلكتروني)</span></label>
           <input
@@ -67,7 +74,14 @@
           </div>
         </div>
 
-        <button id="loginBtn" type="submit" class="btn btn-primary" style="margin-top:8px">
+        <div class="remember-row">
+          <label class="remember-check" for="rememberMe">
+            <input id="rememberMe" name="rememberMe" type="checkbox" checked>
+            <span>حفظ الحساب والبقاء مسجلاً الدخول</span>
+          </label>
+        </div>
+
+        <button id="loginBtn" type="submit" class="btn btn-primary" style="margin-top:4px">
           دخول إلى المتجر 🔓
         </button>
       </form>

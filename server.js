@@ -108,9 +108,11 @@ function buildCookieString(req, name, value, maxAgeSec) {
     `${name}=${encodeURIComponent(value)}`,
     'Path=/',
     'HttpOnly',
-    `Max-Age=${Math.max(0, Math.floor(maxAgeSec))}`,
-    secure ? 'SameSite=None' : 'SameSite=Lax',
   ];
+  if (maxAgeSec !== null && maxAgeSec !== undefined) {
+    parts.push(`Max-Age=${Math.max(0, Math.floor(maxAgeSec))}`);
+  }
+  parts.push(secure ? 'SameSite=None' : 'SameSite=Lax');
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
@@ -201,6 +203,7 @@ async function requireApprovedUser(req, res, next) {
 
     req.user = session.user;
     req.userToken = token;
+    req.userSession = session;
     return next();
   } catch (err) {
     return res.status(503).json({ error: 'تعذر التحقق من الجلسة حالياً.' });
@@ -407,17 +410,27 @@ app.post('/api/auth/login', checkRateLimit, async (req, res) => {
     }
 
     if (user.status === 'Approved') {
+      const rememberMe = body.rememberMe !== false;
+      const ttlSec = 90 * 24 * 60 * 60;
+      const ttlMs = rememberMe ? ttlSec * 1000 : 24 * 60 * 60 * 1000;
       const sess = await userStore.createUserSession(
         user.id,
         'auth',
-        7 * 24 * 60 * 60 * 1000,
+        ttlMs,
         user.tokenVersion || 1
       );
       clearSessionCookie(res, req, STATUS_COOKIE);
-      setSessionCookie(res, req, USER_COOKIE, sess.rawToken, 7 * 24 * 60 * 60);
+      setSessionCookie(
+        res,
+        req,
+        USER_COOKIE,
+        sess.rawToken,
+        rememberMe ? ttlSec : null
+      );
       return res.json({
         ok: true,
         status: 'Approved',
+        rememberMe,
         user: userStore.sanitizeUser(user),
       });
     }
@@ -509,7 +522,19 @@ app.get('/api/auth/status', async (req, res) => {
   return res.status(401).json({ error: 'لا توجد جلسة نشطة.' });
 });
 
-app.get('/api/auth/me', requireApprovedUser, (req, res) => {
+app.get('/api/auth/me', requireApprovedUser, async (req, res) => {
+  const sess = req.userSession;
+  const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+  const remaining = Number(sess?.expiresAt || 0) - Date.now();
+  if (
+    sess &&
+    remaining > 2 * 24 * 60 * 60 * 1000 &&
+    remaining < 45 * 24 * 60 * 60 * 1000 &&
+    typeof userStore.extendUserSession === 'function'
+  ) {
+    await userStore.extendUserSession(req.userToken, ninetyDaysMs);
+    setSessionCookie(res, req, USER_COOKIE, req.userToken, 90 * 24 * 60 * 60);
+  }
   return res.json({
     authenticated: true,
     user: req.user,
@@ -592,14 +617,17 @@ app.post('/api/admin/login', checkRateLimit, async (req, res) => {
 
   try {
     const fb = await firebaseSignIn(email, password);
+    const rememberMe = req.body?.rememberMe !== false;
+    const ttlSec = 30 * 24 * 60 * 60;
     const sess = createAdminSession({
       email: fb.email,
       uid: fb.uid,
       fbIdToken: fb.idToken,
       fbRefreshToken: fb.refreshToken,
       fbExpiresInSec: fb.expiresIn,
+      ttlMs: rememberMe ? ttlSec * 1000 : 24 * 60 * 60 * 1000,
     });
-    setSessionCookie(res, req, ADMIN_COOKIE, sess.rawToken, 7 * 24 * 60 * 60);
+    setSessionCookie(res, req, ADMIN_COOKIE, sess.rawToken, rememberMe ? ttlSec : null);
     return res.json({ ok: true, email: fb.email });
   } catch {
     return res.status(401).json({ error: 'الإيميل أو كلمة السر غلط' });

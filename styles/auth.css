@@ -300,6 +300,121 @@ body {
   margin-top: 4px;
 }
 
+.remember-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 14px;
+}
+
+.remember-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  user-select: none;
+}
+
+.remember-check input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+  flex: none;
+}
+
+.saved-accounts {
+  background: var(--paper-2);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.saved-accounts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--mu);
+  margin-bottom: 8px;
+}
+
+.saved-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.saved-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--paper);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 4px 6px 4px 10px;
+  box-shadow: var(--shadow-sm);
+  max-width: 100%;
+}
+
+.saved-chip.active {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 28%, transparent);
+}
+
+.saved-chip-pick {
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: start;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.saved-chip-pick strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.saved-chip-pick small {
+  font-size: 11.5px;
+  color: var(--mu);
+  direction: ltr;
+  text-align: start;
+}
+
+.saved-chip-del {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 2px solid var(--border);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.saved-chip-del:hover {
+  background: var(--red);
+  color: #ffffff;
+}
+
 .opt-section {
   margin: 16px 0 14px;
   padding: 14px;

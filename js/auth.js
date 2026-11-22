@@ -96,11 +96,137 @@ async function postJson(url, payload) {
   return { ok: res.ok, status: res.status, data };
 }
 
+const SAVED_ACCOUNTS_KEY = 'abu_saved_accounts_v1';
+
+function loadSavedAccounts() {
+  try {
+    const raw = localStorage.getItem(SAVED_ACCOUNTS_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list)
+      ? list.filter((a) => a && typeof a.identifier === 'string' && a.identifier.trim())
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAccountProfile(profile) {
+  const id = String(profile?.identifier || '').trim();
+  if (!id) return;
+  const list = loadSavedAccounts().filter((a) => a.identifier !== id);
+  list.unshift({
+    identifier: id,
+    fullName: String(profile?.fullName || '').trim(),
+    shopName: String(profile?.shopName || '').trim(),
+    lastUsedAt: Date.now(),
+  });
+  try {
+    localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(list.slice(0, 5)));
+  } catch {}
+}
+
+function removeSavedAccount(identifier) {
+  const id = String(identifier || '').trim();
+  const list = loadSavedAccounts().filter((a) => a.identifier !== id);
+  try {
+    localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+async function storeBrowserCredential({ identifier, password, fullName }) {
+  try {
+    if (
+      window.PasswordCredential &&
+      navigator.credentials &&
+      typeof navigator.credentials.store === 'function'
+    ) {
+      const cred = new window.PasswordCredential({
+        id: String(identifier || '').trim(),
+        password: String(password || ''),
+        name: String(fullName || identifier || '').trim(),
+      });
+      await navigator.credentials.store(cred);
+    }
+  } catch {
+    // ignore unsupported browsers/contexts
+  }
+}
+
+function renderSavedAccountsUI(identifierInput, passwordInput) {
+  const box = $('savedAccountsBox');
+  const listEl = $('savedAccountsList');
+  if (!box || !listEl || !identifierInput) return;
+
+  const render = () => {
+    const accounts = loadSavedAccounts();
+    listEl.innerHTML = '';
+    if (!accounts.length) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    const currentVal = identifierInput.value.trim();
+
+    accounts.forEach((acc) => {
+      const chip = document.createElement('div');
+      chip.className = 'saved-chip' + (currentVal === acc.identifier ? ' active' : '');
+
+      const pickBtn = document.createElement('button');
+      pickBtn.type = 'button';
+      pickBtn.className = 'saved-chip-pick';
+      const titleEl = document.createElement('strong');
+      titleEl.textContent = acc.fullName || acc.shopName || 'حساب محفوظ';
+      const subEl = document.createElement('small');
+      subEl.textContent = acc.shopName && acc.fullName
+        ? `${acc.identifier} · ${acc.shopName}`
+        : acc.identifier;
+      pickBtn.appendChild(titleEl);
+      pickBtn.appendChild(subEl);
+      pickBtn.addEventListener('click', () => {
+        identifierInput.value = acc.identifier;
+        render();
+        if (passwordInput) passwordInput.focus();
+      });
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'saved-chip-del';
+      delBtn.setAttribute('aria-label', 'حذف الحساب المحفوظ');
+      delBtn.textContent = '✕';
+      delBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        removeSavedAccount(acc.identifier);
+        if (identifierInput.value.trim() === acc.identifier) {
+          const next = loadSavedAccounts();
+          identifierInput.value = next[0]?.identifier || '';
+        }
+        render();
+      });
+
+      chip.appendChild(pickBtn);
+      chip.appendChild(delBtn);
+      listEl.appendChild(chip);
+    });
+  };
+
+  const accounts = loadSavedAccounts();
+  if (!identifierInput.value.trim() && accounts.length) {
+    identifierInput.value = accounts[0].identifier;
+  }
+  identifierInput.addEventListener('input', render);
+  render();
+}
+
 function initLoginPage() {
   const form = $('loginForm');
   if (!form) return;
 
   clearLocalStoreCache();
+
+  const identifierInput = $('identifier');
+  const passwordInput = $('password');
+  const rememberCheck = $('rememberMe');
+  renderSavedAccountsUI(identifierInput, passwordInput);
 
   const params = new URLSearchParams(location.search);
   const reason = params.get('reason');
@@ -119,8 +245,9 @@ function initLoginPage() {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     showMsg('loginAlert', '');
-    const identifier = $('identifier').value.trim();
-    const password = $('password').value;
+    const identifier = identifierInput.value.trim();
+    const password = passwordInput.value;
+    const rememberMe = rememberCheck ? Boolean(rememberCheck.checked) : true;
 
     if (!identifier || !password) {
       showMsg('loginAlert', 'يرجى إدخال رقم الهاتف وكلمة المرور.');
@@ -133,12 +260,32 @@ function initLoginPage() {
     btn.textContent = 'جاري التحقق...';
 
     try {
-      const { ok, data } = await postJson('/api/auth/login', { identifier, password });
+      const { ok, data } = await postJson('/api/auth/login', {
+        identifier,
+        password,
+        rememberMe,
+      });
       if (!ok) {
         showMsg('loginAlert', data.error || 'تعذر تسجيل الدخول، تأكد من البيانات.');
         btn.disabled = false;
         btn.textContent = origText;
         return;
+      }
+
+      if (rememberMe) {
+        saveAccountProfile({
+          identifier: data.user?.phone || identifier,
+          fullName: data.user?.fullName || '',
+          shopName: data.user?.shopName || '',
+        });
+        await storeBrowserCredential({
+          identifier: data.user?.phone || identifier,
+          password,
+          fullName: data.user?.fullName || '',
+        });
+      } else {
+        removeSavedAccount(identifier);
+        if (data.user?.phone) removeSavedAccount(data.user.phone);
       }
 
       if (data.status === 'Approved') {
@@ -212,6 +359,17 @@ function initRegisterPage() {
         btn.textContent = origText;
         return;
       }
+
+      saveAccountProfile({
+        identifier: data.user?.phone || phone,
+        fullName: data.user?.fullName || fullName,
+        shopName: data.user?.shopName || shopName,
+      });
+      await storeBrowserCredential({
+        identifier: data.user?.phone || phone,
+        password,
+        fullName: data.user?.fullName || fullName,
+      });
 
       window.location.replace('/account-status?justRegistered=1');
     } catch {

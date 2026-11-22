@@ -98,9 +98,11 @@ function buildCookieString(req, url, name, value, maxAgeSec) {
     `${name}=${encodeURIComponent(value)}`,
     'Path=/',
     'HttpOnly',
-    `Max-Age=${Math.max(0, Math.floor(maxAgeSec))}`,
-    secure ? 'SameSite=None' : 'SameSite=Lax',
   ];
+  if (maxAgeSec !== null && maxAgeSec !== undefined) {
+    parts.push(`Max-Age=${Math.max(0, Math.floor(maxAgeSec))}`);
+  }
+  parts.push(secure ? 'SameSite=None' : 'SameSite=Lax');
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
@@ -241,7 +243,7 @@ async function resolveAdminSession(req, url, env, fbCfg) {
           url,
           ADMIN_COOKIE,
           encodeAdminCookieToken(refreshed.idToken, refreshed.refreshToken),
-          7 * 24 * 60 * 60
+          30 * 24 * 60 * 60
         );
         return {
           admin: {
@@ -331,7 +333,7 @@ async function requireApprovedUser(req, url, store) {
     };
   }
 
-  return { ok: true, user: session.user, token };
+  return { ok: true, user: session.user, token, session };
 }
 
 function handleRtdbConfigError(err) {
@@ -550,16 +552,20 @@ export default {
         }
 
         if (user.status === 'Approved') {
+          const rememberMe = body.rememberMe !== false;
+          const ttlSec = 90 * 24 * 60 * 60;
+          const ttlMs = rememberMe ? ttlSec * 1000 : 24 * 60 * 60 * 1000;
           const sess = await store.createUserSession(
             user.id,
             'auth',
-            7 * 24 * 60 * 60 * 1000,
+            ttlMs,
             user.tokenVersion || 1
           );
           return jsonResponse(
             {
               ok: true,
               status: 'Approved',
+              rememberMe,
               user: store.sanitizeUser(user),
             },
             200,
@@ -570,7 +576,7 @@ export default {
                 url,
                 USER_COOKIE,
                 sess.rawToken,
-                7 * 24 * 60 * 60
+                rememberMe ? ttlSec : null
               ),
             ]
           );
@@ -688,7 +694,22 @@ export default {
     if (method === 'GET' && pathname === '/api/auth/me') {
       const check = await requireApprovedUser(req, url, store);
       if (!check.ok) return check.response;
-      return jsonResponse({ authenticated: true, user: check.user });
+      const sess = check.session;
+      const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+      const remaining = Number(sess?.expiresAt || 0) - Date.now();
+      const extraCookies = [];
+      if (
+        sess &&
+        remaining > 2 * 24 * 60 * 60 * 1000 &&
+        remaining < 45 * 24 * 60 * 60 * 1000 &&
+        typeof store.extendUserSession === 'function'
+      ) {
+        await store.extendUserSession(check.token, ninetyDaysMs);
+        extraCookies.push(
+          buildCookieString(req, url, USER_COOKIE, check.token, 90 * 24 * 60 * 60)
+        );
+      }
+      return jsonResponse({ authenticated: true, user: check.user }, 200, extraCookies);
     }
 
     // ==================== PROTECTED STOREFRONT ASSETS & APIs ====================
@@ -794,6 +815,7 @@ export default {
           email,
           password,
         });
+        const rememberMe = body.rememberMe !== false;
         const cookieVal = encodeAdminCookieToken(fb.idToken, fb.refreshToken);
         return jsonResponse(
           { ok: true, email: fb.email },
@@ -804,7 +826,7 @@ export default {
               url,
               ADMIN_COOKIE,
               cookieVal,
-              7 * 24 * 60 * 60
+              rememberMe ? 30 * 24 * 60 * 60 : null
             ),
           ]
         );
