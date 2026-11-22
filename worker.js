@@ -970,6 +970,7 @@ export default {
           userMessage: String(body.message || ''),
           currentDraft: Array.isArray(body.currentDraft) ? body.currentDraft : [],
           catalogData: rawCatalog?.data || {},
+          stateCtx: body.stateCtx && typeof body.stateCtx === 'object' ? body.stateCtx : {},
         });
         return jsonResponse({ ok: true, ...validated });
       } catch {

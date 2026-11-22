@@ -796,11 +796,14 @@ app.post('/api/ai/validate', requireApprovedUser, checkRateLimit, async (req, re
     const geminiJson = req.body?.geminiResult ?? req.body?.geminiJson ?? {};
     const userMessage = String(req.body?.message || '');
     const currentDraft = Array.isArray(req.body?.currentDraft) ? req.body.currentDraft : [];
+    const stateCtx =
+      req.body?.stateCtx && typeof req.body.stateCtx === 'object' ? req.body.stateCtx : {};
     const validated = validateCustomerGeminiResponse({
       geminiJson,
       userMessage,
       currentDraft,
       catalogData,
+      stateCtx,
     });
     return res.json({ ok: true, ...validated });
   } catch (err) {
@@ -869,7 +872,8 @@ app.delete('/api/orders/:id', requireApprovedUser, checkRateLimit, async (req, r
 app.delete('/api/orders', requireApprovedUser, checkRateLimit, async (req, res) => {
   try {
     const result = await userStore.clearUserOrders(req.user.id);
-    return res.json({ ok: true, deletedCount: Number(result?.deletedCount || 0) });
+    const deletedCount = typeof result === 'number' ? result : Number(result?.deletedCount || 0);
+    return res.json({ ok: true, deletedCount });
   } catch (err) {
     const cfgErr = handleRtdbConfigError(err, res);
     if (cfgErr) return cfgErr;
@@ -1398,6 +1402,7 @@ app.delete('/api/admin/orders', requireAdmin, async (req, res) => {
     const result = await userStore.clearAllOrders({
       adminIdToken: req.adminSession.fb_id_token || '',
     });
+    const deletedCount = typeof result === 'number' ? result : Number(result?.deletedCount || 0);
     safeAuditLog(
       {
         action: 'orders_clear',
@@ -1405,11 +1410,11 @@ app.delete('/api/admin/orders', requireAdmin, async (req, res) => {
         entityType: 'order',
         entityId: 'all',
         entityLabel: 'سجل الطلبات',
-        details: `مسح جميع طلبات الواتساب (${Number(result?.deletedCount || 0)} طلب)`,
+        details: `مسح جميع طلبات الواتساب (${deletedCount} طلب)`,
       },
       req.adminSession
     );
-    return res.json({ ok: true, deletedCount: Number(result?.deletedCount || 0) });
+    return res.json({ ok: true, deletedCount });
   } catch (err) {
     const cfgErr = handleRtdbConfigError(err, res);
     if (cfgErr) return cfgErr;

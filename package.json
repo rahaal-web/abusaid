@@ -10,6 +10,7 @@
     "lint": "sh -c 'for f in server.js worker.js lib/*.js js/*.js protected/*.js; do node -c \"$f\" || exit 1; done'"
   },
   "dependencies": {
+    "@google/genai": "^3.6.1",
     "express": "^4.21.2"
   }
 }

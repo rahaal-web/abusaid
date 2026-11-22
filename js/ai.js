@@ -478,11 +478,18 @@ async function rGem(prompt, opts = {}) {
 }
 
 async function validateCustomerWithServer(geminiJson, userMessage) {
+  const stateCtx = {
+    pendingClarification: CH.pendingClarification || null,
+    lastReferencedProductIdx: Number.isInteger(CH.lastReferencedProductIdx)
+      ? CH.lastReferencedProductIdx
+      : -1,
+  };
   const localValidated = validateCustomerGeminiResponse({
     geminiJson,
     userMessage,
     currentDraft: RL,
     catalogData: getCatalogSnapshot(),
+    stateCtx,
   });
   try {
     const res = await fetch('/api/ai/validate', {
@@ -493,11 +500,15 @@ async function validateCustomerWithServer(geminiJson, userMessage) {
         geminiResult: geminiJson,
         message: userMessage,
         currentDraft: RL,
+        stateCtx,
       }),
     });
     if (res.ok) {
       const serverData = await res.json().catch(() => null);
       if (serverData && serverData.ok && Array.isArray(serverData.draft)) {
+        if (!serverData.nextState && localValidated.nextState) {
+          serverData.nextState = localValidated.nextState;
+        }
         return serverData;
       }
     }
@@ -1391,6 +1402,7 @@ function chPrompt() {
     .slice(-14)
     .map((x) => (x.r === 'u' ? 'العميل: ' : 'المساعد: ') + x.t)
     .join('\n');
+  const catNames = Object.keys(kb.cats).join('، ') || 'مفيش';
   const offTxt = kb.offers.length
     ? kb.offers.map((o) => o.t + (o.pr ? ' (' + o.pr + ')' : '') + (o.d ? ' - ' + o.d : '')).join(' | ')
     : 'مفيش عروض سلايدر نشطة حالياً';
@@ -1408,22 +1420,27 @@ function chPrompt() {
     ' وحدة بإجمالي ' +
     cartTot.s +
     ' جنيه.\n' +
-    '- العروض النشطة الآن فقط: ' +
+    '- الأقسام المتاحة: ' +
+    catNames +
+    '\n- العروض النشطة الآن فقط: ' +
     offTxt +
     '\n- أصناف خلصانة حالياً (غير متاحة للطلب): ' +
     outTxt +
     '\nالكتالوج المتاح بالكامل (رقم الصنف|الاسم|الحجم أو النوع|العبوة|السعر|القسم|النكهات بصيغة رقم=اسم):\n' +
     rCat() +
-    '\nالقواعد:\n' +
+    '\nالقواعد الإلزامية (تصرف كمندوب مبيعات محترف خطوة بخطوة):\n' +
     '- أرجع JSON مطابق للـ Schema بدقة.\n' +
-    '- items تمثل المسودة الكاملة بعد تطبيق آخر رسالة للعميل على «الطلب الحالي». لو أضاف صنفاً، احتفظ بكل الأصناف السابقة في items ولا تحذفها إلا إذا طلب العميل الحذف صراحة.\n' +
-    '- لو طلب نكهة غير موجودة في نكهات الصنف، لا تضفه، واذكر النكهات المتاحة فعلياً لهذا الصنف.\n' +
-    '- لو قال «أي نكهة» أو «مش فارقة»، ضع f=-1 وذكّره أن اختيار النكهة مطلوب قبل الإضافة النهائية للسلة.\n' +
-    '- لو الكتالوج به أكثر من حجم/سعر لنفس الصنف والعميل لم يحدد، ضع a=true و alt=[أرقام البدائل] واسأله بدلاً من التخمين.\n' +
-    '- اسأل سؤالاً واحداً مختصراً في المرة، ولا تخترع أي سعر أو عرض غير مكتوب أعلاه.\n' +
-    '- action="review" فقط عند موافقة العميل الصريحة على المراجعة والمسودة ليست فارغة.\n' +
+    '- ممنوع تماماً الرد بكلمة تأكيد عامة فقط مثل «تمام» أو «حاضر» أو «ماشي». كل رد يجب أن يحتوي على سؤال توضيحي محدد، أو ملخص الأصناف المضافة وسؤال التأكيد، أو بدائل واضحة.\n' +
+    '- لو طلب العميل قسماً أو اسماً عاماً يطابق أكثر من صنف (مثل: «عايز كرتونة شيبسي»)، لا تخمن صنفاً ولا تضفه لـ items؛ احتفظ بـ items كما هي في «الطلب الحالي»، اجعل intent="clarify"، اسأله عن النوع المطلوب، واعرض الأنواع المتاحة في quick.\n' +
+    '- لو الصنف له نكهات والعميل لم يحدد نكهة، أو الكمية غير محددة، لا تضف الصنف نهائياً لـ items قبل استكمال النكهة والكمية؛ اجعل intent="clarify" واسأله سؤالاً واحداً محدداً واعرض الاختيارات في quick.\n' +
+    '- لو طلب نكهة غير موجودة أو خلصانة، لا تضفه، واذكر النكهات المتاحة فعلياً لهذا الصنف.\n' +
+    '- لو طلب منتجاً غير موجود في الكتالوج، ضعه في unknown ولا تخترع منتجاً بديلاً وأخبره بوضوح.\n' +
+    '- عند اكتمال المنتج والنكهة والكمية، حدّث items (مع الحفاظ على الطلب الحالي ما لم يطلب الحذف/التعديل)، واعرض ملخص الطلب وسعره في reply واطلب التأكيد.\n' +
+    '- action="review" فقط عند موافقة العميل الصريحة على المراجعة والمسودة ليست فارغة وكل الأصناف مكتملة.\n' +
     'حالة التوضيح السابقة: ' +
     JSON.stringify(CH.pendingClarification || null) +
+    '\nآخر صنف تمت مناقشته: ' +
+    CH.lastReferencedProductIdx +
     '\nالطلب الحالي: ' +
     JSON.stringify(dr) +
     '\nالمحادثة:\n' +
@@ -1580,372 +1597,29 @@ function handlePendingFollowup(t, kb) {
 }
 
 function chLocal(t) {
-  const n = rn(t)
-    .replace(/[؟?!.،,;:«»"']+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const kb = buildStoreKB();
-
-  // Check pending conversational follow-up (flavor / variant disambiguation)
-  const follow = handlePendingFollowup(t, kb);
-  if (follow) return follow;
-
-  // 1) Confirm / Review intent
-  if (
-    RL.length &&
-    /^(?:ايوه|تمام|خلاص|يلا|كده بس|كده|راجع|ضيف|اضف|ماشي|اه|موافق|اكد|ابعت|انقل للسله)(?:\s|$)/.test(n)
-  ) {
-    return { m: 'تمام، هراجع معاك الطلب ونضيفه للسلة 👌', go: true, quick: [] };
-  }
-
-  // 2) Clear entire draft
-  if (/(?:امسح|فضي|الغي|شيل)\s*(?:كله|الكل|الطلب|المسوده|كل حاجه)|ابدا من جديد/.test(n)) {
-    RL = [];
-    RU = [];
-    CH.pendingFlavorIdx = -1;
-    CH.pendingAltCands = null;
-    return {
-      m: 'مسحت المسودة كلها 🗑 قولي تحب تبدأ بطلب إيه؟',
-      go: false,
-      quick: [
-        { label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' },
-        { label: '🎁 العروض', val: 'إيه العروض؟' },
-      ],
-    };
-  }
-
-  // 3) Remove specific product from draft ("شيل الشيبسي" / "احذف الدوريتوس" / "مش عايز بسكويت")
-  if (/^(?:شيل|احذف|الغي|امسح|مش عايز|بلاش)\s+/.test(n)) {
-    if (!RL.length) {
-      return {
-        m: 'المسودة فاضية أصلاً 😊 ابعتلي الأصناف اللي تحب تطلبها.',
-        go: false,
-        quick: [{ label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' }],
-      };
-    }
-    const restText = t.replace(/^(?:شيل|احذف|الغي|امسح|مش عايز|بلاش)\s+/i, '');
-    const m = rmatch(ntk(restText), [], true);
-    if (m) {
-      const targetIdx = m.cs[0].i;
-      const before = RL.length;
-      RL = RL.filter((l) => l.i !== targetIdx);
-      if (RL.length < before) {
-        return {
-          m: 'شيلت ' + pname(targetIdx) + ' من الطلب ✅',
-          go: false,
-          quick: RL.length
-            ? [{ label: '✅ راجع الطلب', val: 'راجع' }]
-            : [{ label: '📋 الأصناف', val: 'عندكم إيه؟' }],
-        };
-      }
-    }
-    return {
-      m: 'الصنف ده مش موجود في مسودة الطلب دلوقتي.',
-      go: false,
-      quick: [{ label: '✅ راجع الطلب الحالي', val: 'راجع' }],
-    };
-  }
-
-  // 4) Adjust quantity on existing draft item ("زود" / "قلل" / "خليهم 5")
-  if (RL.length && /^(?:زود|زودلي|نقص|قلل|خليهم|خلي|عدل)(?:\s|$)/.test(n)) {
-    const nums = n.match(/\d+/);
-    let qty = nums ? +nums[0] : 0;
-    if (!qty) {
-      for (const k in RNUM) {
-        if (n.indexOf(k) > -1) {
-          qty = RNUM[k];
-          break;
-        }
-      }
-    }
-    const adjClean = n.replace(/^(?:زود|زودلي|نقص|قلل|خليهم|خلي|عدل)\s*/, '');
-    const adjParsed = rq(ntk(adjClean));
-    const m = rmatch(adjParsed[1], [], false);
-    const line =
-      (m &&
-        m.cs
-          .map((c) => RL.find((l) => l.i === c.i))
-          .find(Boolean)) ||
-      RL[RL.length - 1];
-    if (line) {
-      if (/^(?:زود|زودلي)/.test(n)) {
-        line.q = Math.min(99, line.q + (qty || 1));
-      } else if (/^(?:نقص|قلل)/.test(n)) {
-        line.q = Math.max(1, line.q - (qty || 1));
-      } else if (qty > 0) {
-        line.q = Math.min(99, qty);
-      }
-      return {
-        m:
-          'عدّلت الكمية لـ ' +
-          pname(line.i) +
-          ' بقت ' +
-          fmtUnit(line.q) +
-          ' ✅',
-        go: false,
-        quick: [
-          { label: '✅ راجع وضيف للسلة', val: 'راجع' },
-          { label: '➕ أضيف صنف تاني', val: 'عندكم أصناف إيه؟' },
-        ],
-      };
-    }
-  }
-
-  // 5) Offers & Discounts Q&A
-  if (/(?:^|\s)(?:ال)?(?:عروض|عرض|خصم|خصومات|تخفيض|تخفيضات|اوفرز)(?:\s|$)/.test(n)) {
-    const parts = [];
-    if (kb.offers.length) {
-      parts.push(
-        '🎁 عروض اليوم:\n' +
-          kb.offers
-            .slice(0, 5)
-            .map((o) => '• ' + o.t + (o.pr ? ' — ' + o.pr : '') + (o.d ? ' (' + o.d + ')' : ''))
-            .join('\n')
-      );
-    }
-    if (kb.discounts.length) {
-      parts.push(
-        '🔥 أصناف عليها خصم مباشر:\n' +
-          kb.discounts
-            .slice(0, 5)
-            .map(
-              (d) =>
-                '• ' +
-                d.name +
-                ': ' +
-                money(d.price) +
-                ' بدل ' +
-                money(d.oldPrice) +
-                ' (خصم ' +
-                numAr(d.discPct) +
-                '%)'
-            )
-            .join('\n')
-      );
-    }
-    if (!parts.length) {
-      parts.push('كل الأصناف عندنا بأسعار الجملة المباشرة! تقدر تسأل عن أي صنف وهقولك سعره فوراً.');
-    }
-    const quick = kb.discounts.slice(0, 2).map((d) => ({
-      label: 'اطلب ٢ ' + d.baseName,
-      val: '٢ ' + d.name,
-    }));
-    quick.push({ label: '📋 كل الأقسام', val: 'عندكم أصناف إيه؟' });
-    return { m: parts.join('\n\n'), go: false, quick };
-  }
-
-  // 6) Min order / Cart total / Store info Q&A
-  if (/(?:اقل طلب|الحد الادني|حد ادني|حسابي|سله|سلة|توصيل|واتساب|رقم|شحن|وحدة|وحده)/.test(n)) {
-    const minVal = +state.CFG?.min || 0;
-    const cartTot = totals();
-    const draftTot = RL.reduce((s, l) => s + l.q * (state.P[l.i]?.[3] || 0), 0);
-    let m =
-      '📦 نظام الطلب في ' +
-      ((state.CFG && state.CFG.brandName) || 'أبو سعيد') +
-      ':\n• الطلب بالـ ' +
-      ((state.CFG && state.CFG.unit) || 'كرتونة') +
-      '\n• ' +
-      (minVal > 0 ? 'أقل قيمة للطلب: ' + money(minVal) : 'مفيش حد أدنى للطلب') +
-      '\n• الإرسال فوري عبر واتساب مباشرة.';
-    if (cartTot.n > 0) {
-      m += '\n🛒 في سلتك دلوقتي: ' + fmtUnit(cartTot.n) + ' بإجمالي ' + money(cartTot.s);
-    }
-    if (draftTot > 0) {
-      m += '\n📝 في المسودة: بإجمالي ' + money(draftTot);
-    }
-    return {
-      m,
-      go: false,
-      quick: [
-        { label: '🎁 العروض الحالية', val: 'إيه العروض؟' },
-        { label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' },
-      ],
-    };
-  }
-
-  // 7) Price / Flavors / Stock question ("بكام الشيبسي" / "نكهات الدوريتوس" / "متوفر بيج شيبس؟")
-  if (/(?:^|\s)(?:بكام|بكأم|سعر|اسعار|نكهات|اطعمه|طعوم|متوفر|في من|عندكم من|تفاصيل|خلصان)(?:\s|$)/.test(n) && !/عندكم\s+(?:ايه|اصناف)/.test(n)) {
-    const queryClean = n.replace(
-      /(?:^|\s)(?:بكام|بكأم|سعر|اسعار|نكهات|اطعمه|طعوم|متوفر|في من|عندكم من|تفاصيل|خلصان|هو|هي|ايه|اللي|في)(?=\s|$)/g,
-      ' '
-    );
-    const { hints } = extractHints(queryClean);
-    const m = rmatch(ntk(queryClean), hints, true);
-    if (m) {
-      const topRecs = m.cs.slice(0, 3).map((c) => {
-        const p = state.P[c.i];
-        return { i: c.i, p, out: c.out };
-      });
-      const linesTxt = topRecs.map(({ i, p, out }) => {
-        const fl = FL(p);
-        const avFl = fl.filter((f) => !f[1]).map((f) => f[0]);
-        let s =
-          '• ' +
-          pname(i) +
-          (p[2] ? ' (' + p[2] + ')' : '') +
-          ' — ' +
-          (out ? '❌ خلصان حالياً' : money(p[3]) + (+p[11] > p[3] ? ' (بدل ' + money(p[11]) + ')' : ''));
-        if (!out && avFl.length) {
-          s += '\n  النكهات: ' + avFl.slice(0, 7).join('، ') + (avFl.length > 7 ? ' و' + numAr(avFl.length - 7) + ' تانيين' : '');
-        }
-        return s;
-      });
-      const firstAvail = topRecs.find((x) => !x.out);
-      const quick = firstAvail
-        ? [
-            {
-              label: '➕ اطلب ٢ ' + pname(firstAvail.i),
-              val:
-                '٢ ' +
-                pname(firstAvail.i) +
-                (FL(firstAvail.p).find((f) => !f[1]) ? ' ' + FL(firstAvail.p).find((f) => !f[1])[0] : ''),
-            },
-            { label: '🎁 العروض', val: 'إيه العروض؟' },
-          ]
-        : [{ label: '📋 أصناف متوفرة تانية', val: 'عندكم أصناف إيه؟' }];
-      return { m: linesTxt.join('\n'), go: false, quick };
-    }
-  }
-
-  // 8) General catalog / category browsing ("عندكم إيه؟" / "اقسام إيه؟" / "أصناف الشيبسي")
-  if (/(?:عندكم\s+ايه|عندكو\s+ايه|عندكم\s+اصناف|ايه\s+(?:اللي\s+)?متوفر|ايه\s+(?:اللي\s+)?موجود|(?:^|\s)(?:ال)?(?:اصناف|اقسام|منتجات|بضاعه|منيو|قوايم|كتالوج)(?:\s|$)|تبيعوا\s+ايه|متوفر\s+ايه)/.test(n)) {
-    const catNames = Object.keys(kb.cats);
-    const matchedCat = catNames.find((c) => n.indexOf(rn(c)) > -1);
-    if (matchedCat) {
-      const list = kb.cats[matchedCat];
-      const msg =
-        '📦 قسم ' +
-        matchedCat +
-        ' (' +
-        numAr(list.length) +
-        ' صنف متاح):\n' +
-        list
-          .slice(0, 8)
-          .map((x) => '• ' + x.name + ' — ' + money(x.price))
-          .join('\n') +
-        (list.length > 8 ? '\n... و' + numAr(list.length - 8) + ' صنف تاني في الكتالوج' : '');
-      return {
-        m: msg,
-        go: false,
-        quick: list.slice(0, 3).map((x) => ({
-          label: 'اطلب ٢ ' + x.baseName,
-          val: '٢ ' + x.name,
-        })),
-      };
-    }
-    const msg =
-      '🏪 متوفر عندنا ' +
-      numAr(kb.avail.length) +
-      ' صنف متوزعين على:\n' +
-      catNames
-        .map((c) => '• ' + c + ' (' + numAr(kb.cats[c].length) + ' صنف)')
-        .join('\n') +
-      '\nقولّي حابب تشوف قسم إيه أو اكتبلي طلبك على طول!';
-    return {
-      m: msg,
-      go: false,
-      quick: catNames.slice(0, 4).map((c) => ({ label: 'قسم ' + c, val: 'عندكم إيه في ' + c })),
-    };
-  }
-
-  // Also check if user typed ONLY a category name like "شيبسي" or "مشروبات" with no quantity
-  const pureCat = Object.keys(kb.cats).find((c) => rn(c) === n || n === 'قسم ' + rn(c));
-  if (pureCat) {
-    const list = kb.cats[pureCat];
-    return {
-      m:
-        '📦 أشهر أصناف ' +
-        pureCat +
-        ':\n' +
-        list
-          .slice(0, 7)
-          .map((x) => '• ' + x.name + ' — ' + money(x.price))
-          .join('\n'),
-      go: false,
-      quick: list.slice(0, 3).map((x) => ({ label: 'اطلب ٢ ' + x.baseName, val: '٢ ' + x.name })),
-    };
-  }
-
-  // 9) Greeting / Capabilities help
-  if (/^(?:اهلا|أهلا|السلام عليكم|وعليكم|مرحبا|هاي|ازيك|صباح|مساء|مساعده|مساعدة|بتعمل ايه|انت مين)(?:\s|$)/.test(n)) {
-    return {
-      m:
-        'أهلاً بيك في ' +
-        ((state.CFG && state.CFG.brandName) || 'أبو سعيد') +
-        ' 👋\nأنا مساعدك الذكي للطلبات! تقدر تكتبلي طلبك بالعامية (زي: «٣ شيبسي ملح و٢ دوريتوس»)، أو تسألني عن أي سعر أو عرض أو نكهة.',
-      go: false,
-      quick: [
-        { label: '🎁 إيه العروض؟', val: 'إيه العروض والخصومات؟' },
-        { label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' },
-        { label: '💰 أقل طلب كام؟', val: 'أقل طلب كام؟' },
-      ],
-    };
-  }
-
-  // 10) Default: Full multi-item order extraction
-  const r = rlocal(t);
-  const names = [];
-  let missingFlavorItem = null;
-  let ambItem = null;
-
-  r.items.forEach((x) => {
-    let e = null;
-    RL.forEach((o) => {
-      if (o.i === x.i && o.f === x.f) e = o;
-    });
-    if (e) e.q = Math.min(e.q + x.q, 99);
-    else RL.push({ i: x.i, f: x.f, q: x.q, c: x.c, amb: x.amb });
-    const p = state.P[x.i];
-    const fl = FL(p);
-    names.push(
-      fmtUnit(x.q) + ' ' + pname(x.i) + (x.f >= 0 && fl[x.f] ? ' · ' + fl[x.f][0] : '')
-    );
-    if (x.amb && !ambItem) ambItem = x;
-    else if (x.f < 0 && fl.some((f) => !f[1]) && !missingFlavorItem) missingFlavorItem = x;
+  const res = processCustomerTurn({
+    text: t,
+    catalogData: getCatalogSnapshot(),
+    currentDraft: RL,
+    convState: {
+      pendingClarification: CH.pendingClarification || null,
+      lastReferencedProductIdx: Number.isInteger(CH.lastReferencedProductIdx)
+        ? CH.lastReferencedProductIdx
+        : -1,
+    },
   });
-
-  RL = chFix(RL);
-  RU = r.unk;
-
-  let m = '';
-  let quick = [];
-
-  if (names.length) m = 'ضفتلك للطلب ✅:\n' + names.join('\n');
-  if (r.soldOutHits.length) {
-    m += (m ? '\n\n' : '') + '⚠️ غير متوفر حالياً (خلصان): ' + r.soldOutHits.join('، ');
+  RL = Array.isArray(res.draft) ? res.draft : RL;
+  if (res.nextState && typeof res.nextState === 'object') {
+    CH.pendingClarification = res.nextState.pendingClarification || null;
+    CH.lastReferencedProductIdx = Number.isInteger(res.nextState.lastReferencedProductIdx)
+      ? res.nextState.lastReferencedProductIdx
+      : -1;
   }
-  if (r.unk.length) {
-    m += (m ? '\n' : '') + 'ما لقيتش في الأصناف: «' + r.unk.join('»، «') + '»';
-  }
-
-  if (ambItem && ambItem.c && ambItem.c.length > 1) {
-    CH.pendingAltCands = ambItem.c.slice(0, 4);
-    m += '\n\n🤔 قصدك أنهي حجم أو نوع من ' + state.P[ambItem.i][0] + '؟';
-    quick = CH.pendingAltCands.map((idx) => ({
-      label: pname(idx) + ' · ' + money(state.P[idx][3]),
-      val: pname(idx) + ' ب ' + state.P[idx][3] + ' جنيه',
-    }));
-  } else if (missingFlavorItem) {
-    const flAvail = FL(state.P[missingFlavorItem.i]).filter((f) => !f[1]);
-    CH.pendingFlavorIdx = missingFlavorItem.i;
-    m += '\n\n🌶 تحب أنهي نكهة في ' + pname(missingFlavorItem.i) + '؟';
-    quick = flAvail.slice(0, 4).map((f) => ({ label: f[0], val: f[0] }));
-    quick.push({ label: 'أي نكهة (اختار بعدين)', val: 'أي نكهة' });
-  } else if (names.length) {
-    m += '\nتحب تزوّد حاجة؟ ولو خلصت دوس «راجع وضيف للسلة».';
-    quick = [
-      { label: '✅ راجع وضيف للسلة', val: 'راجع' },
-      { label: '🎁 شوف العروض', val: 'إيه العروض؟' },
-    ];
-  } else if (!r.soldOutHits.length && !r.unk.length) {
-    m = 'ما قدرتش أحدد صنف من رسالتك 😊 جرّب تكتب اسم الصنف والكمية، أو اسألني «عندكم أصناف إيه؟».';
-    quick = [
-      { label: '📋 الأصناف المتوفرة', val: 'عندكم أصناف إيه؟' },
-      { label: '🎁 العروض الحالية', val: 'إيه العروض؟' },
-    ];
-  }
-
-  return { m, go: false, quick };
+  return {
+    m: String(res.reply || 'معلش ما فهمتش طلبك بالكامل 😊 قولّي اسم الصنف والكمية اللي محتاجها.'),
+    go: Boolean(res.go),
+    quick: Array.isArray(res.quick) ? res.quick : [],
+  };
 }
 
 async function rGo() {
@@ -2014,23 +1688,40 @@ async function chSend() {
   let ok = false;
   if (useGemini) {
     try {
-      const raw = await rGem(chPrompt());
-      let j = JSON.parse(raw.replace(/```json|```/g, '').trim());
+      const res = await rGem(chPrompt(), {
+        schemaType: 'customer_chat',
+        systemInstruction: chSystemInstruction(),
+        taskType: 'customer_chat',
+        temperature: 0.15,
+        returnObject: true,
+      });
+      let j =
+        res && res.structured && typeof res.structured === 'object'
+          ? res.structured
+          : JSON.parse(String((res && res.text) || '{}').replace(/```json|```/g, '').trim());
       if (Array.isArray(j)) j = { items: j };
-      const L = rNorm(j);
-      if (L.length || j.clear === true || !RL.length) RL = L;
-      RU = (Array.isArray(j.unknown) ? j.unknown : []).map(String);
-      CH.quick = Array.isArray(j.quick)
-        ? j.quick
-            .filter((q) => q && q.label && q.val)
-            .slice(0, 4)
-            .map((q) => ({ label: String(q.label), val: String(q.val) }))
-        : [];
-      CH.msgs.push({ r: 'a', t: String(j.reply || 'تمام') });
-      CH.busy = 0;
-      ok = true;
-      chRender();
-      if (j.action === 'review' && RL.length) chReview();
+
+      const validated = await validateCustomerWithServer(j, t);
+      RL = Array.isArray(validated.draft) ? validated.draft : RL;
+      RU = Array.isArray(validated.unknown) ? validated.unknown.map(String) : [];
+      CH.quick = Array.isArray(validated.quick) ? validated.quick : [];
+      if (validated.nextState && typeof validated.nextState === 'object') {
+        CH.pendingClarification = validated.nextState.pendingClarification || null;
+        CH.lastReferencedProductIdx = Number.isInteger(validated.nextState.lastReferencedProductIdx)
+          ? validated.nextState.lastReferencedProductIdx
+          : -1;
+      }
+
+      const finalReply = String(validated.reply || '').trim();
+      if (!finalReply) {
+        ok = false;
+      } else {
+        CH.msgs.push({ r: 'a', t: finalReply });
+        CH.busy = 0;
+        ok = true;
+        chRender();
+        if (validated.action === 'review' && RL.length) chReview();
+      }
     } catch (x) {
       ok = false;
     }
