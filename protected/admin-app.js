@@ -32,6 +32,29 @@
   var usersBusyId = '';
   var usersSetupNotice = '';
 
+  var pushOverview = {
+    configured: false,
+    missingVars: [],
+    subscriberCount: 0,
+    deviceCount: 0,
+    segments: [],
+    subscribedUsers: [],
+    logs: [],
+  };
+  var pushLoading = false;
+  var pushSending = false;
+  var pushSetupNotice = '';
+  var pushForm = {
+    targetType: 'all',
+    targetUserId: '',
+    targetSegment: 'withShop',
+    title: '',
+    body: '',
+    urlPreset: '/',
+    urlCustom: '',
+    imageDataUrl: '',
+  };
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -189,7 +212,7 @@
     updateUsersBadge();
     $('qw').hidden = tab != 'p';
     $('v').innerHTML =
-      tab == 'p' ? vp() : tab == 'c' ? vc() : tab == 'o' ? vo() : tab == 'u' ? vu() : vs();
+      tab == 'p' ? vp() : tab == 'c' ? vc() : tab == 'o' ? vo() : tab == 'u' ? vu() : tab == 'n' ? vn() : vs();
   }
 
   function vp() {
@@ -802,6 +825,352 @@
     }
   }
 
+  // ===== إدارة الإشعارات الفورية (Web Push) =====
+  function pushStatusBadge(st) {
+    if (st === 'sent') return { cls: 'st-sent', label: 'تم الإرسال ✅' };
+    if (st === 'partial') return { cls: 'st-partial', label: 'إرسال جزئي ⚠️' };
+    if (st === 'no_subscribers') return { cls: 'st-no_subscribers', label: 'لا يوجد مشتركون' };
+    return { cls: 'st-failed', label: 'تعذر الإرسال ❌' };
+  }
+
+  function vn() {
+    var usersList = Array.isArray(pushOverview.subscribedUsers) ? pushOverview.subscribedUsers : [];
+    var segmentsList = Array.isArray(pushOverview.segments) ? pushOverview.segments : [];
+    var logsList = Array.isArray(pushOverview.logs) ? pushOverview.logs : [];
+
+    var targetControls = '';
+    if (pushForm.targetType === 'user') {
+      if (!usersList.length) {
+        targetControls = '<p class="hint" style="color:var(--red)">لا يوجد مستخدمون مشتركون في الإشعارات حالياً.</p>';
+      } else {
+        targetControls =
+          '<label>اختر المستخدم المشترك</label>' +
+          '<select id="pushTargetUser">' +
+          usersList
+            .map(function (u) {
+              var sel = String(u.id) === String(pushForm.targetUserId) ? ' selected' : '';
+              return (
+                '<option value="' +
+                esc(u.id) +
+                '"' +
+                sel +
+                '>' +
+                esc(u.fullName || 'بدون اسم') +
+                ' — ' +
+                esc(u.phone || '') +
+                ' (' +
+                (u.deviceCount || 1) +
+                ' جهاز)</option>'
+              );
+            })
+            .join('') +
+          '</select>';
+      }
+    } else if (pushForm.targetType === 'segment') {
+      targetControls =
+        '<label>اختر الفئة المستهدفة</label>' +
+        '<select id="pushTargetSeg">' +
+        segmentsList
+          .map(function (sg) {
+            var sel = String(sg.id) === String(pushForm.targetSegment) ? ' selected' : '';
+            return (
+              '<option value="' +
+              esc(sg.id) +
+              '"' +
+              sel +
+              '>' +
+              esc(sg.label) +
+              ' (' +
+              Number(sg.count || 0) +
+              ' مشترك)</option>'
+            );
+          })
+          .join('') +
+        '</select>';
+    }
+
+    var urlOptions = [
+      ['/', 'الصفحة الرئيسية للمتجر (/)'],
+      ['/#offers', 'قسم العروض (/#offers)'],
+      ['/#catalog', 'كل الأصناف (/#catalog)'],
+      ['custom', 'رابط أو صفحة مخصصة'],
+    ];
+
+    var sendDisabled = pushSending || !pushOverview.configured ? ' disabled' : '';
+
+    return (
+      '<div class="sh" style="margin-top:14px"><b>🔔 إدارة الإشعارات</b><small>' +
+      Number(pushOverview.subscriberCount || 0) +
+      ' مشترك</small><button class="mini" type="button" id="pushRefresh">' +
+      (pushLoading ? '⏳ جاري...' : '🔄 تحديث') +
+      '</button></div>' +
+      '<p class="hint">أرسل إشعارات فورية للعملاء على Android وChrome وEdge حتى عند إغلاق الموقع.</p>' +
+      (!pushOverview.configured
+        ? '<div class="card2" style="border-color:var(--red);background:#fff3cd;color:#5c3d00"><b>⚠️ مفاتيح VAPID غير مضافة على الخادم</b><p style="margin:6px 0 0;font-size:13px;line-height:1.7">أضف المتغيرات السرية التالية في Cloudflare Workers: <b dir="ltr">VAPID_PUBLIC_KEY</b> و <b dir="ltr">VAPID_PRIVATE_KEY</b> و <b dir="ltr">VAPID_SUBJECT</b> لتفعيل الإرسال.</p></div>'
+        : '') +
+      (pushSetupNotice
+        ? '<div class="card2" style="border-color:var(--red);background:#fff3cd;color:#5c3d00"><b>⚠️ تنبيه قاعدة البيانات</b><p style="margin:6px 0 0;font-size:13px">' +
+          esc(pushSetupNotice) +
+          '</p></div>'
+        : '') +
+      '<div class="nstats">' +
+      '<div class="nstat"><b>' +
+      Number(pushOverview.subscriberCount || 0) +
+      '</b><small>المستخدمون المشتركون</small></div>' +
+      '<div class="nstat"><b>' +
+      Number(pushOverview.deviceCount || 0) +
+      '</b><small>الأجهزة النشطة</small></div>' +
+      '<div class="nstat"><b>' +
+      logsList.length +
+      '</b><small>سجل الإشعارات</small></div>' +
+      '</div>' +
+      '<div class="card2">' +
+      '<b style="font-size:16px">✉️ إرسال إشعار جديد</b>' +
+      '<label>الجمهور المستهدف</label>' +
+      '<div class="ufil">' +
+      [
+        ['all', '📢 جميع المشتركين'],
+        ['user', '👤 مستخدم محدد'],
+        ['segment', '🏷 فئة محددة'],
+      ]
+        .map(function (m) {
+          return (
+            '<button type="button" class="fbtn' +
+            (pushForm.targetType === m[0] ? ' on' : '') +
+            '" data-ptarget="' +
+            m[0] +
+            '">' +
+            m[1] +
+            '</button>'
+          );
+        })
+        .join('') +
+      '</div>' +
+      targetControls +
+      '<label>عنوان الإشعار</label>' +
+      '<input id="pushTitle" type="text" maxlength="120" placeholder="مثال: عروض جملة جديدة اليوم 🔥" value="' +
+      esc(pushForm.title) +
+      '">' +
+      '<label>نص الإشعار</label>' +
+      '<textarea id="pushBody" rows="3" maxlength="400" placeholder="اكتب تفاصيل العرض أو التنبيه للعملاء...">' +
+      esc(pushForm.body) +
+      '</textarea>' +
+      '<label>صورة اختيارية للإشعار</label>' +
+      '<div class="npv">' +
+      '<div class="npv-box" id="pushImgPreview">' +
+      (pushForm.imageDataUrl ? '<img src="' + esc(pushForm.imageDataUrl) + '" alt="">' : '🖼') +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">' +
+      '<label class="pubb" style="margin:0;cursor:pointer;font-size:13px">📷 اختيار صورة<input id="pushImgFile" type="file" accept="image/*" hidden></label>' +
+      (pushForm.imageDataUrl
+        ? '<button type="button" class="del" id="pushImgRm" style="padding:4px 10px;font-size:12px">حذف الصورة</button>'
+        : '<small class="hint" style="margin:0">اختياري — تُضغط تلقائياً لتعمل على إشعارات الجوال</small>') +
+      '</div></div>' +
+      '<label>الرابط عند الضغط على الإشعار</label>' +
+      '<select id="pushUrlPreset">' +
+      urlOptions
+        .map(function (o) {
+          return (
+            '<option value="' +
+            esc(o[0]) +
+            '"' +
+            (pushForm.urlPreset === o[0] ? ' selected' : '') +
+            '>' +
+            esc(o[1]) +
+            '</option>'
+          );
+        })
+        .join('') +
+      '</select>' +
+      (pushForm.urlPreset === 'custom'
+        ? '<label>الرابط المخصص</label><input id="pushUrlCustom" dir="ltr" type="text" placeholder="/#offers أو https://..." value="' +
+          esc(pushForm.urlCustom) +
+          '">'
+        : '') +
+      '<button id="pushSendBtn" class="pubb big" style="width:100%" type="button"' +
+      sendDisabled +
+      '>' +
+      (pushSending ? '⏳ جاري الإرسال...' : '🚀 إرسال الإشعار الآن') +
+      '</button>' +
+      '</div>' +
+      '<div class="sec"><div class="sh"><b>📜 سجل الإشعارات السابقة</b><small>' +
+      logsList.length +
+      ' إشعار</small></div>' +
+      (!logsList.length
+        ? '<p class="emp">لم يتم إرسال أي إشعارات بعد.</p>'
+        : logsList
+            .map(function (lg) {
+              var badge = pushStatusBadge(lg.status);
+              return (
+                '<article class="ucard">' +
+                '<div class="uhead"><div><b class="uname">' +
+                esc(lg.title) +
+                '</b><div class="umeta">' +
+                '<span>🎯 ' +
+                esc(lg.targetLabel || 'جميع المشتركين') +
+                '</span>' +
+                '<span>🕒 ' +
+                esc(formatDateAr(lg.createdAt)) +
+                '</span>' +
+                '<span dir="ltr">🔗 ' +
+                esc(lg.url || '/') +
+                '</span>' +
+                '<span>📊 تم التسليم: <b>' +
+                Number(lg.sentCount || 0) +
+                '</b> · فشل: ' +
+                Number(lg.failedCount || 0) +
+                (lg.removedCount ? ' · اشتراكات منتهية أُزيلت: ' + Number(lg.removedCount) : '') +
+                '</span></div></div><span class="stpill ' +
+                badge.cls +
+                '">' +
+                badge.label +
+                '</span></div>' +
+                '<p style="margin:8px 0 0;font-size:13.5px;line-height:1.6">' +
+                esc(lg.body) +
+                '</p>' +
+                (lg.imageUrl
+                  ? '<img class="nlog-img" src="' + esc(lg.imageUrl) + '" alt="" loading="lazy">'
+                  : '') +
+                '</article>'
+              );
+            })
+            .join('')) +
+      '</div>'
+    );
+  }
+
+  async function loadPushOverview(silent) {
+    pushLoading = true;
+    try {
+      var res = await fetch('/api/admin/push/overview', { credentials: 'same-origin' });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return;
+      }
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        if (data && data.needsRtdbSetup) {
+          pushSetupNotice = data.error || '';
+          if (tab === 'n') render();
+          return;
+        }
+        throw new Error(data.error || 'تعذر تحميل بيانات الإشعارات');
+      }
+      pushSetupNotice = '';
+      pushOverview = {
+        configured: Boolean(data.configured),
+        missingVars: Array.isArray(data.missingVars) ? data.missingVars : [],
+        subscriberCount: Number(data.subscriberCount || 0),
+        deviceCount: Number(data.deviceCount || 0),
+        segments: Array.isArray(data.segments) ? data.segments : [],
+        subscribedUsers: Array.isArray(data.subscribedUsers) ? data.subscribedUsers : [],
+        logs: Array.isArray(data.logs) ? data.logs : [],
+      };
+      if (
+        pushOverview.subscribedUsers.length &&
+        !pushOverview.subscribedUsers.some(function (u) {
+          return String(u.id) === String(pushForm.targetUserId);
+        })
+      ) {
+        pushForm.targetUserId = String(pushOverview.subscribedUsers[0].id);
+      }
+      if (
+        pushOverview.segments.length &&
+        !pushOverview.segments.some(function (sg) {
+          return String(sg.id) === String(pushForm.targetSegment);
+        })
+      ) {
+        pushForm.targetSegment = String(pushOverview.segments[0].id);
+      }
+    } catch (err) {
+      if (!silent) toast(err && err.message ? err.message : 'تعذر تحميل بيانات الإشعارات');
+    } finally {
+      pushLoading = false;
+      if (tab === 'n') {
+        var activeEl = document.activeElement;
+        var typingInCompose =
+          activeEl &&
+          (activeEl.id === 'pushTitle' ||
+            activeEl.id === 'pushBody' ||
+            activeEl.id === 'pushUrlCustom');
+        if (!typingInCompose) render();
+      }
+    }
+  }
+
+  async function sendAdminPushNotification() {
+    if (pushSending) return;
+    var title = String(pushForm.title || '').trim();
+    var body = String(pushForm.body || '').trim();
+    if (title.length < 2) {
+      toast('اكتب عنوان الإشعار (حرفين على الأقل)');
+      return;
+    }
+    if (body.length < 2) {
+      toast('اكتب نص الإشعار');
+      return;
+    }
+    if (pushForm.targetType === 'user' && !pushForm.targetUserId) {
+      toast('اختر المستخدم المشترك أولاً');
+      return;
+    }
+
+    var targetUrl =
+      pushForm.urlPreset === 'custom' ? String(pushForm.urlCustom || '').trim() || '/' : pushForm.urlPreset;
+
+    pushSending = true;
+    var btn = $('pushSendBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ جاري الإرسال...';
+    }
+
+    try {
+      var res = await fetch('/api/admin/push/send', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetType: pushForm.targetType,
+          targetUserId: pushForm.targetType === 'user' ? pushForm.targetUserId : '',
+          targetSegment: pushForm.targetType === 'segment' ? pushForm.targetSegment : '',
+          title: title,
+          body: body,
+          url: targetUrl,
+          imageDataUrl: pushForm.imageDataUrl || '',
+        }),
+      });
+      if (res.status === 401) {
+        handleAdminUnauthorized();
+        return;
+      }
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) throw new Error(data.error || 'تعذر إرسال الإشعار');
+
+      if (data.status === 'no_subscribers') {
+        toast('لا يوجد مشتركون مطابقون لهذا الاختيار حالياً');
+      } else if (Number(data.sentCount || 0) > 0) {
+        toast('تم إرسال الإشعار إلى ' + data.sentCount + ' جهاز بنجاح ✅');
+        pushForm.title = '';
+        pushForm.body = '';
+        pushForm.imageDataUrl = '';
+        pushForm.urlCustom = '';
+      } else {
+        toast('تعذر تسليم الإشعار للمشتركين (' + Number(data.failedCount || 0) + ' فشل)');
+      }
+      await loadPushOverview(true);
+    } catch (err) {
+      toast(err && err.message ? err.message : 'تعذر إرسال الإشعار');
+    } finally {
+      pushSending = false;
+      if (tab === 'n') render();
+    }
+  }
+
   // ===== تعديل / إضافة الأصناف والأقسام =====
   var dupFrom = -1;
   function openEd(i, c, dup) {
@@ -1073,10 +1442,29 @@
       tab = b.dataset.t;
       render();
       if (tab === 'u') loadUsers(true);
+      if (tab === 'n') loadPushOverview(true);
       return;
     }
     if (t.id === 'uRefresh') {
       loadUsers(false);
+      return;
+    }
+    if (t.id === 'pushRefresh') {
+      loadPushOverview(false);
+      return;
+    }
+    if ((b = t.closest('[data-ptarget]'))) {
+      pushForm.targetType = b.dataset.ptarget;
+      render();
+      return;
+    }
+    if (t.id === 'pushImgRm') {
+      pushForm.imageDataUrl = '';
+      render();
+      return;
+    }
+    if (t.id === 'pushSendBtn') {
+      sendAdminPushNotification();
       return;
     }
     if ((b = t.closest('[data-uf]'))) {
@@ -1202,6 +1590,22 @@
       } else if (k == 'unit') D.cfg.unit = t.value.trim() || 'كرتونة';
       else D.cfg[k] = t.value.trim();
       mark();
+    } else if (t.id === 'pushTargetUser') {
+      pushForm.targetUserId = t.value;
+    } else if (t.id === 'pushTargetSeg') {
+      pushForm.targetSegment = t.value;
+    } else if (t.id === 'pushUrlPreset') {
+      pushForm.urlPreset = t.value;
+      render();
+    } else if (t.id === 'pushImgFile' && t.files && t.files[0]) {
+      shrink(t.files[0])
+        .then(function (u) {
+          pushForm.imageDataUrl = u;
+          if (tab === 'n') render();
+        })
+        .catch(function () {
+          toast('الصورة دي مش شغالة، جرّب غيرها');
+        });
     }
   });
 
@@ -1211,6 +1615,18 @@
       userQuery = t.value.trim();
       var ul = $('uList');
       if (ul) ul.innerHTML = renderUserCardsHtml();
+      return;
+    }
+    if (t.id === 'pushTitle') {
+      pushForm.title = t.value;
+      return;
+    }
+    if (t.id === 'pushBody') {
+      pushForm.body = t.value;
+      return;
+    }
+    if (t.id === 'pushUrlCustom') {
+      pushForm.urlCustom = t.value;
       return;
     }
     if (t.dataset && t.dataset.n) {
@@ -3423,7 +3839,7 @@
     $('lf').hidden = true;
     $('app').hidden = false;
     try {
-      await Promise.all([loadAll(), loadUsers(true)]);
+      await Promise.all([loadAll(), loadUsers(true), loadPushOverview(true)]);
       render();
     } catch (e) {
       toast((e && e.message) || 'تعذر تحميل لوحة التحكم');

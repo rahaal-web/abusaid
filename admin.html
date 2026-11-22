@@ -100,6 +100,18 @@ input[type=range]{padding:0;border:0;height:30px;background:transparent;accent-c
 .uact-ok{background:var(--green);color:#fff}
 .uact-warn{background:#ff9f1c;color:#1b1b1b}
 .uact-del{background:var(--red);color:#fff}
+.nstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0}
+.nstat{background:var(--paper);border:3px solid var(--ink);border-radius:14px;padding:10px 8px;text-align:center;box-shadow:3px 3px 0 var(--ink)}
+.nstat b{display:block;font-family:Lalezar,Cairo,sans-serif;font-size:24px;line-height:1.1;color:var(--blue)}
+.nstat small{display:block;font-size:11.5px;color:var(--mu);margin-top:2px}
+.npv{display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap}
+.npv-box{width:76px;height:76px;border:3px solid var(--ink);border-radius:12px;background:#fff;display:grid;place-items:center;overflow:hidden;font-size:24px;flex:none}
+.npv-box img{width:100%;height:100%;object-fit:cover;display:block}
+.st-sent{background:#c6f6d5;color:#0b5d34}
+.st-partial{background:#ffe58f;color:#5c3d00}
+.st-failed{background:#ffd1ce;color:#8a130b}
+.st-no_subscribers{background:#e2e8f0;color:#1e293b}
+.nlog-img{width:100%;max-height:150px;object-fit:cover;border:2px solid var(--ink);border-radius:10px;margin-top:8px;display:block}
 </style><!-- PWA: install support -->
 <script>
 (function(){
@@ -156,7 +168,7 @@ if(iosSafari)show('ثبّت لوحة التحكم كتطبيق على موباي
 <form class="login" id="lf" method="post" action="/admin"><h3>🔧 لوحة التحكم</h3><div style="font-weight:800;color:var(--mu)">أبو سعيد</div><label>الإيميل</label><input id="lu" name="username" type="email" dir="ltr" autocomplete="username" required><label>كلمة السر</label><input id="lp" name="password" type="password" dir="ltr" autocomplete="current-password" required><label class="ck" style="margin-top:10px;font-size:13px;cursor:pointer"><input id="lrem" type="checkbox" checked><span>حفظ الجلسة وتذكر تسجيل الدخول</span></label><button class="pubb" id="lbtn" style="width:100%;margin-top:12px;padding:10px" type="submit">دخول</button><div class="err" id="le"></div><div class="cred">تصميم وتطوير <b>احمد رحال</b></div></form>
 <div id="app" hidden>
  <div class="top"><div class="trow"><b>🔧 أبو سعيد</b><span><button class="pubb" id="pub">🚀 نشر</button><button class="x" id="lo" title="خروج">🚪</button></span></div><div class="stt" id="st"></div>
- <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="u">👥 طلبات الحسابات <span class="ubadge" id="uBadge" hidden>0</span></button><button data-t="s">⚙️ الإعدادات</button></nav>
+ <nav class="tb"><button data-t="p">🍽 الأصناف</button><button data-t="c">🗂 الأقسام</button><button data-t="o">🎁 العروض</button><button data-t="u">👥 طلبات الحسابات <span class="ubadge" id="uBadge" hidden>0</span></button><button data-t="n">🔔 الإشعارات</button><button data-t="s">⚙️ الإعدادات</button></nav>
  <div id="qw" style="display:flex;gap:8px;align-items:center"><input id="q" placeholder="🔍 دوّر على صنف"><button class="pubb" id="smb" type="button" style="flex:none;padding:5px 12px;font-size:14px;font-family:inherit;letter-spacing:.3px;background:linear-gradient(135deg,#ffe27a,#d4a017 55%,#b8860b);color:#1b1b1b">Rahal Ai</button></div></div>
  <div id="v"></div>
  <div class="cred">تصميم وتطوير <b>احمد رحال</b></div>

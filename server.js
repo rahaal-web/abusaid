@@ -13,6 +13,13 @@ import {
   sanitizeCatalogForCustomer,
 } from './lib/firebaseProxy.js';
 import { createRtdbAuthStore } from './lib/rtdbAuthStore.js';
+import {
+  computePushOverview,
+  detectDeviceLabel,
+  executeAdminPushBroadcast,
+  resolveVapidEnv,
+  validatePushSubscriptionInput,
+} from './lib/pushService.js';
 
 const rtdbStore = createRtdbAuthStore(process.env);
 const userStore = rtdbStore.hasServerDbCredentials() ? rtdbStore : sqliteStore;
@@ -270,6 +277,35 @@ app.get('/js/logo-data.js', (_req, res) => {
 
 app.get('/js/pwa.js', (_req, res) => {
   res.sendFile(path.join(__dirname, 'js', 'pwa.js'));
+});
+
+app.get('/sw.js', (_req, res) => {
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'sw.js'));
+});
+
+app.get('/manifest.webmanifest', (_req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'manifest.webmanifest'));
+});
+
+app.use('/icons', express.static(path.join(__dirname, 'icons'), { maxAge: '7d' }));
+
+app.get('/push-img/:id', async (req, res) => {
+  try {
+    const img = await userStore.getPushImage(req.params.id);
+    if (!img || !img.base64 || !/^image\/(png|jpeg|webp|gif)$/i.test(img.mime || '')) {
+      return res.status(404).send('Not found');
+    }
+    const buf = Buffer.from(img.base64, 'base64');
+    res.setHeader('Content-Type', img.mime);
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+    return res.send(buf);
+  } catch {
+    return res.status(404).send('Not found');
+  }
 });
 
 app.get(['/login', '/login.html'], async (req, res) => {
@@ -553,6 +589,7 @@ app.get('/js/data.js', requireApprovedUser, sendProtectedFile('js/data.js'));
 app.get('/js/state.js', requireApprovedUser, sendProtectedFile('js/state.js'));
 app.get('/js/utils.js', requireApprovedUser, sendProtectedFile('js/utils.js'));
 app.get('/js/firebase-client.js', requireApprovedUser, sendProtectedFile('js/firebase-client.js'));
+app.get('/js/push.js', requireApprovedUser, sendProtectedFile('js/push.js'));
 
 app.get('/api/firebase-config', requireApprovedUser, (_req, res) => {
   return res.json({ config: resolveFirebaseWebConfig(process.env) });
@@ -595,6 +632,68 @@ app.post('/api/ai/generate', requireApprovedUser, async (req, res) => {
     const code = err?.message || 'AI_ERROR';
     const status = code === 'LIMIT' ? 429 : code === 'KEY' ? 403 : 502;
     return res.status(status).json({ error: code });
+  }
+});
+
+// ==================== CUSTOMER WEB PUSH APIs ====================
+app.get('/api/push/config', requireApprovedUser, async (req, res) => {
+  const vapid = resolveVapidEnv(process.env);
+  try {
+    const userSubs = await userStore.listUserPushSubscriptions(req.user.id);
+    return res.json({
+      configured: vapid.configured,
+      publicKey: vapid.configured ? vapid.publicKey : '',
+      subscribedEndpoints: userSubs.map((s) => s.endpoint),
+      deviceCount: userSubs.length,
+    });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر جلب إعدادات الإشعارات.' });
+  }
+});
+
+app.post('/api/push/subscribe', requireApprovedUser, checkRateLimit, async (req, res) => {
+  const parsed = validatePushSubscriptionInput(req.body?.subscription || req.body);
+  if (!parsed.valid) {
+    return res.status(400).json({ error: parsed.error });
+  }
+  const userAgent = req.get('user-agent') || '';
+  const deviceLabel = detectDeviceLabel(userAgent);
+  try {
+    const saved = await userStore.upsertPushSubscription({
+      userId: req.user.id,
+      phone: req.user.phone,
+      fullName: req.user.fullName,
+      shopName: req.user.shopName,
+      address: req.user.address,
+      subscription: parsed.subscription,
+      userAgent,
+      deviceLabel,
+    });
+    return res.json({ ok: true, subscription: saved });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر حفظ اشتراك الإشعارات.' });
+  }
+});
+
+app.post('/api/push/unsubscribe', requireApprovedUser, checkRateLimit, async (req, res) => {
+  const endpoint = String(req.body?.endpoint || '').trim();
+  if (!endpoint) {
+    return res.status(400).json({ error: 'يرجى تحديد رابط الاشتراك.' });
+  }
+  try {
+    const removed = await userStore.removePushSubscription({
+      userId: req.user.id,
+      endpoint,
+    });
+    return res.json({ ok: true, removed });
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر إلغاء اشتراك الإشعارات.' });
   }
 });
 
@@ -804,6 +903,45 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     return res.json({ ok: true });
   } catch {
     return res.status(502).json({ error: 'تعذر حذف المستخدم' });
+  }
+});
+
+app.get('/api/admin/push/overview', requireAdmin, async (req, res) => {
+  const vapid = resolveVapidEnv(process.env);
+  try {
+    const overview = await computePushOverview({
+      store: userStore,
+      vapid,
+      adminIdToken: req.adminSession.fb_id_token || '',
+    });
+    return res.json(overview);
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(502).json({ error: 'تعذر تحميل بيانات الإشعارات.' });
+  }
+});
+
+app.post('/api/admin/push/send', requireAdmin, checkRateLimit, async (req, res) => {
+  const vapid = resolveVapidEnv(process.env);
+  const origin = `${req.protocol}://${req.get('host')}`;
+  try {
+    const result = await executeAdminPushBroadcast({
+      store: userStore,
+      vapid,
+      origin,
+      adminEmail: req.adminSession.email,
+      adminIdToken: req.adminSession.fb_id_token || '',
+      body: req.body || {},
+    });
+    return res.json(result);
+  } catch (err) {
+    const cfgErr = handleRtdbConfigError(err, res);
+    if (cfgErr) return cfgErr;
+    return res.status(err?.status || 502).json({
+      error: err?.message || 'تعذر إرسال الإشعار.',
+      needsVapidSetup: Boolean(err?.needsVapidSetup),
+    });
   }
 });
 

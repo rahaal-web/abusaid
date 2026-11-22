@@ -9,9 +9,12 @@ A('meta',{name:'apple-mobile-web-app-status-bar-style',content:'default'});
 A('link',{rel:'icon',type:'image/png',href:I192});
 A('link',{rel:'apple-touch-icon',href:I192});
 try{
-var m={name:NAME,short_name:SHORT,lang:'ar',dir:'rtl',start_url:location.href.split('#')[0],display:'standalone',background_color:'#18160d',theme_color:'#18160d',
-icons:[{src:I192,sizes:'192x192',type:'image/png',purpose:'any'},{src:I512,sizes:'512x512',type:'image/png',purpose:'any'},{src:IM512,sizes:'512x512',type:'image/png',purpose:'maskable'}]};
-A('link',{rel:'manifest',href:URL.createObjectURL(new Blob([JSON.stringify(m)],{type:'application/manifest+json'}))});
+A('link',{rel:'manifest',href:'/manifest.webmanifest'});
+}catch(e){}
+try{
+if('serviceWorker' in navigator){
+navigator.serviceWorker.register('/sw.js',{scope:'/'}).catch(function(){});
+}
 }catch(e){}
 
 var standalone=(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;

@@ -11,6 +11,11 @@ import { clearCachedData, LOGO_FALLBACK, saveCachedData } from './data.js';
 import { initFirebaseAnalytics } from './firebase-client.js';
 import { bindOfferEvents, renderOffers } from './offers.js';
 import {
+  closeAccountModal,
+  initPushUI,
+  refreshPushAccountInfo,
+} from './push.js';
+import {
   $,
   AN,
   cleanCart,
@@ -504,6 +509,7 @@ function checkSession() {
         badge.textContent = d.user.fullName || d.user.phone || '';
         wrap.hidden = false;
       }
+      refreshPushAccountInfo();
     })
     .catch(() => {});
 }
@@ -595,7 +601,9 @@ function bindGlobalEvents() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if ($('fsheet')?.classList.contains('on')) {
+      if ($('accountSheet')?.classList.contains('on')) {
+        closeAccountModal();
+      } else if ($('fsheet')?.classList.contains('on')) {
         fClose();
       } else if ($('sheet')?.classList.contains('on')) {
         closeCartSheet();
@@ -662,6 +670,7 @@ function bootstrap() {
   ref();
   checkSession();
   sync();
+  initPushUI();
   initFirebaseAnalytics();
 
   setTimeout(() => {

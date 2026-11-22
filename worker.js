@@ -21,6 +21,13 @@ import {
   sanitizeCatalogForCustomer,
 } from './lib/firebaseCatalogCore.js';
 import { createRtdbAuthStore } from './lib/rtdbAuthStore.js';
+import {
+  computePushOverview,
+  detectDeviceLabel,
+  executeAdminPushBroadcast,
+  resolveVapidEnv,
+  validatePushSubscriptionInput,
+} from './lib/pushService.js';
 
 const USER_COOKIE = 'abu_session';
 const STATUS_COOKIE = 'abu_status_token';
@@ -42,6 +49,7 @@ const PROTECTED_STORE_PATHS = new Set([
   '/js/state.js',
   '/js/utils.js',
   '/js/firebase-client.js',
+  '/js/push.js',
 ]);
 
 const PUBLIC_ASSET_PATHS = new Set([
@@ -49,6 +57,11 @@ const PUBLIC_ASSET_PATHS = new Set([
   '/js/auth.js',
   '/js/logo-data.js',
   '/js/pwa.js',
+  '/sw.js',
+  '/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-maskable-512.png',
 ]);
 
 const BLOCKED_PREFIXES = ['/lib/', '/data/', '/protected/', '/public/', '/.'];
@@ -383,9 +396,46 @@ export default {
       FIREBASE_DB_HOST: dbHost,
     });
 
-    // ==================== PUBLIC AUTH ASSETS & PAGES ====================
+    // ==================== PUBLIC AUTH, PWA & PUSH IMAGE ASSETS ====================
     if (method === 'GET' && PUBLIC_ASSET_PATHS.has(pathname)) {
-      return serveAsset(env, req, pathname);
+      const res = await serveAsset(env, req, pathname, {
+        noStore: pathname === '/sw.js',
+      });
+      if (pathname === '/sw.js' && res.status === 200) {
+        const headers = new Headers(res.headers);
+        headers.set('Content-Type', 'application/javascript; charset=utf-8');
+        headers.set('Service-Worker-Allowed', '/');
+        headers.set('Cache-Control', 'no-cache');
+        return new Response(res.body, { status: 200, headers });
+      }
+      if (pathname === '/manifest.webmanifest' && res.status === 200) {
+        const headers = new Headers(res.headers);
+        headers.set('Content-Type', 'application/manifest+json; charset=utf-8');
+        return new Response(res.body, { status: 200, headers });
+      }
+      return res;
+    }
+
+    if (method === 'GET' && pathname.startsWith('/push-img/')) {
+      const imgId = decodeURIComponent(pathname.slice('/push-img/'.length));
+      const img = await store.getPushImage(imgId);
+      if (!img || !img.base64 || !/^image\/(png|jpeg|webp|gif)$/i.test(img.mime || '')) {
+        return new Response('Not found', { status: 404 });
+      }
+      try {
+        const bin = atob(img.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+        return new Response(bytes, {
+          status: 200,
+          headers: {
+            'Content-Type': img.mime,
+            'Cache-Control': 'public, max-age=604800',
+          },
+        });
+      } catch {
+        return new Response('Not found', { status: 404 });
+      }
     }
 
     if (method === 'GET' && (pathname === '/login' || pathname === '/login.html')) {
@@ -795,6 +845,76 @@ export default {
       }
     }
 
+    // ==================== CUSTOMER WEB PUSH APIs ====================
+    if (method === 'GET' && pathname === '/api/push/config') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      const vapid = resolveVapidEnv(env);
+      try {
+        const userSubs = await store.listUserPushSubscriptions(check.user.id);
+        return jsonResponse({
+          configured: vapid.configured,
+          publicKey: vapid.configured ? vapid.publicKey : '',
+          subscribedEndpoints: userSubs.map((s) => s.endpoint),
+          deviceCount: userSubs.length,
+        });
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'تعذر جلب إعدادات الإشعارات.' }, 502);
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/push/subscribe') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      const body = (await readJsonBody(req)) || {};
+      const parsed = validatePushSubscriptionInput(body.subscription || body);
+      if (!parsed.valid) {
+        return jsonResponse({ error: parsed.error }, 400);
+      }
+      const userAgent = req.headers.get('user-agent') || '';
+      const deviceLabel = detectDeviceLabel(userAgent);
+      try {
+        const saved = await store.upsertPushSubscription({
+          userId: check.user.id,
+          phone: check.user.phone,
+          fullName: check.user.fullName,
+          shopName: check.user.shopName,
+          address: check.user.address,
+          subscription: parsed.subscription,
+          userAgent,
+          deviceLabel,
+        });
+        return jsonResponse({ ok: true, subscription: saved });
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'تعذر حفظ اشتراك الإشعارات.' }, 502);
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/push/unsubscribe') {
+      const check = await requireApprovedUser(req, url, store);
+      if (!check.ok) return check.response;
+      const body = (await readJsonBody(req)) || {};
+      const endpoint = String(body.endpoint || '').trim();
+      if (!endpoint) {
+        return jsonResponse({ error: 'يرجى تحديد رابط الاشتراك.' }, 400);
+      }
+      try {
+        const removed = await store.removePushSubscription({
+          userId: check.user.id,
+          endpoint,
+        });
+        return jsonResponse({ ok: true, removed });
+      } catch (err) {
+        const cfgErr = handleRtdbConfigError(err);
+        if (cfgErr) return cfgErr;
+        return jsonResponse({ error: 'تعذر إلغاء اشتراك الإشعارات.' }, 502);
+      }
+    }
+
     // ==================== ADMIN AUTH, ASSETS & MANAGEMENT APIs ====================
     if (method === 'GET' && (pathname === '/admin' || pathname === '/admin.html')) {
       return serveAsset(env, req, '/admin.html', { noStore: true });
@@ -1058,6 +1178,49 @@ export default {
           const cfgErr = handleRtdbConfigError(err);
           if (cfgErr) return cfgErr;
           return jsonResponse({ error: 'تعذر حذف المستخدم' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/push/overview') {
+        try {
+          const vapid = resolveVapidEnv(env);
+          const overview = await computePushOverview({
+            store,
+            vapid,
+            adminIdToken: admin.idToken,
+          });
+          return jsonResponse(overview, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse({ error: 'تعذر تحميل بيانات الإشعارات.' }, 502, setCookies);
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/push/send') {
+        const body = (await readJsonBody(req)) || {};
+        const vapid = resolveVapidEnv(env);
+        try {
+          const result = await executeAdminPushBroadcast({
+            store,
+            vapid,
+            origin: url.origin,
+            adminEmail: admin.email,
+            adminIdToken: admin.idToken,
+            body,
+          });
+          return jsonResponse(result, 200, setCookies);
+        } catch (err) {
+          const cfgErr = handleRtdbConfigError(err);
+          if (cfgErr) return cfgErr;
+          return jsonResponse(
+            {
+              error: err?.message || 'تعذر إرسال الإشعار.',
+              needsVapidSetup: Boolean(err?.needsVapidSetup),
+            },
+            err?.status || 502,
+            setCookies
+          );
         }
       }
 
