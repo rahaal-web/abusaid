@@ -33,6 +33,7 @@ export const state = {
     renderCartUI: () => {},
     renderOffers: () => {},
     renderSpotlight: () => {},
+    syncDailyDeal: () => {},
     applyCfg: () => {},
     rapply: () => {},
     openFlavorModal: () => {},

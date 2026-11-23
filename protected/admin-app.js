@@ -1757,6 +1757,20 @@
       '<div class="cr" style="margin-bottom:0"><b style="flex:1">إظهار شبكة الأقسام الرئيسية</b><label class="sw"><input type="checkbox" data-s="hideCatsBox"' +
       (c.hideCatsBox ? '' : ' checked') +
       '><i></i></label></div>' +
+      '<div class="cr" style="margin-top:10px"><b style="flex:1">إظهار بطاقة «منتج اليوم» في قسم العروض</b><label class="sw"><input type="checkbox" data-s="hideDailyDeal"' +
+      (c.hideDailyDeal ? '' : ' checked') +
+      '><i></i></label></div>' +
+      '<label>تحديد «منتج اليوم» (اختياري)</label><select data-s="dailyDealIdx"><option value=""' +
+      (c.dailyDealIdx == null || c.dailyDealIdx === '' ? ' selected' : '') +
+      '>تلقائي يومياً (أو حسب العروض النشطة)</option>' +
+      (D.p || [])
+        .map(function (p, idx) {
+          if (!p || p[7]) return '';
+          var sel = String(c.dailyDealIdx) === String(idx) ? ' selected' : '';
+          return '<option value="' + idx + '"' + sel + '>' + esc(p[0]) + ' (' + esc(p[1]) + ')</option>';
+        })
+        .join('') +
+      '</select>' +
       '</div></div></div>'
     );
   }
@@ -5588,7 +5602,7 @@
       var k = t.dataset.s;
       if (k == 'phone') { D.cfg.phone = np(t.value); render(); }
       else if (k == 'min') D.cfg.min = +t.value || 0;
-      else if (k == 'ro' || k == 'rm' || k == 'oh' || k == 'hideThemeBtn' || k == 'hideBanner' || k == 'hideSpotlight' || k == 'hideCatsBox') {
+      else if (k == 'ro' || k == 'rm' || k == 'oh' || k == 'hideThemeBtn' || k == 'hideBanner' || k == 'hideSpotlight' || k == 'hideCatsBox' || k == 'hideDailyDeal') {
         D.cfg[k] = t.checked ? 0 : 1;
       }
       else if (k == 'fontUnified') D.cfg.fontUnified = t.checked ? 1 : 0;

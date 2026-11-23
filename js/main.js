@@ -8,7 +8,7 @@ import {
 } from './cart.js';
 import { clearCachedData, LOGO_FALLBACK, saveCachedData } from './data.js';
 import { initFirebaseAnalytics } from './firebase-client.js';
-import { bindOfferEvents, renderOffers } from './offers.js';
+import { bindOfferEvents, renderOffers, syncDailyDealBadge } from './offers.js';
 import {
   initPushUI,
   isMandatoryPushOpen,
@@ -586,6 +586,7 @@ function registerHooks() {
     if ($('sheet')?.classList.contains('on')) syncCartOverlay(true);
   };
   state.hooks.renderOffers = renderOffers;
+  state.hooks.syncDailyDeal = syncDailyDealBadge;
   state.hooks.renderSpotlight = renderHeroSpotlight;
   state.hooks.applyCfg = applyCfg;
   state.hooks.rapply = rapply;

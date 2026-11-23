@@ -50,6 +50,7 @@ export function chg(k, d) {
   saveCart();
   state.hooks.renderCatalog();
   updCartSummary();
+  state.hooks.syncDailyDeal?.();
 
   if (d > 0 && prev === 0) {
     pulseCartIndicators();
@@ -472,6 +473,7 @@ export function bindCartEvents() {
         saveCart();
         state.hooks.renderCatalog();
         updCartSummary();
+        state.hooks.syncDailyDeal?.();
         lines();
         showToast('تم حذف الصنف من السلة');
       }
@@ -494,6 +496,7 @@ export function bindCartEvents() {
     resetClearConfirm();
     state.hooks.renderCatalog();
     updCartSummary();
+    state.hooks.syncDailyDeal?.();
     lines();
   };
 

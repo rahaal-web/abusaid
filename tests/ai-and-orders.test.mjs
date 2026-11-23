@@ -2052,6 +2052,13 @@ function createMockBrowserEnv() {
     'accountSheet',
     'pushMandatoryModal',
     'toast',
+    'navOffers',
+    'offers',
+    'dailyDealWrap',
+    'otrack',
+    'dots',
+    'oPrev',
+    'oNext',
   ].forEach((id) => createMount(id));
 
   const document = {
@@ -2104,6 +2111,7 @@ async function runCustomerUiAndCartSuite() {
   const cartMod = await import('../js/cart.js');
   const routerMod = await import('../js/router.js');
   const aiMod = await import('../js/ai.js');
+  const offersMod = await import('../js/offers.js');
 
   const { state } = stateMod;
   let catalogRenderCount = 0;
@@ -2137,6 +2145,7 @@ async function runCustomerUiAndCartSuite() {
 
   routerMod.initRouter();
   aiMod.bindAIEvents();
+  offersMod.bindOfferEvents();
 
   // U1: Mandatory 10-step UI interactive flow + real cart addition + persistence
   await runCase('UI & Cart', 'U1: Mandatory 10-step interactive selection, chat card edit, review & rAdd() to state.cart', async () => {
@@ -2413,6 +2422,66 @@ async function runCustomerUiAndCartSuite() {
     assert.ok(one.unk.some((u) => /جاكودار/.test(u)));
     assert.equal(one.items.some((x) => x.i === 3), false);
     assert.deepEqual(state.cart, {});
+  });
+
+  // U8: Product of the Day ("منتج اليوم") & product-linked offers add to cart in 1 click with Toast confirmation
+  await runCase('UI & Cart', 'U8: Product of the Day renders in #offers even when offers=[] and adds 1 item to cart with Toast confirmation', () => {
+    resetEnv();
+    routerMod.switchOverlay(null);
+    state.hooks.syncDailyDeal = offersMod.syncDailyDealBadge;
+
+    // 1. Catalog has no carousel offers, yet #offers shows "منتج اليوم"
+    state.D.offers = [];
+    state.CFG.dailyDealIdx = 3; // جاجوار (has flavors: جبنة [0], شطة [1])
+    offersMod.renderOffers();
+
+    const offersSec = document.getElementById('offers');
+    const dailyWrap = document.getElementById('dailyDealWrap');
+    assert.equal(offersSec.hidden, false, '#offers section must be visible for منتج اليوم');
+    assert.equal(dailyWrap.hidden, false, '#dailyDealWrap must be visible');
+    assert.match(dailyWrap.textContent, /منتج اليوم/);
+
+    // Pick second flavor (شطة = 1) and click the one-click add button
+    const spiceBtn = dailyWrap.querySelector('[data-dd-flavor="1"]');
+    assert.ok(spiceBtn, 'Daily deal flavor button for شطة must exist');
+    spiceBtn.click();
+
+    const addBtn = document.getElementById('dailyDealAddBtn');
+    assert.ok(addBtn, 'Daily deal one-click add button must exist');
+    addBtn.click();
+
+    assert.deepEqual(state.cart, { '3:1': 1 }, 'One-click add must add valid prodIdx:flavorIdx to state.cart');
+    const saved = JSON.parse(localStorage.getItem('cart') || '{}');
+    assert.deepEqual(saved.c, { '3:1': 1 }, 'One-click add must persist cart to localStorage');
+    assert.equal(document.getElementById('hdrCartCount').textContent, '١');
+    assert.equal(document.getElementById('dailyDealInCart').hidden, false);
+    assert.match(document.getElementById('dailyDealInCart').textContent, /١/);
+
+    const toastEl = document.getElementById('toast');
+    assert.ok(toastEl.classList.contains('on'), 'Toast must become visible');
+    assert.equal(toastEl.dataset.type, 'ok');
+    assert.match(toastEl.textContent, /تمت إضافة/);
+    assert.match(toastEl.textContent, /جاجوار/);
+
+    // 2. Also verify unflavored linked offer slide supports one-click add + Toast
+    state.cart = {};
+    state.CFG.dailyDealIdx = '';
+    state.D.offers = [
+      {
+        t: 'عرض فريسكا الخاص',
+        d: 'سعر مميز اليوم',
+        g: 'عرض خاص',
+        pr: '٩٠ جنيه',
+        c: '#ffd23f',
+        productIndex: 4, // فريسكا (unflavored)
+      },
+    ];
+    offersMod.renderOffers();
+    const offerAddBtn = document.getElementById('otrack').querySelector('[data-offer-add="4"]');
+    assert.ok(offerAddBtn, 'Linked offer slide must render one-click add button');
+    offerAddBtn.click();
+    assert.deepEqual(state.cart, { '4': 1 });
+    assert.match(toastEl.textContent, /تمت إضافة.*فريسكا/);
   });
 }
 
