@@ -29,7 +29,6 @@
       <nav class="hdr-nav" aria-label="التنقل الرئيسي">
         <a href="#categoriesSec">الأقسام</a>
         <a href="#offers" id="navOffers" hidden>العروض</a>
-        <a href="#favoritesSec" id="navFavorites">المفضلة</a>
         <a href="#catalog">كل الأصناف</a>
       </nav>
 
@@ -57,10 +56,15 @@
           <span class="hdr-orders-txt">طلباتي</span>
           <span class="hdr-orders-badge" id="hdrOrdersCount" hidden>٠</span>
         </button>
-        <button id="hdrCart" class="hdr-cart-btn" type="button" aria-label="سلة الطلبات">
+        <button id="hdrFavBtn" class="icon-btn hdr-fav-btn" type="button" aria-label="قائمة المفضلة" title="المفضلة">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+          </svg>
+          <span class="hdr-fav-badge" id="hdrFavCount" hidden>٠</span>
+        </button>
+        <button id="hdrCart" class="icon-btn hdr-cart-btn" type="button" aria-label="سلة الطلبات" title="سلة الطلبات">
           <span aria-hidden="true">🛒</span>
-          <span class="hdr-cart-badge" id="hdrCartCount">٠</span>
-          <span id="hdrCartSum">السلة</span>
+          <span class="hdr-cart-badge" id="hdrCartCount" hidden>٠</span>
         </button>
         <button id="logoutBtn" class="icon-btn hdr-logout-btn" type="button" aria-label="تسجيل الخروج" title="تسجيل الخروج">🚪</button>
       </div>
@@ -152,26 +156,6 @@
       </div>
     </section>
 
-    <section class="sec fav-sec" id="favoritesSec">
-      <div class="wrap">
-        <div class="sec-head fav-head">
-          <div class="fav-title-wrap">
-            <h2 class="sec-title">❤️ قائمة المفضلة</h2>
-            <span class="fav-count-pill" id="favCount">٠</span>
-          </div>
-          <div class="fav-head-actions">
-            <span class="sec-sub">أصنافك المحفوظة للوصول السريع</span>
-            <button type="button" class="fav-clear-btn" id="favClearBtn" hidden>مسح الكل</button>
-          </div>
-        </div>
-        <div class="fav-empty" id="favEmpty">
-          <span class="fav-empty-ico" aria-hidden="true">♡</span>
-          <span>اضغط على أيقونة القلب في أي بطاقة منتج لحفظه هنا للوصول السريع</span>
-        </div>
-        <div class="grid fav-grid" id="favGrid" hidden></div>
-      </div>
-    </section>
-
     <section id="catalog">
       <div class="catalog-bar">
         <div class="wrap catalog-bar-inner">
@@ -234,6 +218,32 @@
     </div>
     <div class="wrap">
       <div class="grid" id="sgrid"></div>
+    </div>
+  </div>
+
+  <!-- Full-Screen Favorites Page -->
+  <div id="favoritesSheet" class="fav-page" role="dialog" aria-modal="true" aria-labelledby="favoritesTitle">
+    <div class="fav-page-bar">
+      <div class="fav-page-bar-inner">
+        <div class="fav-page-start">
+          <button id="favClose" class="x" type="button" aria-label="رجوع">→</button>
+          <div class="fav-title-wrap">
+            <h2 id="favoritesTitle">❤️ قائمة المفضلة</h2>
+            <span class="fav-count-pill" id="favCount">٠</span>
+          </div>
+        </div>
+        <div class="fav-head-actions">
+          <button type="button" class="fav-clear-btn" id="favClearBtn" hidden>مسح الكل</button>
+        </div>
+      </div>
+    </div>
+    <div class="wrap fav-page-body">
+      <div class="fav-empty" id="favEmpty">
+        <span class="fav-empty-ico" aria-hidden="true">♡</span>
+        <p class="fav-empty-txt">قائمة المفضلة فاضية دلوقتي — اضغط على أيقونة القلب في أي بطاقة منتج لحفظه هنا للوصول السريع.</p>
+        <button type="button" class="btn-primary fav-browse-btn" id="favBrowseBtn">استعرض الأصناف 🛍️</button>
+      </div>
+      <div class="grid fav-grid" id="favGrid" hidden></div>
     </div>
   </div>
 

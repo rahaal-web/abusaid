@@ -1897,6 +1897,23 @@ function createMockBrowserEnv() {
     click() {
       this.dispatchEvent({ type: 'click', target: this });
     }
+    setAttribute(k, v) {
+      const val = String(v == null ? '' : v);
+      this.attributes[k] = val;
+      if (k === 'id') {
+        this.id = val;
+        byId.set(val, this);
+      } else if (k === 'class') {
+        this._className = val;
+      } else if (k.startsWith('data-')) {
+        this.dataset[toCamel(k.slice(5))] = val;
+      }
+    }
+    getAttribute(k) {
+      if (k === 'id') return this.id;
+      if (k === 'class') return this._className;
+      return Object.prototype.hasOwnProperty.call(this.attributes, k) ? this.attributes[k] : null;
+    }
     _matches(sel) {
       return sel.split(',').some((part) => {
         const s = part.trim();
@@ -2044,8 +2061,9 @@ function createMockBrowserEnv() {
     'sum',
     'bar',
     'hdrCartCount',
-    'hdrCartSum',
     'hdrCart',
+    'hdrFavBtn',
+    'hdrFavCount',
     'open',
     'fsheet',
     'ordersSheet',
@@ -2053,14 +2071,15 @@ function createMockBrowserEnv() {
     'pushMandatoryModal',
     'toast',
     'navOffers',
-    'navFavorites',
     'offers',
     'dailyDealWrap',
     'otrack',
     'dots',
     'oPrev',
     'oNext',
-    'favoritesSec',
+    'favoritesSheet',
+    'favClose',
+    'favBrowseBtn',
     'favCount',
     'favClearBtn',
     'favEmpty',
@@ -2078,17 +2097,39 @@ function createMockBrowserEnv() {
     querySelector: (sel) => body.querySelector(sel),
   };
 
+  const winListeners = new Map();
+  const histStack = [{ state: null, url: 'http://localhost:3000/' }];
+  let histPos = 0;
+
   const historyObj = {
-    state: null,
-    length: 1,
-    pushState(s) {
-      this.state = s;
-      this.length += 1;
+    get state() {
+      return histStack[histPos]?.state ?? null;
     },
-    replaceState(s) {
-      this.state = s;
+    set state(s) {
+      if (histStack[histPos]) histStack[histPos].state = s;
     },
-    back() {},
+    get length() {
+      return histStack.length;
+    },
+    pushState(s, _t, url) {
+      histStack.splice(histPos + 1);
+      histStack.push({ state: s, url: url || 'http://localhost:3000/' });
+      histPos = histStack.length - 1;
+    },
+    replaceState(s, _t, url) {
+      histStack[histPos] = {
+        state: s,
+        url: url || histStack[histPos]?.url || 'http://localhost:3000/',
+      };
+    },
+    back() {
+      if (histPos > 0) {
+        histPos -= 1;
+        const st = histStack[histPos].state;
+        const fns = winListeners.get('popstate') || [];
+        fns.forEach((fn) => fn({ type: 'popstate', state: st }));
+      }
+    },
   };
 
   const win = {
@@ -2097,8 +2138,17 @@ function createMockBrowserEnv() {
     innerWidth: 1024,
     scrollY: 0,
     scrollTo() {},
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, fn) {
+      if (!winListeners.has(type)) winListeners.set(type, []);
+      winListeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      if (!winListeners.has(type)) return;
+      winListeners.set(
+        type,
+        winListeners.get(type).filter((f) => f !== fn)
+      );
+    },
     history: historyObj,
     document,
   };
@@ -2110,6 +2160,7 @@ function createMockBrowserEnv() {
   globalThis.history = historyObj;
   globalThis.matchMedia = win.matchMedia;
   globalThis.Element = MockElement;
+  globalThis.requestAnimationFrame = (fn) => fn();
 
   return { document, byId, localStorage };
 }
@@ -2145,6 +2196,7 @@ async function runCustomerUiAndCartSuite() {
     state.hooks.renderSpotlight = () => {};
     state.hooks.syncFilterInputs = () => {};
     state.hooks.syncSearchOverlay = () => {};
+    state.hooks.syncFavoritesOverlay = storeMod.syncFavoritesOverlay;
     state.hooks.syncOrdersOverlay = () => {};
     state.hooks.syncAccountOverlay = () => {};
     state.hooks.syncAiOverlay = aiMod.syncAiOverlay;
@@ -2217,7 +2269,10 @@ async function runCustomerUiAndCartSuite() {
     const saved = JSON.parse(localStorage.getItem('cart') || '{}');
     assert.deepEqual(saved.c, { '3:0': 2 }, 'saveCart() must persist cart to localStorage');
     assert.ok(catalogRenderCount >= 1, 'renderCatalog hook must run after rAdd()');
-    assert.equal(document.getElementById('hdrCartSum').textContent, '٢٦٠ جنيه');
+    assert.equal(document.getElementById('hdrCartCount').textContent, '٢');
+    assert.equal(document.getElementById('hdrCartCount').hidden, false);
+    assert.equal(document.getElementById('hdrCartSum'), null);
+    assert.doesNotMatch(document.getElementById('hdrCart').textContent, /السلة/);
     assert.equal(document.getElementById('cnt').textContent, '٢');
     assert.equal(aiMod.__getAiStateForTest().RL.length, 0, 'Draft must reset only after successful rAdd()');
     assert.ok(document.getElementById('sheet').classList.contains('on'), 'Cart drawer opens after adding');
@@ -2497,19 +2552,32 @@ async function runCustomerUiAndCartSuite() {
     assert.match(toastEl.textContent, /تمت إضافة.*فريسكا/);
   });
 
-  // U9: Favorites List ("قائمة المفضلة") heart toggle, separate homepage section, localStorage persistence & quick access
-  await runCase('UI & Cart', 'U9: Heart button saves products to separate Favorites section on homepage without opening flavor modal and persists across reloads', () => {
+  // U9: Favorites List ("قائمة المفضلة") dedicated page via header heart icon + icon-only Cart button
+  await runCase('UI & Cart', 'U9: Header heart icon opens dedicated Favorites page (hidden from homepage), persists across reloads & icon-only cart hides السلة text', () => {
     resetEnv();
     routerMod.switchOverlay(null);
     state.hooks.renderCatalog = storeMod.renderGrid;
     storeMod.renderGrid();
+    cartMod.updCartSummary();
 
+    assert.equal(document.getElementById('favoritesSec'), null, 'Favorites section must not appear on homepage');
+    assert.equal(document.getElementById('navFavorites'), null, 'Favorites nav link must be removed from .hdr-nav');
+    assert.equal(document.getElementById('hdrCartSum'), null, 'Header cart button must not contain #hdrCartSum word');
+    assert.doesNotMatch(document.getElementById('hdrCart').textContent, /السلة/);
+
+    const favSheet = document.getElementById('favoritesSheet');
+    const hdrFavBtn = document.getElementById('hdrFavBtn');
+    const hdrFavCount = document.getElementById('hdrFavCount');
+    const favClose = document.getElementById('favClose');
     const favGrid = document.getElementById('favGrid');
     const favEmpty = document.getElementById('favEmpty');
     const favCount = document.getElementById('favCount');
     const favClearBtn = document.getElementById('favClearBtn');
     const grid = document.getElementById('grid');
 
+    assert.equal(favSheet.classList.contains('on'), false, 'Favorites page stays closed initially');
+    assert.equal(hdrFavCount.hidden, true);
+    assert.equal(hdrFavBtn.classList.contains('has-favs'), false);
     assert.equal(favGrid.hidden, true);
     assert.equal(favEmpty.hidden, false);
     assert.equal(favCount.textContent, '٠');
@@ -2522,17 +2590,26 @@ async function runCustomerUiAndCartSuite() {
     // Must NOT open flavor modal even though card has data-o="3"
     assert.equal(document.getElementById('fsheet').classList.contains('on'), false, 'Clicking heart must NOT open flavor modal');
     assert.equal(state.favorites.length, 1);
+    assert.equal(hdrFavCount.hidden, false);
+    assert.equal(hdrFavCount.textContent, '١');
+    assert.equal(hdrFavBtn.classList.contains('has-favs'), true);
+    assert.ok(grid.querySelector('[data-fav="3"]').classList.contains('on'), 'Heart button must have active .on state');
+    assert.match(document.getElementById('toast').textContent, /المفضلة/);
+
+    // Clicking top header heart icon opens the dedicated Favorites page
+    hdrFavBtn.click();
+    assert.equal(favSheet.classList.contains('on'), true, 'Clicking header heart icon must open #favoritesSheet page');
+    assert.ok(routerMod.getCurrentSnapshot().layers.includes('favorites'));
     assert.equal(favGrid.hidden, false, '#favGrid must become visible once a favorite is added');
     assert.equal(favEmpty.hidden, true);
     assert.equal(favCount.textContent, '١');
     assert.equal(favClearBtn.hidden, false);
-    assert.ok(favGrid.querySelector('#fav-prod-3'), 'Saved product must appear inside separate #favGrid section');
-    assert.ok(grid.querySelector('[data-fav="3"]').classList.contains('on'), 'Heart button must have active .on state');
-    assert.match(document.getElementById('toast').textContent, /المفضلة/);
+    assert.ok(favGrid.querySelector('#fav-prod-3'), 'Saved product must appear inside Favorites page #favGrid');
 
     // Also add unflavored product 4 (فريسكا) and quick-add it directly from #favGrid!
     grid.querySelector('[data-fav="4"]').click();
     assert.equal(favCount.textContent, '٢');
+    assert.equal(hdrFavCount.textContent, '٢');
     const favCard4 = favGrid.querySelector('#fav-prod-4');
     assert.ok(favCard4, 'Product 4 card must appear inside #favGrid');
     const favAddBtn = favCard4.querySelector('[data-k="4"][data-d="1"]');
@@ -2548,11 +2625,12 @@ async function runCustomerUiAndCartSuite() {
     assert.ok(favGrid.querySelector('#fav-prod-3'));
     assert.ok(favGrid.querySelector('#fav-prod-4'));
 
-    // Toggle off from inside #favGrid removes from favorites and updates catalog card
+    // Toggle off from inside #favGrid removes from favorites and updates catalog card & badge
     favGrid.querySelector('[data-fav="3"]').click();
     assert.equal(state.favorites.length, 1);
     assert.equal(favGrid.querySelector('#fav-prod-3'), null);
     assert.equal(grid.querySelector('[data-fav="3"]').classList.contains('on'), false);
+    assert.equal(hdrFavCount.textContent, '١');
 
     // Clear all favorites
     favClearBtn.click();
@@ -2560,6 +2638,12 @@ async function runCustomerUiAndCartSuite() {
     assert.equal(favGrid.hidden, true);
     assert.equal(favEmpty.hidden, false);
     assert.equal(favCount.textContent, '٠');
+    assert.equal(hdrFavCount.hidden, true);
+    assert.equal(hdrFavBtn.classList.contains('has-favs'), false);
+
+    // Close Favorites page cleanly
+    favClose.click();
+    assert.equal(favSheet.classList.contains('on'), false);
   });
 
   // U10: Full Admin control over Product of the Day (mode, name-shift resilience, flavor lock, stepQty, texts, color, image, schedule, fallback, hide, asset GC & admin hooks)

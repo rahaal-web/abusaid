@@ -112,7 +112,8 @@ function syncBodyModalLock() {
       $('fsheet')?.classList.contains('on') ||
       $('rsheet')?.classList.contains('on') ||
       $('ordersSheet')?.classList.contains('on') ||
-      $('accountSheet')?.classList.contains('on')
+      $('accountSheet')?.classList.contains('on') ||
+      $('favoritesSheet')?.classList.contains('on')
   );
   document.body.classList.toggle('modal-open', anyOpen);
 }

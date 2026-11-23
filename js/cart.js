@@ -75,15 +75,21 @@ export function updCartSummary() {
   const sum = $('sum');
   const bar = $('bar');
   const hdrCount = $('hdrCartCount');
-  const hdrSum = $('hdrCartSum');
   const hdrCart = $('hdrCart');
 
   if (cnt) cnt.textContent = numAr(t.n);
   if (sum) sum.textContent = money(t.s);
   if (bar) bar.classList.toggle('on', t.n > 0);
-  if (hdrCount) hdrCount.textContent = numAr(t.n);
-  if (hdrSum) hdrSum.textContent = t.n > 0 ? money(t.s) : 'السلة';
-  if (hdrCart) hdrCart.classList.toggle('has-items', t.n > 0);
+  if (hdrCount) {
+    hdrCount.textContent = numAr(t.n);
+    hdrCount.hidden = t.n === 0;
+  }
+  if (hdrCart) {
+    hdrCart.classList.toggle('has-items', t.n > 0);
+    const label = t.n > 0 ? 'سلة الطلبات (' + numAr(t.n) + ' - ' + money(t.s) + ')' : 'سلة الطلبات';
+    hdrCart.setAttribute('aria-label', label);
+    hdrCart.title = label;
+  }
 }
 
 export function wa() {
@@ -256,6 +262,7 @@ function syncBodyModalLock() {
       $('rsheet')?.classList.contains('on') ||
       $('ordersSheet')?.classList.contains('on') ||
       $('accountSheet')?.classList.contains('on') ||
+      $('favoritesSheet')?.classList.contains('on') ||
       $('pushMandatoryModal')?.classList.contains('on')
   );
   document.body.classList.toggle('modal-open', anyOpen);

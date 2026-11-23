@@ -383,8 +383,8 @@ export function renderFavorites() {
   const favEmpty = $('favEmpty');
   const favCount = $('favCount');
   const clearBtn = $('favClearBtn');
-  const navFav = $('navFavorites');
-  if (!favGrid && !favEmpty && !favCount) return;
+  const hdrFavBtn = $('hdrFavBtn');
+  const hdrFavCount = $('hdrFavCount');
 
   const allItems = buildGroupedItems('', false);
   const byGroupKey = new Map();
@@ -398,11 +398,24 @@ export function renderFavorites() {
     if (found) favItems.push(found);
   });
 
+  if (hdrFavCount) {
+    hdrFavCount.textContent = numAr(favItems.length);
+    hdrFavCount.hidden = favItems.length === 0;
+  }
+  if (hdrFavBtn) {
+    hdrFavBtn.classList.toggle('has-favs', favItems.length > 0);
+    const favLabel =
+      favItems.length > 0
+        ? 'قائمة المفضلة (' + numAr(favItems.length) + ')'
+        : 'قائمة المفضلة';
+    hdrFavBtn.setAttribute('aria-label', favLabel);
+    hdrFavBtn.title = favLabel;
+  }
+
+  if (!favGrid && !favEmpty && !favCount) return;
+
   if (favCount) favCount.textContent = numAr(favItems.length);
   if (clearBtn) clearBtn.hidden = favItems.length === 0;
-  if (navFav) {
-    navFav.textContent = favItems.length > 0 ? 'المفضلة (' + numAr(favItems.length) + ')' : 'المفضلة';
-  }
 
   if (!favItems.length) {
     if (favEmpty) favEmpty.hidden = false;
@@ -582,10 +595,45 @@ export function sClose() {
   popOverlay('search');
 }
 
+export function syncFavoritesOverlay(isOpen) {
+  const favSheet = $('favoritesSheet');
+  if (!favSheet) return;
+  if (isOpen) {
+    renderFavorites();
+    if (!favSheet.classList.contains('on')) {
+      favSheet.classList.add('on');
+      favSheet.scrollTop = 0;
+    }
+  } else {
+    favSheet.classList.remove('on');
+  }
+  ovf();
+}
+
+export function openFavoritesPage() {
+  pushOverlay('favorites');
+}
+
+export function closeFavoritesPage() {
+  popOverlay('favorites');
+}
+
 export function ovf() {
   const rOn = $('rsheet') && $('rsheet').classList.contains('on');
   const sOn = $('spage') && $('spage').classList.contains('on');
-  document.body.style.overflow = rOn || sOn ? 'hidden' : '';
+  const favOn = $('favoritesSheet') && $('favoritesSheet').classList.contains('on');
+  const anyOverlayOpen = Boolean(
+    rOn ||
+      sOn ||
+      favOn ||
+      $('sheet')?.classList.contains('on') ||
+      $('fsheet')?.classList.contains('on') ||
+      $('ordersSheet')?.classList.contains('on') ||
+      $('accountSheet')?.classList.contains('on') ||
+      $('pushMandatoryModal')?.classList.contains('on')
+  );
+  document.body.style.overflow = rOn || sOn || favOn ? 'hidden' : '';
+  document.body.classList.toggle('modal-open', anyOverlayOpen);
 }
 
 export function bindStoreEvents() {
@@ -634,9 +682,22 @@ export function bindStoreEvents() {
   const sgridEl = $('sgrid');
   const favGridEl = $('favGrid');
   const favClearBtn = $('favClearBtn');
+  const hdrFavBtn = $('hdrFavBtn');
+  const favCloseBtn = $('favClose');
+  const favBrowseBtn = $('favBrowseBtn');
   if (gridEl) gridEl.addEventListener('click', handleGridClick);
   if (sgridEl) sgridEl.addEventListener('click', handleGridClick);
   if (favGridEl) favGridEl.addEventListener('click', handleGridClick);
+  if (hdrFavBtn) hdrFavBtn.addEventListener('click', openFavoritesPage);
+  if (favCloseBtn) favCloseBtn.addEventListener('click', closeFavoritesPage);
+  if (favBrowseBtn) {
+    favBrowseBtn.addEventListener('click', () => {
+      commitRoute(
+        { sec: 'catalog', spot: -1, layers: [] },
+        { mode: 'push', scrollTarget: 'section' }
+      );
+    });
+  }
   if (favClearBtn) {
     favClearBtn.addEventListener('click', () => {
       if (!state.favorites || !state.favorites.length) return;

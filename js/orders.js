@@ -443,6 +443,7 @@ export function syncOrdersOverlay(isOpen) {
     !$('fsheet')?.classList.contains('on') &&
     !$('rsheet')?.classList.contains('on') &&
     !$('accountSheet')?.classList.contains('on') &&
+    !$('favoritesSheet')?.classList.contains('on') &&
     !$('pushMandatoryModal')?.classList.contains('on')
   ) {
     document.body.classList.remove('modal-open');

@@ -39,6 +39,7 @@ import {
   renderHeroSpotlight,
   renderTabs,
   sClose,
+  syncFavoritesOverlay,
   syncFilterInputs,
   syncSearchOverlay,
 } from './store.js';
@@ -605,6 +606,7 @@ function registerHooks() {
   state.hooks.closeSearch = sClose;
   state.hooks.syncFilterInputs = syncFilterInputs;
   state.hooks.syncSearchOverlay = syncSearchOverlay;
+  state.hooks.syncFavoritesOverlay = syncFavoritesOverlay;
   state.hooks.syncCartOverlay = syncCartOverlay;
   state.hooks.syncFlavorOverlay = syncFlavorOverlay;
   state.hooks.syncAiOverlay = syncAiOverlay;

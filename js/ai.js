@@ -2191,6 +2191,7 @@ export function aiHide() {
     !$('fsheet')?.classList.contains('on') &&
     !$('ordersSheet')?.classList.contains('on') &&
     !$('accountSheet')?.classList.contains('on') &&
+    !$('favoritesSheet')?.classList.contains('on') &&
     !$('pushMandatoryModal')?.classList.contains('on')
   ) {
     document.body.classList.remove('modal-open');

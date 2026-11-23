@@ -3,9 +3,9 @@ import { FL, gk, rn } from './utils.js';
 
 const SCROLL_STORAGE_KEY = 'abu_store_scroll_v1';
 const SEQ_STORAGE_KEY = 'abu_store_nav_seq_v1';
-const VALID_LAYERS = ['cart', 'flavor', 'search', 'ai', 'orders', 'account'];
+const VALID_LAYERS = ['cart', 'flavor', 'search', 'favorites', 'ai', 'orders', 'account'];
 const VALID_SORTS = ['default', 'price-asc', 'price-desc', 'discount'];
-const VALID_SECS = ['categoriesSec', 'offers', 'favoritesSec', 'catalog'];
+const VALID_SECS = ['categoriesSec', 'offers', 'catalog'];
 const VALID_AI_STEPS = ['chat', 'old', 'review'];
 
 let routerInitialized = false;
@@ -74,7 +74,8 @@ function saveScrollForNavIdx(idx) {
   if (!Number.isFinite(idx)) return;
   const isModalLocked =
     document.body.classList.contains('modal-open') ||
-    Boolean($('spage')?.classList.contains('on'));
+    Boolean($('spage')?.classList.contains('on')) ||
+    Boolean($('favoritesSheet')?.classList.contains('on'));
   if (isModalLocked) return;
   scrollMap[idx] = Math.max(0, Math.round(window.scrollY || window.pageYOffset || 0));
   saveScrollMap();
@@ -340,6 +341,7 @@ function applySnapshotToUI(snap, options = {}) {
   // Sync overlays cleanly in bottom-to-top layering order
   const layers = snap.layers;
   const wantSearch = layers.includes('search');
+  const wantFavorites = layers.includes('favorites');
   const wantCart = layers.includes('cart');
   const wantOrders = layers.includes('orders');
   const wantAccount = layers.includes('account');
@@ -352,10 +354,12 @@ function applySnapshotToUI(snap, options = {}) {
   if (!wantOrders) state.hooks.syncOrdersOverlay?.(false);
   if (!wantCart) state.hooks.syncCartOverlay?.(false);
   if (!wantAi) state.hooks.syncAiOverlay?.(false, '');
+  if (!wantFavorites) state.hooks.syncFavoritesOverlay?.(false);
   if (!wantSearch) state.hooks.syncSearchOverlay?.(false, '');
 
   // Open active overlays
   if (wantSearch) state.hooks.syncSearchOverlay?.(true, snap.searchModalQuery);
+  if (wantFavorites) state.hooks.syncFavoritesOverlay?.(true);
   if (wantCart) state.hooks.syncCartOverlay?.(true);
   if (wantOrders) state.hooks.syncOrdersOverlay?.(true);
   if (wantAccount) state.hooks.syncAccountOverlay?.(true);
@@ -376,7 +380,8 @@ function applySnapshotToUI(snap, options = {}) {
   }
 
   // Scroll handling
-  const hasBlockingFullscreen = wantSearch || wantCart || wantOrders || wantAccount || wantAi || wantFlavor;
+  const hasBlockingFullscreen =
+    wantSearch || wantFavorites || wantCart || wantOrders || wantAccount || wantAi || wantFlavor;
   if (fromPopstate || isInitialLoad) {
     if (targetScrollY != null && Number.isFinite(Number(targetScrollY)) && !hasBlockingFullscreen) {
       restoreScrollImmediate(targetScrollY);
