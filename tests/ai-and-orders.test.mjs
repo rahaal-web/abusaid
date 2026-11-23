@@ -2053,12 +2053,21 @@ function createMockBrowserEnv() {
     'pushMandatoryModal',
     'toast',
     'navOffers',
+    'navFavorites',
     'offers',
     'dailyDealWrap',
     'otrack',
     'dots',
     'oPrev',
     'oNext',
+    'favoritesSec',
+    'favCount',
+    'favClearBtn',
+    'favEmpty',
+    'favGrid',
+    'catalogStatus',
+    'grid',
+    'sgrid',
   ].forEach((id) => createMount(id));
 
   const document = {
@@ -2112,6 +2121,7 @@ async function runCustomerUiAndCartSuite() {
   const routerMod = await import('../js/router.js');
   const aiMod = await import('../js/ai.js');
   const offersMod = await import('../js/offers.js');
+  const storeMod = await import('../js/store.js');
 
   const { state } = stateMod;
   let catalogRenderCount = 0;
@@ -2124,6 +2134,8 @@ async function runCustomerUiAndCartSuite() {
     state.P = cat.p;
     state.CATS = ['الكل'].concat(cat.cats || []);
     state.cart = {};
+    state.favorites = [];
+    state.syncing = false;
     catalogRenderCount = 0;
     state.hooks.renderCatalog = () => {
       catalogRenderCount += 1;
@@ -2146,6 +2158,7 @@ async function runCustomerUiAndCartSuite() {
   routerMod.initRouter();
   aiMod.bindAIEvents();
   offersMod.bindOfferEvents();
+  storeMod.bindStoreEvents();
 
   // U1: Mandatory 10-step UI interactive flow + real cart addition + persistence
   await runCase('UI & Cart', 'U1: Mandatory 10-step interactive selection, chat card edit, review & rAdd() to state.cart', async () => {
@@ -2482,6 +2495,71 @@ async function runCustomerUiAndCartSuite() {
     offerAddBtn.click();
     assert.deepEqual(state.cart, { '4': 1 });
     assert.match(toastEl.textContent, /تمت إضافة.*فريسكا/);
+  });
+
+  // U9: Favorites List ("قائمة المفضلة") heart toggle, separate homepage section, localStorage persistence & quick access
+  await runCase('UI & Cart', 'U9: Heart button saves products to separate Favorites section on homepage without opening flavor modal and persists across reloads', () => {
+    resetEnv();
+    routerMod.switchOverlay(null);
+    state.hooks.renderCatalog = storeMod.renderGrid;
+    storeMod.renderGrid();
+
+    const favGrid = document.getElementById('favGrid');
+    const favEmpty = document.getElementById('favEmpty');
+    const favCount = document.getElementById('favCount');
+    const favClearBtn = document.getElementById('favClearBtn');
+    const grid = document.getElementById('grid');
+
+    assert.equal(favGrid.hidden, true);
+    assert.equal(favEmpty.hidden, false);
+    assert.equal(favCount.textContent, '٠');
+
+    // Click heart button on flavored product 3 (جاجوار) in catalog grid
+    const heartInCatalog = grid.querySelector('[data-fav="3"]');
+    assert.ok(heartInCatalog, 'Catalog product card must render a heart favorite button');
+    heartInCatalog.click();
+
+    // Must NOT open flavor modal even though card has data-o="3"
+    assert.equal(document.getElementById('fsheet').classList.contains('on'), false, 'Clicking heart must NOT open flavor modal');
+    assert.equal(state.favorites.length, 1);
+    assert.equal(favGrid.hidden, false, '#favGrid must become visible once a favorite is added');
+    assert.equal(favEmpty.hidden, true);
+    assert.equal(favCount.textContent, '١');
+    assert.equal(favClearBtn.hidden, false);
+    assert.ok(favGrid.querySelector('#fav-prod-3'), 'Saved product must appear inside separate #favGrid section');
+    assert.ok(grid.querySelector('[data-fav="3"]').classList.contains('on'), 'Heart button must have active .on state');
+    assert.match(document.getElementById('toast').textContent, /المفضلة/);
+
+    // Also add unflavored product 4 (فريسكا) and quick-add it directly from #favGrid!
+    grid.querySelector('[data-fav="4"]').click();
+    assert.equal(favCount.textContent, '٢');
+    const favCard4 = favGrid.querySelector('#fav-prod-4');
+    assert.ok(favCard4, 'Product 4 card must appear inside #favGrid');
+    const favAddBtn = favCard4.querySelector('[data-k="4"][data-d="1"]');
+    assert.ok(favAddBtn, 'Favorite card in #favGrid must support direct quick add to cart');
+    favAddBtn.click();
+    assert.deepEqual(state.cart, { '4': 1 });
+
+    // Simulate reload: clear memory and restore from localStorage
+    state.favorites = [];
+    stateMod.initFavoritesFromStorage();
+    storeMod.renderGrid();
+    assert.equal(state.favorites.length, 2, 'Favorites must persist and restore from localStorage');
+    assert.ok(favGrid.querySelector('#fav-prod-3'));
+    assert.ok(favGrid.querySelector('#fav-prod-4'));
+
+    // Toggle off from inside #favGrid removes from favorites and updates catalog card
+    favGrid.querySelector('[data-fav="3"]').click();
+    assert.equal(state.favorites.length, 1);
+    assert.equal(favGrid.querySelector('#fav-prod-3'), null);
+    assert.equal(grid.querySelector('[data-fav="3"]').classList.contains('on'), false);
+
+    // Clear all favorites
+    favClearBtn.click();
+    assert.equal(state.favorites.length, 0);
+    assert.equal(favGrid.hidden, true);
+    assert.equal(favEmpty.hidden, false);
+    assert.equal(favCount.textContent, '٠');
   });
 }
 

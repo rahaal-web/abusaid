@@ -15,6 +15,7 @@ export const state = {
   IMGS: {},
   IMGQ: {},
   cart: {},
+  favorites: [],
   cat: 'الكل',
   sort: 'default',
   inStockOnly: false,
@@ -32,6 +33,7 @@ export const state = {
     renderCategories: () => {},
     renderCartUI: () => {},
     renderOffers: () => {},
+    renderFavorites: () => {},
     renderSpotlight: () => {},
     syncDailyDeal: () => {},
     applyCfg: () => {},
@@ -80,6 +82,65 @@ export function cleanCart() {
       delete state.cart[k];
     }
   });
+}
+
+const FAVORITES_STORAGE_KEY = 'abu_favorites_v1';
+
+export function initFavoritesFromStorage() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) || 'null');
+    if (raw && Array.isArray(raw.keys)) {
+      const unique = [];
+      raw.keys.forEach((k) => {
+        const s = typeof k === 'string' ? k.trim() : '';
+        if (s && !unique.includes(s)) unique.push(s);
+      });
+      state.favorites = unique;
+      return;
+    }
+  } catch (e) {
+    // ignore storage errors
+  }
+  state.favorites = [];
+}
+
+export function saveFavorites() {
+  try {
+    localStorage.setItem(
+      FAVORITES_STORAGE_KEY,
+      JSON.stringify({ keys: Array.isArray(state.favorites) ? state.favorites : [] })
+    );
+  } catch (e) {
+    // ignore storage errors
+  }
+}
+
+export function isFavorite(p) {
+  if (!p || !Array.isArray(state.favorites)) return false;
+  return state.favorites.includes(gk(p));
+}
+
+export function toggleFavoriteByIndex(i) {
+  const p = state.P && state.P[i];
+  if (!p) return null;
+  const key = gk(p);
+  const list = Array.isArray(state.favorites) ? state.favorites.slice() : [];
+  const pos = list.indexOf(key);
+  let added = false;
+  if (pos >= 0) {
+    list.splice(pos, 1);
+  } else {
+    list.unshift(key);
+    added = true;
+  }
+  state.favorites = list;
+  saveFavorites();
+  return { added, p, key };
+}
+
+export function clearFavorites() {
+  state.favorites = [];
+  saveFavorites();
 }
 
 export function gidx(p) {

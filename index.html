@@ -29,6 +29,7 @@
       <nav class="hdr-nav" aria-label="التنقل الرئيسي">
         <a href="#categoriesSec">الأقسام</a>
         <a href="#offers" id="navOffers" hidden>العروض</a>
+        <a href="#favoritesSec" id="navFavorites">المفضلة</a>
         <a href="#catalog">كل الأصناف</a>
       </nav>
 
@@ -148,6 +149,26 @@
         <div id="dailyDealWrap" class="daily-deal-wrap" hidden></div>
         <div class="otrack" id="otrack"></div>
         <div class="dots" id="dots"></div>
+      </div>
+    </section>
+
+    <section class="sec fav-sec" id="favoritesSec">
+      <div class="wrap">
+        <div class="sec-head fav-head">
+          <div class="fav-title-wrap">
+            <h2 class="sec-title">❤️ قائمة المفضلة</h2>
+            <span class="fav-count-pill" id="favCount">٠</span>
+          </div>
+          <div class="fav-head-actions">
+            <span class="sec-sub">أصنافك المحفوظة للوصول السريع</span>
+            <button type="button" class="fav-clear-btn" id="favClearBtn" hidden>مسح الكل</button>
+          </div>
+        </div>
+        <div class="fav-empty" id="favEmpty">
+          <span class="fav-empty-ico" aria-hidden="true">♡</span>
+          <span>اضغط على أيقونة القلب في أي بطاقة منتج لحفظه هنا للوصول السريع</span>
+        </div>
+        <div class="grid fav-grid" id="favGrid" hidden></div>
       </div>
     </section>
 

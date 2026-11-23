@@ -10,11 +10,15 @@ import {
 } from './router.js';
 import {
   $,
+  clearFavorites,
   getSelectedVariantIndex,
   gidx,
+  isFavorite,
   pname,
   pq,
+  showToast,
   state,
+  toggleFavoriteByIndex,
   vlab,
 } from './state.js';
 import {
@@ -138,10 +142,20 @@ function buildGroupedItems(qq, applyCatAndFilter) {
   return list;
 }
 
-function renderCardHtml({ p, i, gi, out, ol, ds }) {
+function heartIconSvg(filled) {
+  return (
+    '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" ' +
+    (filled ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2.2"') +
+    '/></svg>'
+  );
+}
+
+function renderCardHtml({ p, i, gi, out, ol, ds }, idPrefix = 'prod-') {
   const fl = FL(p);
   const hf = fl.length > 0;
   const q = hf ? pq(i) : state.cart[i] || 0;
+  const fav = isFavorite(p);
   const imgKey = p[8];
   const im = imgKey && state.IMGS[imgKey];
   const isFetchingImg = !!(imgKey && state.IMGQ[imgKey] && !im);
@@ -190,7 +204,8 @@ function renderCardHtml({ p, i, gi, out, ol, ds }) {
     (out ? ' is-out' : '') +
     '"' +
     (hf && !out ? ' data-o="' + i + '"' : '') +
-    ' id="prod-' +
+    ' id="' +
+    idPrefix +
     i +
     '">' +
     '<div class="pic' +
@@ -199,6 +214,19 @@ function renderCardHtml({ p, i, gi, out, ol, ds }) {
     mediaHtml +
     (ds ? '<span class="dsc">خصم ' + numAr(ds) + '٪</span>' : '') +
     (out ? '<span class="out-tag">نفد المخزون</span>' : '') +
+    '<button type="button" class="fav-btn' +
+    (fav ? ' on' : '') +
+    '" data-fav="' +
+    i +
+    '" aria-label="' +
+    (fav ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة') +
+    '" aria-pressed="' +
+    (fav ? 'true' : 'false') +
+    '" title="' +
+    (fav ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة') +
+    '">' +
+    heartIconSvg(fav) +
+    '</button>' +
     '</div>' +
     '<div class="info">' +
     '<div class="meta-line">' +
@@ -350,6 +378,48 @@ export function renderHeroSpotlight() {
     .join('');
 }
 
+export function renderFavorites() {
+  const favGrid = $('favGrid');
+  const favEmpty = $('favEmpty');
+  const favCount = $('favCount');
+  const clearBtn = $('favClearBtn');
+  const navFav = $('navFavorites');
+  if (!favGrid && !favEmpty && !favCount) return;
+
+  const allItems = buildGroupedItems('', false);
+  const byGroupKey = new Map();
+  allItems.forEach((item) => {
+    byGroupKey.set(gk(item.p), item);
+  });
+
+  const favItems = [];
+  (state.favorites || []).forEach((key) => {
+    const found = byGroupKey.get(key);
+    if (found) favItems.push(found);
+  });
+
+  if (favCount) favCount.textContent = numAr(favItems.length);
+  if (clearBtn) clearBtn.hidden = favItems.length === 0;
+  if (navFav) {
+    navFav.textContent = favItems.length > 0 ? 'المفضلة (' + numAr(favItems.length) + ')' : 'المفضلة';
+  }
+
+  if (!favItems.length) {
+    if (favEmpty) favEmpty.hidden = false;
+    if (favGrid) {
+      favGrid.hidden = true;
+      favGrid.innerHTML = '';
+    }
+    return;
+  }
+
+  if (favEmpty) favEmpty.hidden = true;
+  if (favGrid) {
+    favGrid.hidden = false;
+    favGrid.innerHTML = favItems.map((item) => renderCardHtml(item, 'fav-prod-')).join('');
+  }
+}
+
 export function renderGrid() {
   const gridEl = $('grid');
   const statusEl = $('catalogStatus');
@@ -396,7 +466,7 @@ export function renderGrid() {
 
   if (gridEl) {
     if (items.length) {
-      gridEl.innerHTML = items.map(renderCardHtml).join('');
+      gridEl.innerHTML = items.map((item) => renderCardHtml(item, 'prod-')).join('');
     } else {
       gridEl.innerHTML =
         '<div class="empty-box">' +
@@ -408,6 +478,8 @@ export function renderGrid() {
     }
   }
 
+  renderFavorites();
+
   if (state.SOPEN && $('sgrid')) {
     if (!state.searchModalQuery) {
       $('sgrid').innerHTML =
@@ -415,7 +487,7 @@ export function renderGrid() {
     } else {
       const sItems = buildGroupedItems(state.searchModalQuery, false);
       $('sgrid').innerHTML = sItems.length
-        ? sItems.map(renderCardHtml).join('')
+        ? sItems.map((item) => renderCardHtml(item, 's-prod-')).join('')
         : '<div class="empty-box"><span class="empty-ico" aria-hidden="true">🔍</span><b>ما لقيناش صنف بالاسم ده</b><p>جرّب تكتب اسم تاني</p></div>';
     }
   }
@@ -526,6 +598,20 @@ export function bindStoreEvents() {
       goBackOrHome();
       return;
     }
+    const favBtn = e.target.closest('[data-fav]');
+    if (favBtn) {
+      const res = toggleFavoriteByIndex(+favBtn.dataset.fav);
+      if (res) {
+        renderGrid();
+        showToast(
+          res.added
+            ? 'تمت إضافة «' + res.p[0] + '» إلى المفضلة ❤️'
+            : 'تمت إزالة «' + res.p[0] + '» من المفضلة',
+          res.added ? 'ok' : 'info'
+        );
+      }
+      return;
+    }
     const b = e.target.closest('[data-d]');
     if (b) {
       chg(b.dataset.k, +b.dataset.d);
@@ -546,8 +632,19 @@ export function bindStoreEvents() {
 
   const gridEl = $('grid');
   const sgridEl = $('sgrid');
+  const favGridEl = $('favGrid');
+  const favClearBtn = $('favClearBtn');
   if (gridEl) gridEl.addEventListener('click', handleGridClick);
   if (sgridEl) sgridEl.addEventListener('click', handleGridClick);
+  if (favGridEl) favGridEl.addEventListener('click', handleGridClick);
+  if (favClearBtn) {
+    favClearBtn.addEventListener('click', () => {
+      if (!state.favorites || !state.favorites.length) return;
+      clearFavorites();
+      renderGrid();
+      showToast('تم مسح قائمة المفضلة');
+    });
+  }
 
   const statusEl = $('catalogStatus');
   if (statusEl) {

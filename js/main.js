@@ -26,6 +26,7 @@ import {
   AN,
   cleanCart,
   initCartFromStorage,
+  initFavoritesFromStorage,
   saveCart,
   state,
 } from './state.js';
@@ -33,6 +34,7 @@ import {
   bindStoreEvents,
   observeReveals,
   renderCategoriesShowcase,
+  renderFavorites,
   renderGrid,
   renderHeroSpotlight,
   renderTabs,
@@ -586,6 +588,7 @@ function registerHooks() {
     if ($('sheet')?.classList.contains('on')) syncCartOverlay(true);
   };
   state.hooks.renderOffers = renderOffers;
+  state.hooks.renderFavorites = renderFavorites;
   state.hooks.syncDailyDeal = syncDailyDealBadge;
   state.hooks.renderSpotlight = renderHeroSpotlight;
   state.hooks.applyCfg = applyCfg;
@@ -660,6 +663,7 @@ function bootstrap() {
   registerHooks();
   initTheme();
   initCartFromStorage();
+  initFavoritesFromStorage();
   cleanCart();
 
   bindStoreEvents();

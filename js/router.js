@@ -5,7 +5,7 @@ const SCROLL_STORAGE_KEY = 'abu_store_scroll_v1';
 const SEQ_STORAGE_KEY = 'abu_store_nav_seq_v1';
 const VALID_LAYERS = ['cart', 'flavor', 'search', 'ai', 'orders', 'account'];
 const VALID_SORTS = ['default', 'price-asc', 'price-desc', 'discount'];
-const VALID_SECS = ['categoriesSec', 'offers', 'catalog'];
+const VALID_SECS = ['categoriesSec', 'offers', 'favoritesSec', 'catalog'];
 const VALID_AI_STEPS = ['chat', 'old', 'review'];
 
 let routerInitialized = false;
