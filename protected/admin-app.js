@@ -280,7 +280,7 @@
   var VALID_SUBS = {
     s: ['general', 'appearance', 'security', 'health'],
     n: ['compose', 'devices', 'logs'],
-    o: ['all', 'active', 'scheduled', 'expired', 'hidden'],
+    o: ['all', 'active', 'scheduled', 'expired', 'hidden', 'daily'],
   };
   var DEFAULT_SUBS = { s: 'general', n: 'compose', o: 'all' };
 
@@ -1004,6 +1004,431 @@
     return D.offers || (D.offers = []);
   }
 
+  // ===== Product of the Day (منتج اليوم) Admin Helpers =====
+  function adminTodayYmd() {
+    var now = new Date();
+    return (
+      now.getFullYear() +
+      '-' +
+      String(now.getMonth() + 1).padStart(2, '0') +
+      '-' +
+      String(now.getDate()).padStart(2, '0')
+    );
+  }
+
+  function isAdminWithinSchedule(startDate, endDate) {
+    var todayStr = adminTodayYmd();
+    if (startDate && String(startDate).trim() > todayStr) return false;
+    if (endDate && String(endDate).trim() < todayStr) return false;
+    return true;
+  }
+
+  function isAdminProdAvail(p) {
+    if (!p || p[7]) return false;
+    var meta = D.catMeta || {};
+    if (meta[p[1]] && meta[p[1]].disabled) return false;
+    return true;
+  }
+
+  function adminLum(hex) {
+    var h = String(hex || '').replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (h.length !== 6) return 255;
+    var n = parseInt(h, 16);
+    if (!isFinite(n)) return 255;
+    return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  }
+
+  function resolveConfiguredDailyIdx(requireAvail) {
+    var cfg = D.cfg || {};
+    var list = D.p || [];
+    var hasIdx = cfg.dailyDealIdx !== '' && cfg.dailyDealIdx != null;
+    var cfgIdx = hasIdx ? Number(cfg.dailyDealIdx) : -1;
+    var tName = cfg.dailyDealName ? String(cfg.dailyDealName).trim() : '';
+    var tCat = cfg.dailyDealCat ? String(cfg.dailyDealCat).trim() : '';
+    if (Number.isInteger(cfgIdx) && cfgIdx >= 0 && cfgIdx < list.length) {
+      var cand = list[cfgIdx];
+      if (cand && (!tName || String(cand[0]).trim() === tName) && (!requireAvail || isAdminProdAvail(cand))) {
+        return cfgIdx;
+      }
+    }
+    if (tName) {
+      for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        if (p && String(p[0]).trim() === tName && (!tCat || String(p[1]).trim() === tCat) && (!requireAvail || isAdminProdAvail(p))) {
+          return i;
+        }
+      }
+      for (var j = 0; j < list.length; j++) {
+        var p2 = list[j];
+        if (p2 && String(p2[0]).trim() === tName && (!requireAvail || isAdminProdAvail(p2))) {
+          return j;
+        }
+      }
+    }
+    return -1;
+  }
+
+  function pickAutoDailyIdxForAdmin(preferOffersFirst) {
+    var cfg = D.cfg || {};
+    var list = D.p || [];
+    var offers = OFS();
+    if (preferOffersFirst) {
+      for (var i = 0; i < offers.length; i++) {
+        var o = offers[i];
+        if (getOfferStatus(o) !== 'active') continue;
+        var pIdx = -1;
+        if (o.productIndex !== '' && o.productIndex != null && list[Number(o.productIndex)] && isAdminProdAvail(list[Number(o.productIndex)])) {
+          pIdx = Number(o.productIndex);
+        } else if (o.productName) {
+          for (var j = 0; j < list.length; j++) {
+            if (list[j] && String(list[j][0]).trim() === String(o.productName).trim() && isAdminProdAvail(list[j])) {
+              pIdx = j;
+              break;
+            }
+          }
+        }
+        if (pIdx >= 0) return { prodIdx: pIdx, offer: o };
+      }
+    }
+    var avail = [];
+    for (var k = 0; k < list.length; k++) {
+      if (isAdminProdAvail(list[k])) avail.push(k);
+    }
+    if (!avail.length) return null;
+    var disc = cfg.dailyDealAutoPool === 'all' ? [] : avail.filter(function (idx) { return +list[idx][11] > +list[idx][3]; });
+    var pool = disc.length ? disc : avail;
+    var now = new Date();
+    var dayNum = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+    var pickedPos = ((dayNum * 2654435761) >>> 0) % pool.length;
+    return { prodIdx: pool[pickedPos], offer: null };
+  }
+
+  function resolveAdminDailyDealInfo() {
+    var cfg = D.cfg || {};
+    var hasExplicit = cfg.dailyDealIdx !== '' && cfg.dailyDealIdx != null;
+    var mode =
+      cfg.dailyDealMode === 'manual' || cfg.dailyDealMode === 'offer' || cfg.dailyDealMode === 'auto'
+        ? cfg.dailyDealMode
+        : hasExplicit || cfg.dailyDealName
+        ? 'manual'
+        : 'auto';
+    var manualRawIdx = resolveConfiguredDailyIdx(false);
+    var scheduleOk = isAdminWithinSchedule(cfg.dailyDealStart, cfg.dailyDealEnd);
+    var allowFallback = cfg.dailyDealFallbackAuto !== 0 && cfg.dailyDealFallbackAuto !== false;
+
+    if (cfg.hideDailyDeal) {
+      var hiddenIdx = manualRawIdx >= 0 ? manualRawIdx : -1;
+      return {
+        hidden: true,
+        mode: mode,
+        manualIdx: manualRawIdx,
+        prodIdx: hiddenIdx,
+        offer: null,
+        statusLabel: 'مخفي عن العملاء',
+        statusTone: 'st-muted',
+      };
+    }
+
+    if (mode === 'manual') {
+      var manualAvailIdx = resolveConfiguredDailyIdx(true);
+      if (scheduleOk && manualAvailIdx >= 0) {
+        return {
+          hidden: false,
+          mode: mode,
+          manualIdx: manualRawIdx,
+          prodIdx: manualAvailIdx,
+          offer: null,
+          statusLabel: 'نشط · اختيار يدوي',
+          statusTone: 'st-ok',
+        };
+      }
+      if (!allowFallback) {
+        return {
+          hidden: false,
+          mode: mode,
+          manualIdx: manualRawIdx,
+          prodIdx: -1,
+          offer: null,
+          statusLabel: !scheduleOk ? 'موقوف (خارج التاريخ المحدد)' : 'الصنف غير متاح أو مخفي',
+          statusTone: 'st-warn',
+        };
+      }
+      var fb = pickAutoDailyIdxForAdmin(true);
+      return {
+        hidden: false,
+        mode: mode,
+        manualIdx: manualRawIdx,
+        prodIdx: fb ? fb.prodIdx : -1,
+        offer: fb ? fb.offer : null,
+        statusLabel: !scheduleOk ? 'خارج الجدولة · يعمل البديل التلقائي' : 'الصنف المحدد غير متاح · يعمل البديل التلقائي',
+        statusTone: 'st-warn',
+      };
+    }
+
+    if (mode === 'offer') {
+      var ofPick = pickAutoDailyIdxForAdmin(true);
+      return {
+        hidden: false,
+        mode: mode,
+        manualIdx: manualRawIdx,
+        prodIdx: ofPick ? ofPick.prodIdx : -1,
+        offer: ofPick ? ofPick.offer : null,
+        statusLabel: 'نشط · من العروض والخصومات',
+        statusTone: 'st-info',
+      };
+    }
+
+    var autoPick = pickAutoDailyIdxForAdmin(cfg.dailyDealAutoPool !== 'all');
+    return {
+      hidden: false,
+      mode: 'auto',
+      manualIdx: manualRawIdx,
+      prodIdx: autoPick ? autoPick.prodIdx : -1,
+      offer: autoPick ? autoPick.offer : null,
+      statusLabel: 'نشط · دوران تلقائي يومي',
+      statusTone: 'st-ok',
+    };
+  }
+
+  function syncDailyDealRefAfterProductMutation(deletedRefName, deletedRefCat) {
+    var cfg = D.cfg || {};
+    if (!cfg.dailyDealName && (cfg.dailyDealIdx === '' || cfg.dailyDealIdx == null)) return;
+    var nextIdx = -1;
+    if (cfg.dailyDealName) {
+      for (var i = 0; i < D.p.length; i++) {
+        var p = D.p[i];
+        if (p && String(p[0]).trim() === String(cfg.dailyDealName).trim() && (!cfg.dailyDealCat || String(p[1]).trim() === String(cfg.dailyDealCat).trim())) {
+          nextIdx = i;
+          break;
+        }
+      }
+      if (nextIdx < 0) {
+        for (var j = 0; j < D.p.length; j++) {
+          if (D.p[j] && String(D.p[j][0]).trim() === String(cfg.dailyDealName).trim()) {
+            nextIdx = j;
+            break;
+          }
+        }
+      }
+    }
+    if (nextIdx >= 0) {
+      cfg.dailyDealIdx = nextIdx;
+      cfg.dailyDealName = D.p[nextIdx][0];
+      cfg.dailyDealCat = D.p[nextIdx][1];
+    } else if (deletedRefName && String(deletedRefName).trim() === String(cfg.dailyDealName || '').trim() && (!deletedRefCat || !cfg.dailyDealCat || String(deletedRefCat).trim() === String(cfg.dailyDealCat).trim())) {
+      delete cfg.dailyDealIdx;
+      delete cfg.dailyDealName;
+      delete cfg.dailyDealCat;
+      delete cfg.dailyDealFlavorIdx;
+      if (cfg.dailyDealMode === 'manual') cfg.dailyDealMode = 'auto';
+    }
+  }
+
+  function setDailyDealProduct(idx, shouldSwitchMode) {
+    var p = D.p[idx];
+    if (!p) return;
+    D.cfg.dailyDealIdx = idx;
+    D.cfg.dailyDealName = p[0];
+    D.cfg.dailyDealCat = p[1];
+    D.cfg.dailyDealFlavorIdx = '';
+    if (shouldSwitchMode !== false) D.cfg.dailyDealMode = 'manual';
+    D.cfg.hideDailyDeal = 0;
+    mark();
+  }
+
+  function renderDailyDealPreviewCardHtml() {
+    var cfg = D.cfg || {};
+    var info = resolveAdminDailyDealInfo();
+    var p = info.prodIdx >= 0 ? D.p[info.prodIdx] : null;
+    if (!p) {
+      return (
+        '<div class="emp" style="padding:18px">' +
+        '<div><span class="stpill ' + info.statusTone + '">' + esc(info.statusLabel) + '</span></div>' +
+        '<p style="margin:8px 0 0">لا يوجد صنف نشط للعرض في المعاينة حالياً.</p>' +
+        '</div>'
+      );
+    }
+
+    var badgeText = cfg.dailyDealBadge && String(cfg.dailyDealBadge).trim() ? String(cfg.dailyDealBadge).trim() : '⭐ منتج اليوم';
+    var promoNote = cfg.dailyDealNote && String(cfg.dailyDealNote).trim() ? String(cfg.dailyDealNote).trim() : '';
+    var btnLabel = cfg.dailyDealBtnText && String(cfg.dailyDealBtnText).trim() ? String(cfg.dailyDealBtnText).trim() : 'أضف للسلة بضغطة واحدة';
+    var stepQty = Math.min(50, Math.max(1, Math.round(Number(cfg.dailyDealStepQty || 1) || 1)));
+    var customBg = cfg.dailyDealBg && String(cfg.dailyDealBg).trim() ? String(cfg.dailyDealBg).trim() : '';
+    var fgCol = customBg ? (adminLum(customBg) > 150 ? '#18160d' : '#ffffff') : '';
+    var styleAttr = customBg ? ' style="--dd-bg:' + esc(customBg) + ';--dd-fg:' + fgCol + '"' : '';
+    var imgUrl = (cfg.dailyDealImgId && IMG[cfg.dailyDealImgId]) || (p[8] && IMG[p[8]]) || '';
+    var hasDisc = +p[11] > +p[3];
+    var discPct = hasDisc ? Math.round((1 - +p[3] / +p[11]) * 100) : 0;
+    var flvs = (p[9] || []).map(function (f, idx) { return { n: f[0], off: !!f[1], idx: idx }; }).filter(function (f) { return !f.off; });
+    var cfgFlv = cfg.dailyDealFlavorIdx !== '' && cfg.dailyDealFlavorIdx != null ? Number(cfg.dailyDealFlavorIdx) : -1;
+    var activeFlvIdx = cfgFlv >= 0 && p[9] && p[9][cfgFlv] && !p[9][cfgFlv][1] ? cfgFlv : (flvs[0] ? flvs[0].idx : -1);
+
+    var flvHtml = '';
+    if (!cfg.dailyDealHideFlavors && flvs.length > 1) {
+      flvHtml =
+        '<div class="dd-adm-flvs">' +
+        flvs.slice(0, 5).map(function (f) {
+          return '<span class="dd-adm-flv' + (f.idx === activeFlvIdx ? ' on' : '') + '">' + esc(f.n) + '</span>';
+        }).join('') +
+        (flvs.length > 5 ? '<span class="dd-adm-flv">+' + (flvs.length - 5) + '</span>' : '') +
+        '</div>';
+    } else if (flvs.length >= 1 && activeFlvIdx >= 0 && p[9][activeFlvIdx]) {
+      flvHtml = '<div style="font-size:11.5px;opacity:.85">النكهة الافتراضية: <b>' + esc(p[9][activeFlvIdx][0]) + '</b></div>';
+    }
+
+    return (
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+      '<span class="stpill ' + info.statusTone + '">' + esc(info.statusLabel) + '</span>' +
+      (cfg.dailyDealStart || cfg.dailyDealEnd ? '<span style="font-size:11.5px;color:var(--mu)">📅 ' + esc((cfg.dailyDealStart || '…') + ' → ' + (cfg.dailyDealEnd || '…')) + '</span>' : '') +
+      '</div>' +
+      '<div class="dd-adm-preview-card' + (info.hidden ? ' is-hidden-deal' : '') + '"' + styleAttr + '>' +
+      '<div class="dd-adm-prev-media" style="background:' + esc(p[4] || '#ffd23f') + '">' +
+      (imgUrl ? '<img src="' + imgUrl + '" alt="">' : esc(p[6] || '📦')) +
+      '</div>' +
+      '<div class="dd-adm-prev-body">' +
+      '<div class="dd-adm-prev-top">' +
+      '<span class="dd-adm-badge">' + esc(badgeText) + '</span>' +
+      (discPct > 0 ? '<span class="dd-adm-disc">وفر ' + discPct + '%</span>' : '') +
+      '</div>' +
+      '<div style="font-size:11.5px;opacity:.8">' + esc(p[1]) + (p[2] ? ' · ' + esc(p[2]) : '') + '</div>' +
+      '<b style="font-size:15.5px;line-height:1.35">' + esc(p[0] + (p[10] ? ' (' + p[10] + ')' : '')) + '</b>' +
+      (promoNote ? '<p style="margin:0;font-size:12px;opacity:.88">' + esc(promoNote) + '</p>' : '') +
+      flvHtml +
+      '<div class="dd-adm-prev-foot">' +
+      '<div class="num"><b style="font-size:17px">' + Number(p[3] || 0) + ' ج</b>' +
+      (hasDisc ? ' <s style="opacity:.65;font-size:12px">' + Number(p[11]) + ' ج</s>' : '') +
+      ' <small style="opacity:.8">/ ' + esc(cfg.unit || 'كرتونة') + '</small></div>' +
+      '<span class="dd-adm-prev-btn">🛒 ' + esc(btnLabel) + (stepQty > 1 ? ' (' + stepQty + ')' : '') + '</span>' +
+      '</div></div></div>'
+    );
+  }
+
+  function updateDailyDealAdminPreview() {
+    var box = $('ddAdmPreview');
+    if (box) box.innerHTML = renderDailyDealPreviewCardHtml();
+  }
+
+  function renderDailyDealManager() {
+    var cfg = D.cfg || {};
+    var info = resolveAdminDailyDealInfo();
+    var mode = info.mode;
+    var manualIdx = resolveConfiguredDailyIdx(false);
+    var previewProdIdx = manualIdx >= 0 ? manualIdx : info.prodIdx;
+    var selProd = previewProdIdx >= 0 ? D.p[previewProdIdx] : null;
+    var selFlavors = selProd && Array.isArray(selProd[9]) ? selProd[9] : [];
+    var stepQty = Math.min(50, Math.max(1, Math.round(Number(cfg.dailyDealStepQty || 1) || 1)));
+    var customBg = cfg.dailyDealBg || '';
+    var allowFallback = cfg.dailyDealFallbackAuto !== 0 && cfg.dailyDealFallbackAuto !== false;
+
+    return (
+      '<div class="card" style="margin-bottom:14px">' +
+      '<div class="card-head"><h3 class="card-title">👁 معاينة مباشرة لبطاقة «منتج اليوم» في المتجر</h3>' +
+      '<button class="btn btn-sm btn-warn" type="button" id="ddResetBtn">↺ استعادة الإعدادات الافتراضية</button></div>' +
+      '<div id="ddAdmPreview">' + renderDailyDealPreviewCardHtml() + '</div>' +
+      '</div>' +
+
+      '<div class="grid-2">' +
+      '<div class="card">' +
+      '<h3 class="card-title">🎯 التفعيل وطريقة الاختيار</h3>' +
+      '<div class="cr" style="margin-top:12px"><b style="flex:1">إظهار بطاقة «منتج اليوم» للعملاء</b><label class="sw"><input type="checkbox" data-s="hideDailyDeal"' + (cfg.hideDailyDeal ? '' : ' checked') + '><i></i></label></div>' +
+
+      '<label>وضع اختيار منتج اليوم</label>' +
+      '<select id="ddModeSel" data-s="dailyDealMode">' +
+      '<option value="auto"' + (mode === 'auto' ? ' selected' : '') + '>تلقائي يومياً (يتغير كل يوم)</option>' +
+      '<option value="manual"' + (mode === 'manual' ? ' selected' : '') + '>اختيار صنف محدد يدوياً</option>' +
+      '<option value="offer"' + (mode === 'offer' ? ' selected' : '') + '>حسب العروض النشطة المرتبطة</option>' +
+      '</select>' +
+
+      (mode === 'auto'
+        ? '<label>مصدر الاختيار التلقائي</label><select data-s="dailyDealAutoPool">' +
+          '<option value="discount_first"' + (cfg.dailyDealAutoPool !== 'all' ? ' selected' : '') + '>الأصناف التي عليها خصم أو عرض أولاً</option>' +
+          '<option value="all"' + (cfg.dailyDealAutoPool === 'all' ? ' selected' : '') + '>التبديل بين جميع الأصناف المتاحة</option>' +
+          '</select>'
+        : '') +
+
+      '<label>الصنف المختار لمنتج اليوم' + (mode !== 'manual' ? ' (يُفعّل الوضع اليدوي تلقائياً عند الاختيار)' : '') + '</label>' +
+      '<select id="ddProdSel">' +
+      '<option value="">— اختيار تلقائي بدون تثبيت صنف —</option>' +
+      (D.p || []).map(function (p, idx) {
+        if (!p) return '';
+        var tag = p[7] ? ' [مخفي]' : '';
+        return '<option value="' + idx + '"' + (manualIdx === idx ? ' selected' : '') + '>' + esc(p[0] + (p[10] ? ' · ' + p[10] : '') + ' — ' + p[3] + ' ج (' + p[1] + ')' + tag) + '</option>';
+      }).join('') +
+      '</select>' +
+
+      (selProd
+        ? '<div class="card2" style="margin-top:12px;background:var(--surface-2);padding:12px">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">' +
+          '<b style="font-size:13px">💰 تعديل سريع لسعر «' + esc(selProd[0]) + '» في الكتالوج</b>' +
+          '<button class="btn btn-sm" type="button" data-e="' + previewProdIdx + '">تعديل كامل</button>' +
+          '</div>' +
+          '<div class="r2">' +
+          '<div><label style="margin-top:4px">السعر الحالي (ج)</label><input id="ddProdPrice" type="number" inputmode="numeric" value="' + Number(selProd[3] || 0) + '"></div>' +
+          '<div><label style="margin-top:4px">السعر قبل الخصم</label><input id="ddProdOldPrice" type="number" inputmode="numeric" value="' + (+selProd[11] > 0 ? selProd[11] : '') + '" placeholder="اختياري"></div>' +
+          '<button class="btn btn-primary" type="button" id="ddApplyPriceBtn" style="flex:none">تحديث السعر</button>' +
+          '</div>' +
+          '<p class="hint">يُحدّث السعر الحقيقي للصنف حتى يتطابق سعر البطاقة مع السلة والفاتورة.</p>' +
+          '</div>'
+        : '') +
+
+      (selFlavors.length
+        ? '<label>النكهة الافتراضية المحددة مسبقاً</label><select data-s="dailyDealFlavorIdx">' +
+          '<option value=""' + (cfg.dailyDealFlavorIdx == null || cfg.dailyDealFlavorIdx === '' ? ' selected' : '') + '>أول نكهة متوفرة تلقائياً</option>' +
+          selFlavors.map(function (f, fi) {
+            return '<option value="' + fi + '"' + (String(cfg.dailyDealFlavorIdx) === String(fi) ? ' selected' : '') + '>' + esc(f[0]) + (f[1] ? ' (غير متوفرة)' : '') + '</option>';
+          }).join('') +
+          '</select>'
+        : '') +
+
+      '<div class="cr" style="margin-top:12px"><b style="flex:1">السماح للعميل باختيار النكهة من البطاقة</b><label class="sw"><input type="checkbox" data-s="dailyDealHideFlavors"' + (cfg.dailyDealHideFlavors ? '' : ' checked') + '><i></i></label></div>' +
+
+      '<label>الكمية المضافة مع كل ضغطة زر</label>' +
+      '<input id="ddStepQtyInp" type="number" min="1" max="50" data-s="dailyDealStepQty" value="' + stepQty + '">' +
+      '<p class="hint">مثلاً 1 كرتونة، أو 5 كراتين لإضافة عرض كمية بضغطة واحدة.</p>' +
+      '</div>' +
+
+      '<div class="card">' +
+      '<h3 class="card-title">🎨 النصوص والمظهر والجدولة</h3>' +
+      '<label>نص الشارة العلوية</label>' +
+      '<input id="ddBadgeInp" data-s="dailyDealBadge" value="' + esc(cfg.dailyDealBadge || '') + '" placeholder="مثال: ⭐ منتج اليوم أو 🔥 عرض ٢٤ ساعة">' +
+
+      '<label>سطر عرض / ملاحظة ترويجية إضافية</label>' +
+      '<input id="ddNoteInp" data-s="dailyDealNote" value="' + esc(cfg.dailyDealNote || '') + '" placeholder="مثال: متاح بسعر الجملة حتى نفاد الكمية اليوم">' +
+
+      '<label>نص زر الإضافة للسلة</label>' +
+      '<input id="ddBtnInp" data-s="dailyDealBtnText" value="' + esc(cfg.dailyDealBtnText || '') + '" placeholder="الافتراضي: أضف للسلة بضغطة واحدة">' +
+
+      '<label>صورة مخصصة لبطاقة منتج اليوم (اختياري)</label>' +
+      '<div class="ip"><div class="ipv">' +
+      (cfg.dailyDealImgId && IMG[cfg.dailyDealImgId] ? '<img src="' + IMG[cfg.dailyDealImgId] + '" alt="">' : (selProd && selProd[8] && IMG[selProd[8]] ? '<img src="' + IMG[selProd[8]] + '" alt="">' : esc((selProd && selProd[6]) || '⭐'))) +
+      '</div><div class="btns">' +
+      '<label class="btn btn-primary btn-sm" style="margin:0;cursor:pointer">📷 رفع صورة مخصصة<input type="file" id="ddImgFile" accept="image/*" hidden></label>' +
+      (cfg.dailyDealImgId ? '<button class="btn btn-danger btn-sm" type="button" id="ddImgRm">استخدام صورة الصنف الأصلية</button>' : '') +
+      '</div></div>' +
+
+      '<label>لون خلفية البطاقة</label>' +
+      '<div class="sws">' +
+      PAL.map(function (x, j) {
+        return '<span class="swc' + (customBg.toLowerCase() === x[1].toLowerCase() ? ' on' : '') + '" data-ddpal="' + j + '" style="background:' + x[1] + '" title="' + esc(x[0]) + '"></span>';
+      }).join('') +
+      '</div>' +
+      '<div class="r2" style="margin-top:8px">' +
+      '<div><input type="color" id="ddBgColor" value="' + esc(customBg || '#fff8e1') + '"></div>' +
+      '<button class="btn btn-sm" type="button" id="ddBgClearBtn" style="flex:none">لون المتجر الافتراضي</button>' +
+      '</div>' +
+
+      '<div class="r2" style="margin-top:6px">' +
+      '<div><label>تاريخ البداية (اختياري)</label><input type="date" data-s="dailyDealStart" value="' + esc(cfg.dailyDealStart || '') + '"></div>' +
+      '<div><label>تاريخ النهاية (اختياري)</label><input type="date" data-s="dailyDealEnd" value="' + esc(cfg.dailyDealEnd || '') + '"></div>' +
+      '</div>' +
+
+      '<div class="cr" style="margin-top:12px"><b style="flex:1">التبديل تلقائياً لصنف آخر عند انتهاء التاريخ أو إخفاء الصنف</b><label class="sw"><input type="checkbox" data-s="dailyDealFallbackAuto"' + (allowFallback ? ' checked' : '') + '><i></i></label></div>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
   // ===== 1. DASHBOARD VIEW =====
   function vDashboard() {
     var totalProd = D.p.length;
@@ -1344,6 +1769,7 @@
     }
 
     var canReorder = !q && prodStatusFilter === 'all' && prodSort === 'order';
+    var dailyPinnedIdx = resolveConfiguredDailyIdx(false);
     var body = '';
     if (prodView === 'table') {
       var allChecked =
@@ -1365,6 +1791,7 @@
             var isSel = !!prodSelected[i];
             var flCnt = (p[9] || []).length;
             var hasDisc = +p[11] > +p[3];
+            var isDailyPinned = dailyPinnedIdx === i;
             return (
               '<tr class="' +
               (p[7] ? 'is-off ' : '') +
@@ -1391,6 +1818,7 @@
               '</div><div class="prod-cell-txt"><b>' +
               esc(p[0]) +
               (p[10] ? ' · <span style="color:var(--blue)">' + esc(p[10]) + '</span>' : '') +
+              (isDailyPinned ? ' <span class="stpill st-warn">⭐ منتج اليوم</span>' : '') +
               '</b><small>' +
               esc(p[2] || '—') +
               '</small></div></div></td>' +
@@ -1411,6 +1839,13 @@
               (p[7] ? '' : ' checked') +
               '><i></i></label></td>' +
               '<td><div class="row-actions">' +
+              '<button class="btn btn-sm' +
+              (isDailyPinned ? ' btn-star-on' : '') +
+              '" type="button" data-set-daily="' +
+              i +
+              '" title="' +
+              (isDailyPinned ? 'معيّن حالياً كمنتج اليوم' : 'تعيين كمنتج اليوم') +
+              '">⭐</button>' +
               '<button class="btn btn-sm" type="button" data-e="' +
               i +
               '">تعديل</button>' +
@@ -1430,6 +1865,7 @@
             var p = D.p[i];
             var isSel = !!prodSelected[i];
             var hasDisc = +p[11] > +p[3];
+            var isDailyPinned = dailyPinnedIdx === i;
             return (
               '<article class="pgrid-card' +
               (p[7] ? ' is-off' : '') +
@@ -1447,6 +1883,7 @@
               '<div style="min-width:0"><b style="display:block;font-size:14px">' +
               esc(p[0]) +
               (p[10] ? ' · ' + esc(p[10]) : '') +
+              (isDailyPinned ? ' <span class="stpill st-warn">⭐ منتج اليوم</span>' : '') +
               '</b><small style="color:var(--mu);font-size:12px">' +
               esc(p[1]) +
               (p[2] ? ' · ' + esc(p[2]) : '') +
@@ -1463,6 +1900,13 @@
               (hasDisc ? ' <small style="text-decoration:line-through;color:var(--mu)">' + p[11] + '</small>' : '') +
               '</div>' +
               '<div style="display:flex;align-items:center;gap:6px">' +
+              '<button class="btn btn-sm' +
+              (isDailyPinned ? ' btn-star-on' : '') +
+              '" type="button" data-set-daily="' +
+              i +
+              '" title="' +
+              (isDailyPinned ? 'معيّن حالياً كمنتج اليوم' : 'تعيين كمنتج اليوم') +
+              '">⭐</button>' +
               '<button class="btn btn-sm" type="button" data-e="' +
               i +
               '">تعديل</button>' +
@@ -1591,6 +2035,7 @@
       ['scheduled', 'مجدول', counts.scheduled],
       ['expired', 'منتهي', counts.expired],
       ['hidden', 'مخفي', counts.hidden],
+      ['daily', '⭐ منتج اليوم', null],
     ];
 
     var stBadgeMap = {
@@ -1602,7 +2047,7 @@
 
     var h =
       '<div class="sec-hdr">' +
-      '<div class="sec-hdr-l"><h2>🎁 العروض الخاصة</h2><span class="count-pill">' +
+      '<div class="sec-hdr-l"><h2>🎁 العروض الخاصة ومنتج اليوم</h2><span class="count-pill">' +
       L.length +
       ' عرض</span></div>' +
       '<div class="sec-hdr-r"><button class="btn btn-success" type="button" data-oadd="1">+ عرض جديد</button></div>' +
@@ -1617,12 +2062,29 @@
             t[0] +
             '">' +
             t[1] +
-            ' (' +
-            t[2] +
-            ')</button>'
+            (t[2] != null ? ' (' + t[2] + ')' : '') +
+            '</button>'
           );
         })
         .join('') +
+      '</div>';
+
+    if (offerSubTab === 'daily') {
+      return h + renderDailyDealManager();
+    }
+
+    var ddInfo = resolveAdminDailyDealInfo();
+    var ddProd = ddInfo.prodIdx >= 0 ? D.p[ddInfo.prodIdx] : null;
+    h +=
+      '<div class="dd-adm-summary">' +
+      '<div class="dd-adm-summary-info">' +
+      '<span style="font-size:22px">⭐</span>' +
+      '<div><b style="display:block;font-size:13.5px">منتج اليوم الحالي: ' +
+      esc(ddProd ? ddProd[0] + ' (' + ddProd[3] + ' ج)' : 'غير محدد') +
+      '</b><small style="color:var(--mu)">' +
+      esc(ddInfo.statusLabel) +
+      '</small></div></div>' +
+      '<button class="btn btn-sm btn-brand" type="button" data-off-tab="daily">⚙️ تحكم كامل في منتج اليوم</button>' +
       '</div>';
 
     if (!filtered.length) {
@@ -1766,11 +2228,12 @@
       (D.p || [])
         .map(function (p, idx) {
           if (!p || p[7]) return '';
-          var sel = String(c.dailyDealIdx) === String(idx) ? ' selected' : '';
+          var sel = resolveConfiguredDailyIdx(false) === idx ? ' selected' : '';
           return '<option value="' + idx + '"' + sel + '>' + esc(p[0]) + ' (' + esc(p[1]) + ')</option>';
         })
         .join('') +
       '</select>' +
+      '<button type="button" class="btn btn-sm btn-primary" id="goDailyDealAdmin" style="width:100%;margin-top:10px">⭐ تحكم كامل في منتج اليوم (صورة، ألوان، جدولة، نكهة، كمية)</button>' +
       '</div></div></div>'
     );
   }
@@ -5170,16 +5633,22 @@
       p[12] = new Date().toISOString();
       if (enew) { var nid = 'i' + Date.now().toString(36); IMG[nid] = enew; PEND[nid] = 1; p[8] = nid; }
       if (!p[0]) return toast('اكتب اسم الصنف');
+      var wasPinnedEd = ei >= 0 && resolveConfiguredDailyIdx(false) === ei;
       if (ei >= 0) D.p[ei] = p;
       else if (dupFrom >= 0 && D.p[dupFrom] && D.p[dupFrom][1] == p[1]) D.p.splice(dupFrom + 1, 0, p);
       else D.p.push(p);
+      if (wasPinnedEd) { D.cfg.dailyDealName = p[0]; D.cfg.dailyDealCat = p[1]; }
+      syncDailyDealRefAfterProductMutation();
       dupFrom = -1; mark(); closeEd(true); render();
       return;
     }
     if (t.id === 'edl' && ei >= 0) {
       askConfirm('هل أنت متأكد من حذف هذا الصنف؟', 'حذف الصنف').then(function (ok) {
         if (!ok) return;
-        D.p.splice(ei, 1); mark(); closeEd(true); render();
+        var delP = D.p[ei];
+        D.p.splice(ei, 1);
+        syncDailyDealRefAfterProductMutation(delP && delP[0], delP && delP[1]);
+        mark(); closeEd(true); render();
       });
       return;
     }
@@ -5400,8 +5869,13 @@
         askConfirm('هل أنت متأكد من حذف ' + selKeys.length + ' صنف محدد؟', 'حذف المحدد').then(function (ok) {
           if (!ok) return;
           var rmSet = {};
+          var pinnedBefore = resolveConfiguredDailyIdx(false);
+          var deletedPinned = rmSet[pinnedBefore];
           selKeys.forEach(function (idx) { rmSet[idx] = 1; });
+          deletedPinned = !!rmSet[pinnedBefore];
+          var pinnedProdRef = deletedPinned && D.p[pinnedBefore] ? D.p[pinnedBefore] : null;
           D.p = D.p.filter(function (_p, idx) { return !rmSet[idx]; });
+          syncDailyDealRefAfterProductMutation(pinnedProdRef && pinnedProdRef[0], pinnedProdRef && pinnedProdRef[1]);
           prodSelected = {};
           mark(); render();
         });
@@ -5411,7 +5885,21 @@
     if (t.dataset.pu != null || t.dataset.pd != null) {
       var up = t.dataset.pu != null, i0 = +(up ? t.dataset.pu : t.dataset.pd), c0 = D.p[i0][1], j0 = i0;
       do { j0 += up ? -1 : 1; } while (j0 >= 0 && j0 < D.p.length && D.p[j0][1] != c0);
-      if (j0 >= 0 && j0 < D.p.length) { var x0 = D.p[i0]; D.p[i0] = D.p[j0]; D.p[j0] = x0; mark(); render(); }
+      if (j0 >= 0 && j0 < D.p.length) {
+        var x0 = D.p[i0]; D.p[i0] = D.p[j0]; D.p[j0] = x0;
+        syncDailyDealRefAfterProductMutation();
+        mark(); render();
+      }
+      return;
+    }
+    if (t.dataset.setDaily != null || (t.closest && t.closest('[data-set-daily]'))) {
+      var sdBtn = t.dataset.setDaily != null ? t : t.closest('[data-set-daily]');
+      var sdIdx = +sdBtn.dataset.setDaily;
+      if (D.p[sdIdx]) {
+        setDailyDealProduct(sdIdx, true);
+        render();
+        toast('تم تعيين «' + D.p[sdIdx][0] + '» كمنتج اليوم ⭐');
+      }
       return;
     }
     if (t.dataset.dup != null) { openEd(+t.dataset.dup, null, true); return; }
@@ -5436,11 +5924,70 @@
       D.cats.push(v); mark(); render(); return;
     }
 
-    // Offers
+    // Offers & Daily Deal Manager
     if ((b = t.closest('[data-off-tab]'))) {
       if (offerSubTab !== b.dataset.offTab) {
         commitAdminRoute({ tab: 'o', sub: b.dataset.offTab }, { mode: 'push' });
       }
+      return;
+    }
+    if (t.id === 'goDailyDealAdmin') {
+      commitAdminRoute({ tab: 'o', sub: 'daily' }, { mode: 'push' });
+      return;
+    }
+    if (t.dataset.ddpal != null) {
+      var ddPalObj = PAL[+t.dataset.ddpal];
+      if (ddPalObj) {
+        D.cfg.dailyDealBg = ddPalObj[1];
+        mark();
+        if ($('ddBgColor')) $('ddBgColor').value = ddPalObj[1];
+        [].forEach.call(document.querySelectorAll('[data-ddpal]'), function (el, idx) {
+          el.classList.toggle('on', idx === +t.dataset.ddpal);
+        });
+        updateDailyDealAdminPreview();
+      }
+      return;
+    }
+    if (t.id === 'ddBgClearBtn') {
+      delete D.cfg.dailyDealBg;
+      mark(); render();
+      return;
+    }
+    if (t.id === 'ddImgRm') {
+      delete D.cfg.dailyDealImgId;
+      mark(); render();
+      return;
+    }
+    if (t.id === 'ddApplyPriceBtn') {
+      var ddManual = resolveConfiguredDailyIdx(false);
+      var ddEff = resolveAdminDailyDealInfo();
+      var priceIdx = ddManual >= 0 ? ddManual : ddEff.prodIdx;
+      if (priceIdx >= 0 && D.p[priceIdx]) {
+        var nextPrice = +($('ddProdPrice') ? $('ddProdPrice').value : 0) || 0;
+        var nextOld = +($('ddProdOldPrice') ? $('ddProdOldPrice').value : 0) || 0;
+        if (nextPrice <= 0) return toast('أدخل سعراً صحيحاً أكبر من صفر');
+        if (nextOld && nextOld <= nextPrice) return toast('السعر قبل الخصم يجب أن يكون أكبر من السعر الحالي');
+        D.p[priceIdx][3] = nextPrice;
+        if (nextOld) D.p[priceIdx][11] = nextOld;
+        else delete D.p[priceIdx][11];
+        mark(); render();
+        toast('تم تحديث سعر «' + D.p[priceIdx][0] + '» ✅');
+      }
+      return;
+    }
+    if (t.id === 'ddResetBtn') {
+      askConfirm('هل تريد استعادة جميع إعدادات «منتج اليوم» إلى الوضع الافتراضي؟', 'استعادة الافتراضي').then(function (ok) {
+        if (!ok) return;
+        [
+          'hideDailyDeal', 'dailyDealMode', 'dailyDealAutoPool',
+          'dailyDealIdx', 'dailyDealName', 'dailyDealCat',
+          'dailyDealFlavorIdx', 'dailyDealHideFlavors', 'dailyDealStepQty',
+          'dailyDealBadge', 'dailyDealNote', 'dailyDealBtnText',
+          'dailyDealBg', 'dailyDealImgId', 'dailyDealStart', 'dailyDealEnd', 'dailyDealFallbackAuto',
+        ].forEach(function (k) { delete D.cfg[k]; });
+        mark(); render();
+        toast('تمت استعادة الإعدادات الافتراضية لمنتج اليوم');
+      });
       return;
     }
     if (t.dataset.oadd != null) { openOf(-1); return; }
@@ -5598,19 +6145,66 @@
       else delete D.cfg.newGk;
       mark(); return;
     }
+    if (t.id === 'ddProdSel') {
+      if (t.value === '') {
+        delete D.cfg.dailyDealIdx;
+        delete D.cfg.dailyDealName;
+        delete D.cfg.dailyDealCat;
+        delete D.cfg.dailyDealFlavorIdx;
+        if (D.cfg.dailyDealMode === 'manual') D.cfg.dailyDealMode = 'auto';
+      } else {
+        setDailyDealProduct(+t.value, true);
+      }
+      mark(); render(); return;
+    }
+    if (t.id === 'ddBgColor') {
+      D.cfg.dailyDealBg = t.value;
+      mark();
+      [].forEach.call(document.querySelectorAll('[data-ddpal]'), function (el, idx) {
+        el.classList.toggle('on', PAL[idx][1].toLowerCase() === String(t.value || '').toLowerCase());
+      });
+      updateDailyDealAdminPreview();
+      return;
+    }
+    if (t.id === 'ddImgFile' && t.files && t.files[0]) {
+      shrink(t.files[0]).then(function (u) {
+        var nid = 'i' + Date.now().toString(36); IMG[nid] = u; PEND[nid] = 1;
+        D.cfg.dailyDealImgId = nid; mark(); render();
+        toast('تم تجهيز صورة منتج اليوم ✅ اضغط نشر لتطبيقها');
+      }).catch(function () { toast('ملف الصورة غير صالح'); });
+      return;
+    }
     if (t.dataset.s) {
       var k = t.dataset.s;
       if (k == 'phone') { D.cfg.phone = np(t.value); render(); }
       else if (k == 'min') D.cfg.min = +t.value || 0;
-      else if (k == 'ro' || k == 'rm' || k == 'oh' || k == 'hideThemeBtn' || k == 'hideBanner' || k == 'hideSpotlight' || k == 'hideCatsBox' || k == 'hideDailyDeal') {
+      else if (k == 'ro' || k == 'rm' || k == 'oh' || k == 'hideThemeBtn' || k == 'hideBanner' || k == 'hideSpotlight' || k == 'hideCatsBox' || k == 'hideDailyDeal' || k == 'dailyDealHideFlavors') {
         D.cfg[k] = t.checked ? 0 : 1;
       }
+      else if (k == 'dailyDealFallbackAuto') D.cfg.dailyDealFallbackAuto = t.checked ? 1 : 0;
       else if (k == 'fontUnified') D.cfg.fontUnified = t.checked ? 1 : 0;
       else if (k == 'rn') { D.cfg.rn = t.value.trim(); render(); }
       else if (k == 'unit') D.cfg.unit = t.value.trim() || 'كرتونة';
       else if (k == 'aiUi' || k == 'adminAiUi') { D.cfg[k] = t.value.trim(); mark(); render(); return; }
+      else if (k == 'dailyDealStepQty') D.cfg.dailyDealStepQty = Math.min(50, Math.max(1, Math.round(+t.value || 1)));
+      else if (k == 'dailyDealIdx') {
+        if (t.value === '') {
+          delete D.cfg.dailyDealIdx; delete D.cfg.dailyDealName; delete D.cfg.dailyDealCat; delete D.cfg.dailyDealFlavorIdx;
+          if (D.cfg.dailyDealMode === 'manual') D.cfg.dailyDealMode = 'auto';
+        } else {
+          setDailyDealProduct(+t.value, true);
+        }
+      }
+      else if (k == 'dailyDealMode') {
+        D.cfg.dailyDealMode = t.value;
+        if (t.value === 'manual' && resolveConfiguredDailyIdx(false) < 0 && D.p.length) {
+          var firstAv = D.p.findIndex(function (p) { return isAdminProdAvail(p); });
+          setDailyDealProduct(firstAv >= 0 ? firstAv : 0, false);
+        }
+      }
       else D.cfg[k] = t.value.trim();
       mark();
+      if (tab === 'o' && offerSubTab === 'daily') render();
       return;
     }
     if (t.id === 'pushTargetUser') { pushForm.targetUserId = t.value; return; }
@@ -5660,6 +6254,24 @@
     if (t.id === 'pushTitle') { pushForm.title = t.value; if ($('mockPushTitle')) $('mockPushTitle').textContent = t.value || 'عنوان الإشعار يظهر هنا'; return; }
     if (t.id === 'pushBody') { pushForm.body = t.value; if ($('mockPushBody')) $('mockPushBody').textContent = t.value || 'نص الإشعار وتفاصيل العرض ستظهر للعملاء بهذا الشكل.'; return; }
     if (t.id === 'pushUrlCustom') { pushForm.urlCustom = t.value; return; }
+    if (t.id === 'ddBadgeInp' || t.id === 'ddNoteInp' || t.id === 'ddBtnInp') {
+      D.cfg[t.dataset.s] = t.value;
+      mark();
+      updateDailyDealAdminPreview();
+      return;
+    }
+    if (t.id === 'ddStepQtyInp') {
+      D.cfg.dailyDealStepQty = Math.min(50, Math.max(1, Math.round(+t.value || 1)));
+      mark();
+      updateDailyDealAdminPreview();
+      return;
+    }
+    if (t.id === 'ddBgColor') {
+      D.cfg.dailyDealBg = t.value;
+      mark();
+      updateDailyDealAdminPreview();
+      return;
+    }
     if (t.dataset && t.dataset.n) {
       var v = +t.value; D.cfg[t.dataset.n] = v;
       var l = $('nv_' + t.dataset.n); if (l) l.textContent = v + (t.dataset.u || '');
@@ -5682,6 +6294,7 @@
     OFS().forEach(function (o) { if (o.i) used[o.i] = 1; });
     if (D.catMeta) Object.keys(D.catMeta).forEach(function (c) { if (D.catMeta[c] && D.catMeta[c].imageId) used[D.catMeta[c].imageId] = 1; });
     if (D.cfg.logo) used[D.cfg.logo] = 1;
+    if (D.cfg.dailyDealImgId) used[D.cfg.dailyDealImgId] = 1;
     if (D.cfg.fontBodyId) used[D.cfg.fontBodyId] = 1;
     if (D.cfg.fontHeadId) used[D.cfg.fontHeadId] = 1;
 

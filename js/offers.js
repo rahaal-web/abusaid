@@ -28,18 +28,27 @@ export function ogo(i, behavior) {
   });
 }
 
-function isOfferActiveNow(o) {
-  if (!o || o.x || !o.t) return false;
+function getTodayYmd() {
   const now = new Date();
-  const todayStr =
+  return (
     now.getFullYear() +
     '-' +
     String(now.getMonth() + 1).padStart(2, '0') +
     '-' +
-    String(now.getDate()).padStart(2, '0');
-  if (o.startDate && String(o.startDate).trim() > todayStr) return false;
-  if (o.endDate && String(o.endDate).trim() < todayStr) return false;
+    String(now.getDate()).padStart(2, '0')
+  );
+}
+
+function isWithinSchedule(startDate, endDate) {
+  const todayStr = getTodayYmd();
+  if (startDate && String(startDate).trim() > todayStr) return false;
+  if (endDate && String(endDate).trim() < todayStr) return false;
   return true;
+}
+
+function isOfferActiveNow(o) {
+  if (!o || o.x || !o.t) return false;
+  return isWithinSchedule(o.startDate, o.endDate);
 }
 
 function isProductAvailableForOffer(p) {
@@ -76,30 +85,55 @@ function resolveLinkedProductIndex(o) {
   return -1;
 }
 
-function resolveDailyDeal(activeOffers) {
-  if (state.CFG && state.CFG.hideDailyDeal) return null;
-  if (!Array.isArray(state.P) || !state.P.length) return null;
+function resolveConfiguredProductIndex(cfg) {
+  if (!cfg || !Array.isArray(state.P)) return -1;
+  const hasIdx = cfg.dailyDealIdx !== '' && cfg.dailyDealIdx != null;
+  const cfgIdx = hasIdx ? Number(cfg.dailyDealIdx) : -1;
+  const targetName = cfg.dailyDealName ? String(cfg.dailyDealName).trim() : '';
+  const targetCat = cfg.dailyDealCat ? String(cfg.dailyDealCat).trim() : '';
 
-  if (state.CFG && state.CFG.dailyDealIdx !== '' && state.CFG.dailyDealIdx != null) {
-    const cfgIdx = Number(state.CFG.dailyDealIdx);
-    if (Number.isInteger(cfgIdx) && isProductAvailableForOffer(state.P[cfgIdx])) {
-      const matchedOffer = activeOffers.find((x) => resolveLinkedProductIndex(x.o) === cfgIdx);
-      return {
-        prodIdx: cfgIdx,
-        offer: matchedOffer ? matchedOffer.o : null,
-        source: 'config',
-      };
+  if (Number.isInteger(cfgIdx) && cfgIdx >= 0 && cfgIdx < state.P.length) {
+    const candidate = state.P[cfgIdx];
+    if (
+      candidate &&
+      (!targetName || String(candidate[0]).trim() === targetName) &&
+      isProductAvailableForOffer(candidate)
+    ) {
+      return cfgIdx;
     }
   }
 
-  for (let i = 0; i < activeOffers.length; i++) {
-    const prodIdx = resolveLinkedProductIndex(activeOffers[i].o);
-    if (prodIdx >= 0) {
-      return {
-        prodIdx,
-        offer: activeOffers[i].o,
-        source: 'offer',
-      };
+  if (targetName) {
+    const byNameAndCat = state.P.findIndex(
+      (p) =>
+        p &&
+        String(p[0]).trim() === targetName &&
+        (!targetCat || String(p[1]).trim() === targetCat) &&
+        isProductAvailableForOffer(p)
+    );
+    if (byNameAndCat >= 0) return byNameAndCat;
+
+    const byName = state.P.findIndex(
+      (p) => p && String(p[0]).trim() === targetName && isProductAvailableForOffer(p)
+    );
+    if (byName >= 0) return byName;
+  }
+
+  return -1;
+}
+
+function pickAutomaticDailyDeal(activeOffers, preferOffersFirst) {
+  const cfg = state.CFG || {};
+  if (preferOffersFirst) {
+    for (let i = 0; i < activeOffers.length; i++) {
+      const prodIdx = resolveLinkedProductIndex(activeOffers[i].o);
+      if (prodIdx >= 0) {
+        return {
+          prodIdx,
+          offer: activeOffers[i].o,
+          source: 'offer',
+        };
+      }
     }
   }
 
@@ -109,7 +143,10 @@ function resolveDailyDeal(activeOffers) {
   }
   if (!avail.length) return null;
 
-  const discounted = avail.filter((i) => +state.P[i][11] > state.P[i][3]);
+  const discounted =
+    cfg.dailyDealAutoPool === 'all'
+      ? []
+      : avail.filter((i) => +state.P[i][11] > state.P[i][3]);
   const pool = discounted.length ? discounted : avail;
   const now = new Date();
   const dayNum = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
@@ -121,10 +158,58 @@ function resolveDailyDeal(activeOffers) {
   };
 }
 
+function resolveDailyDeal(activeOffers) {
+  const cfg = state.CFG || {};
+  if (cfg.hideDailyDeal) return null;
+  if (!Array.isArray(state.P) || !state.P.length) return null;
+
+  const hasExplicitIdx = cfg.dailyDealIdx !== '' && cfg.dailyDealIdx != null;
+  const mode =
+    cfg.dailyDealMode === 'manual' || cfg.dailyDealMode === 'offer' || cfg.dailyDealMode === 'auto'
+      ? cfg.dailyDealMode
+      : hasExplicitIdx || cfg.dailyDealName
+      ? 'manual'
+      : 'auto';
+
+  const scheduleOk = isWithinSchedule(cfg.dailyDealStart, cfg.dailyDealEnd);
+  const allowFallback = cfg.dailyDealFallbackAuto !== 0 && cfg.dailyDealFallbackAuto !== false;
+
+  if (mode === 'manual') {
+    if (scheduleOk) {
+      const manualIdx = resolveConfiguredProductIndex(cfg);
+      if (manualIdx >= 0) {
+        const matchedOffer = activeOffers.find((x) => resolveLinkedProductIndex(x.o) === manualIdx);
+        return {
+          prodIdx: manualIdx,
+          offer: matchedOffer ? matchedOffer.o : null,
+          source: 'manual',
+        };
+      }
+    }
+    if (!allowFallback) return null;
+    return pickAutomaticDailyDeal(activeOffers, true);
+  }
+
+  if (mode === 'offer') {
+    return pickAutomaticDailyDeal(activeOffers, true);
+  }
+
+  return pickAutomaticDailyDeal(activeOffers, cfg.dailyDealAutoPool !== 'all');
+}
+
 function resolveSelectedFlavorForDeal(prodIdx, p) {
   const fl = FL(p);
   if (!fl.length) return -1;
+  const cfg = state.CFG || {};
+  const hideFlavors = Boolean(cfg.dailyDealHideFlavors);
+  const cfgFlvRaw = cfg.dailyDealFlavorIdx;
+  const cfgFlv =
+    cfgFlvRaw !== '' && cfgFlvRaw != null && Number.isInteger(Number(cfgFlvRaw))
+      ? Number(cfgFlvRaw)
+      : -1;
+
   if (
+    !hideFlavors &&
     selectedDailyFlavor.prodIdx === prodIdx &&
     selectedDailyFlavor.flavorIdx >= 0 &&
     fl[selectedDailyFlavor.flavorIdx] &&
@@ -132,6 +217,12 @@ function resolveSelectedFlavorForDeal(prodIdx, p) {
   ) {
     return selectedDailyFlavor.flavorIdx;
   }
+
+  if (cfgFlv >= 0 && fl[cfgFlv] && !fl[cfgFlv][1]) {
+    selectedDailyFlavor = { prodIdx, flavorIdx: cfgFlv };
+    return cfgFlv;
+  }
+
   const first = getFirstAvailableFlavorIndex(p);
   selectedDailyFlavor = { prodIdx, flavorIdx: first };
   return first;
@@ -139,6 +230,12 @@ function resolveSelectedFlavorForDeal(prodIdx, p) {
 
 function buildCartKey(prodIdx, flavorIdx) {
   return flavorIdx >= 0 ? prodIdx + ':' + flavorIdx : String(prodIdx);
+}
+
+function getDailyStepQty() {
+  const raw = Number((state.CFG && state.CFG.dailyDealStepQty) || 1);
+  if (!Number.isFinite(raw) || raw < 1) return 1;
+  return Math.min(50, Math.round(raw));
 }
 
 function renderDailyDealCard(dailyDeal) {
@@ -160,6 +257,7 @@ function renderDailyDealCard(dailyDeal) {
     return;
   }
 
+  const cfg = state.CFG || {};
   currentDailyProdIdx = prodIdx;
   const fl = FL(p);
   const flavorIdx = resolveSelectedFlavorForDeal(prodIdx, p);
@@ -168,7 +266,8 @@ function renderDailyDealCard(dailyDeal) {
     .map((f, idx) => ({ name: f[0], disabled: !!f[1], idx }))
     .filter((f) => !f.disabled);
 
-  const im = (p[8] && state.IMGS[p[8]]) || (offer && offer.i && state.IMGS[offer.i]);
+  const customImg = cfg.dailyDealImgId && state.IMGS[cfg.dailyDealImgId];
+  const im = customImg || (p[8] && state.IMGS[p[8]]) || (offer && offer.i && state.IMGS[offer.i]);
   const mediaHtml = im
     ? '<img src="' +
       im +
@@ -179,11 +278,26 @@ function renderDailyDealCard(dailyDeal) {
 
   const hasDiscount = +p[11] > p[3];
   const discPct = hasDiscount ? Math.round((1 - p[3] / +p[11]) * 100) : 0;
-  const unitLabel = (state.CFG && state.CFG.unit) || 'كرتونة';
+  const unitLabel = cfg.unit || 'كرتونة';
   const inCartQty = pq(prodIdx);
+  const stepQty = getDailyStepQty();
+  const badgeText = cfg.dailyDealBadge && String(cfg.dailyDealBadge).trim()
+    ? String(cfg.dailyDealBadge).trim()
+    : '⭐ منتج اليوم';
+  const promoNote = cfg.dailyDealNote && String(cfg.dailyDealNote).trim()
+    ? String(cfg.dailyDealNote).trim()
+    : '';
+  const btnLabel = cfg.dailyDealBtnText && String(cfg.dailyDealBtnText).trim()
+    ? String(cfg.dailyDealBtnText).trim()
+    : 'أضف للسلة بضغطة واحدة';
+  const customBg = cfg.dailyDealBg && String(cfg.dailyDealBg).trim() ? String(cfg.dailyDealBg).trim() : '';
+  const customFg = customBg ? (lum(customBg) > 150 ? '#18160d' : '#ffffff') : '';
+  const cardStyleAttr = customBg
+    ? ' style="--dd-bg:' + esc(customBg) + ';--dd-fg:' + customFg + '"'
+    : '';
 
   let flavorsHtml = '';
-  if (activeFlavors.length > 1) {
+  if (!cfg.dailyDealHideFlavors && activeFlavors.length > 1) {
     flavorsHtml =
       '<div class="dd-flavors" role="group" aria-label="اختر النكهة لمنتج اليوم">' +
       activeFlavors
@@ -203,18 +317,22 @@ function renderDailyDealCard(dailyDeal) {
         )
         .join('') +
       '</div>';
-  } else if (activeFlavors.length === 1) {
+  } else if (activeFlavors.length >= 1 && flavorIdx >= 0 && fl[flavorIdx]) {
     flavorsHtml =
-      '<div class="dd-single-flv">النكهة المتوفرة: <b>' +
-      esc(activeFlavors[0].name) +
+      '<div class="dd-single-flv">النكهة: <b>' +
+      esc(fl[flavorIdx][0]) +
       '</b></div>';
   }
 
   wrap.hidden = false;
   wrap.innerHTML =
-    '<article class="daily-deal-card" data-dd-card="' +
+    '<article class="daily-deal-card' +
+    (customBg ? ' has-bg' : '') +
+    '" data-dd-card="' +
     prodIdx +
-    '">' +
+    '"' +
+    cardStyleAttr +
+    '>' +
     '<div class="daily-deal-media' +
     (im ? '' : ' is-svg') +
     '">' +
@@ -222,7 +340,9 @@ function renderDailyDealCard(dailyDeal) {
     '</div>' +
     '<div class="daily-deal-body">' +
     '<div class="dd-top">' +
-    '<span class="dd-badge">⭐ منتج اليوم</span>' +
+    '<span class="dd-badge">' +
+    esc(badgeText) +
+    '</span>' +
     (discPct > 0 ? '<span class="dd-disc">وفر ' + numAr(discPct) + '٪</span>' : '') +
     (offer && offer.g ? '<span class="dd-offer-tag">' + esc(offer.g) + '</span>' : '') +
     '</div>' +
@@ -233,6 +353,7 @@ function renderDailyDealCard(dailyDeal) {
     '<h3 class="dd-title">' +
     esc(pname(prodIdx)) +
     '</h3>' +
+    (promoNote ? '<p class="daily-deal-note">' + esc(promoNote) + '</p>' : '') +
     flavorsHtml +
     '<div class="dd-foot">' +
     '<div class="dd-price-row">' +
@@ -251,9 +372,14 @@ function renderDailyDealCard(dailyDeal) {
     esc(cartKey) +
     '" data-dd-flv="' +
     flavorIdx +
+    '" data-dd-qty="' +
+    stepQty +
     '">' +
     '<span aria-hidden="true">🛒</span>' +
-    '<span>أضف للسلة بضغطة واحدة</span>' +
+    '<span>' +
+    esc(btnLabel) +
+    (stepQty > 1 ? ' (' + numAr(stepQty) + ')' : '') +
+    '</span>' +
     '</button>' +
     '<span class="dd-in-cart" id="dailyDealInCart"' +
     (inCartQty > 0 ? '' : ' hidden') +
@@ -279,7 +405,7 @@ export function syncDailyDealBadge() {
   }
 }
 
-function quickAddProductToCart(prodIdx, flavorIdx) {
+function quickAddProductToCart(prodIdx, flavorIdx, qtyStep = 1) {
   const p = state.P[prodIdx];
   if (!isProductAvailableForOffer(p)) {
     showToast('هذا الصنف غير متوفر حالياً', 'warn');
@@ -300,6 +426,7 @@ function quickAddProductToCart(prodIdx, flavorIdx) {
     }
   }
 
+  const step = Math.max(1, Math.min(50, Math.round(Number(qtyStep) || 1)));
   const cartKey = buildCartKey(prodIdx, resolvedFlavor);
   const currentQty = state.cart[cartKey] || 0;
   if (currentQty >= 99) {
@@ -307,11 +434,13 @@ function quickAddProductToCart(prodIdx, flavorIdx) {
     return false;
   }
 
-  chg(cartKey, 1);
+  const addDelta = Math.min(step, 99 - currentQty);
+  chg(cartKey, addDelta);
   syncDailyDealBadge();
 
   const flavorSuffix = resolvedFlavor >= 0 ? ' (' + fl[resolvedFlavor][0] + ')' : '';
-  showToast('تمت إضافة «' + pname(prodIdx) + flavorSuffix + '» إلى السلة ✅', 'ok');
+  const qtyPrefix = addDelta > 1 ? numAr(addDelta) + ' × ' : '';
+  showToast('تمت إضافة ' + qtyPrefix + '«' + pname(prodIdx) + flavorSuffix + '» إلى السلة ✅', 'ok');
   return true;
 }
 
@@ -480,7 +609,9 @@ export function bindOfferEvents() {
         const prodIdx = Number(addBtn.dataset.ddAdd);
         const flvRaw = addBtn.dataset.ddFlv;
         const flavorIdx = flvRaw != null && flvRaw !== '' ? Number(flvRaw) : -1;
-        quickAddProductToCart(prodIdx, flavorIdx);
+        const qtyRaw = addBtn.dataset.ddQty;
+        const stepQty = qtyRaw != null && qtyRaw !== '' ? Number(qtyRaw) : getDailyStepQty();
+        quickAddProductToCart(prodIdx, flavorIdx, stepQty);
       }
     });
   }
@@ -522,7 +653,7 @@ export function bindOfferEvents() {
         const prodIdx = Number(addOfferBtn.dataset.offerAdd);
         const flvRaw = addOfferBtn.dataset.offerFlv;
         const flavorIdx = flvRaw != null && flvRaw !== '' ? Number(flvRaw) : -1;
-        quickAddProductToCart(prodIdx, flavorIdx);
+        quickAddProductToCart(prodIdx, flavorIdx, 1);
         return;
       }
 

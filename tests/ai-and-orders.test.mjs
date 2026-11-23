@@ -2561,6 +2561,85 @@ async function runCustomerUiAndCartSuite() {
     assert.equal(favEmpty.hidden, false);
     assert.equal(favCount.textContent, '٠');
   });
+
+  // U10: Full Admin control over Product of the Day (mode, name-shift resilience, flavor lock, stepQty, texts, color, image, schedule, fallback, hide, asset GC & admin hooks)
+  await runCase('UI & Cart', 'U10: Storefront & asset GC honor full Product of the Day admin controls and admin dashboard exposes manager hooks', async () => {
+    resetEnv();
+    routerMod.switchOverlay(null);
+    state.D.offers = [];
+    state.IMGS.custom_dd_img = 'data:image/png;base64,AAA';
+
+    // 1. Custom manual config with shifted index recovered by dailyDealName, default flavor 1, locked flavor chips, stepQty 3, texts, color, custom image
+    state.CFG.dailyDealMode = 'manual';
+    state.CFG.dailyDealIdx = 99; // Simulated shifted/stale index
+    state.CFG.dailyDealName = 'جاجوار'; // Product 3 in test catalog
+    state.CFG.dailyDealCat = 'سناكس';
+    state.CFG.dailyDealFlavorIdx = 1; // شطة
+    state.CFG.dailyDealHideFlavors = 1;
+    state.CFG.dailyDealStepQty = 3;
+    state.CFG.dailyDealBadge = '🔥 عرض اليوم الحصري';
+    state.CFG.dailyDealNote = 'كمية محدودة بسعر الجملة';
+    state.CFG.dailyDealBtnText = 'اطلب ٣ كراتين فوراً';
+    state.CFG.dailyDealBg = '#2b6cff';
+    state.CFG.dailyDealImgId = 'custom_dd_img';
+
+    offersMod.renderOffers();
+    const dailyWrap = document.getElementById('dailyDealWrap');
+    assert.equal(dailyWrap.hidden, false);
+    assert.match(dailyWrap.textContent, /جاجوار/);
+    assert.match(dailyWrap.textContent, /🔥 عرض اليوم الحصري/);
+    assert.match(dailyWrap.textContent, /كمية محدودة بسعر الجملة/);
+    assert.match(dailyWrap.textContent, /اطلب ٣ كراتين فوراً/);
+    assert.equal(dailyWrap.querySelectorAll('[data-dd-flavor]').length, 0, 'Flavor selector pills must hide when dailyDealHideFlavors=1');
+    assert.ok(dailyWrap.innerHTML.includes('custom_dd_img') || dailyWrap.innerHTML.includes('data:image/png;base64,AAA'));
+
+    const card = dailyWrap.querySelector('[data-dd-card]');
+    assert.ok(card.classList.contains('has-bg'));
+    assert.match(String(card.attributes.style || ''), /--dd-bg:#2b6cff/);
+
+    document.getElementById('dailyDealAddBtn').click();
+    assert.deepEqual(state.cart, { '3:1': 3 }, 'One-click add must add dailyDealStepQty=3 with dailyDealFlavorIdx=1 (شطة)');
+
+    // 2. Schedule expiration with dailyDealFallbackAuto=0 hides card completely
+    state.CFG.dailyDealEnd = '2020-01-01';
+    state.CFG.dailyDealFallbackAuto = 0;
+    offersMod.renderOffers();
+    assert.equal(dailyWrap.hidden, true, 'Expired schedule with dailyDealFallbackAuto=0 must hide card');
+
+    // 3. Re-enabling fallback auto switches to another available product cleanly
+    state.CFG.dailyDealFallbackAuto = 1;
+    offersMod.renderOffers();
+    assert.equal(dailyWrap.hidden, false, 'Expired schedule with dailyDealFallbackAuto=1 falls back to another deal');
+
+    // 4. Explicit dailyDealMode='auto' ignores stale dailyDealName/Idx and hideDailyDeal=1 hides completely
+    state.CFG.dailyDealMode = 'auto';
+    state.CFG.hideDailyDeal = 1;
+    offersMod.renderOffers();
+    assert.equal(dailyWrap.hidden, true, 'hideDailyDeal=1 must hide Product of the Day');
+
+    // 5. Asset GC keeps custom dailyDealImgId & admin-app.js exposes full controls
+    const { collectReferencedAssetIds } = await import('../lib/firebaseCatalogCore.js');
+    const refs = collectReferencedAssetIds({
+      cfg: { dailyDealImgId: 'custom_dd_img' },
+      p: [],
+      offers: [],
+      catMeta: {},
+    });
+    assert.equal(refs.has('custom_dd_img'), true, 'collectReferencedAssetIds must retain dailyDealImgId');
+
+    const adminJsSrc = fs.readFileSync(path.join(ROOT_DIR, 'protected', 'admin-app.js'), 'utf8');
+    for (const marker of [
+      'function renderDailyDealManager(',
+      'data-set-daily',
+      'ddApplyPriceBtn',
+      'dailyDealStepQty',
+      'dailyDealImgId',
+      'dailyDealBg',
+      'dailyDealFallbackAuto',
+    ]) {
+      assert.ok(adminJsSrc.includes(marker), `admin-app.js missing daily deal admin control marker: ${marker}`);
+    }
+  });
 }
 
 async function main() {

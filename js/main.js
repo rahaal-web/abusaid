@@ -469,6 +469,12 @@ function loadImgs() {
     });
   }
 
+  const ddImg = state.CFG && state.CFG.dailyDealImgId;
+  if (ddImg && !state.IMGS[ddImg] && !state.IMGQ[ddImg] && !seen[ddImg]) {
+    seen[ddImg] = 1;
+    need.push(ddImg);
+  }
+
   if (!need.length) return;
   let n = 0;
   let tm;

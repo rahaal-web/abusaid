@@ -354,6 +354,7 @@ function buildAssetUsageMap(data = {}) {
   if (data.cfg?.logo) addRef(data.cfg.logo, { type: 'logo', label: 'شعار المتجر' });
   if (data.cfg?.fontBodyId) addRef(data.cfg.fontBodyId, { type: 'font', label: 'خط المتجر الأساسي' });
   if (data.cfg?.fontHeadId) addRef(data.cfg.fontHeadId, { type: 'font', label: 'خط العناوين' });
+  if (data.cfg?.dailyDealImgId) addRef(data.cfg.dailyDealImgId, { type: 'daily', label: 'صورة منتج اليوم' });
   return usage;
 }
 
